@@ -2,7 +2,8 @@
     "require": {
         "vlucas/phpdotenv": "^5.6",
         "openai-php/client": "^0.9.2",
-        "guzzlehttp/guzzle": "^7.8"
+        "guzzlehttp/guzzle": "^7.8",
+        "spatie/pdf-to-text": "^1.52"
     },
     "config": {
         "allow-plugins": {
