@@ -76,7 +76,7 @@ class EmailProcessor
         // Use recipient email from environment or default to FromFull email
         $recipientEmail = !empty($this->toEmail) ? $this->toEmail : $body['FromFull']['Email'];
 
-        $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject);
+        $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body);
 
         echo json_encode(['status' => 'success', 'message' => 'Email processed successfully', 'ics' => $calendarEvent]);
     }
@@ -110,7 +110,7 @@ Assume the timezone is pacific time if not specified in the email. Based on the 
 
 Render escaped characters from the input. So "\n" becomes rendered as a newline in the output.
 
-Assume TextBody contains a forwarded email. Make the creator of the ICS file the creator of the original email, if found. Make it from {$this->fromEmail} otherwise.
+Assume TextBody contains a forwarded email. Make it from an email with {$this->fromEmail} with a name of the original sender of the forwarded message.
 
 Include the entirety of TextBody, as written, for the description of the event.
 
@@ -144,7 +144,7 @@ PROMPT;
         $response = $this->openaiClient->chat()->create($data);
 
 		$data = trim($response['choices'][0]['message']['content']);
-
+error_log("OpenAI returned: {$data}");
 		$ret = json_decode($data, true);
 		if (json_last_error() != JSON_ERROR_NONE) {
 			http_response_code(500);
@@ -156,21 +156,42 @@ PROMPT;
 		return $ret;
 	}
 
-    private function sendEmailWithAttachment($toEmail, $icsAttachment, $subject)
-    {
+    private function sendEmailWithAttachment($toEmail, $icsAttachment, $subject, $originalEmail)
+	{
+		$attachments = [
+					[
+						'Name' => 'event.ics',
+						'Content' => base64_encode($icsAttachment),
+						'ContentType' => 'text/calendar',
+					],
+		];
+
+		if (!empty($originalEmail['Attachments']))
+		{
+			$attachments = array_merge($attachments, $originalEmail['Attachments']);
+		}
+
+		$origBody = $originalEmail['HtmlBody'] ?? nl2br($originalEmail['TextBody']);
         $response = $this->httpClient->post('/email', [
             'json' => [
                 'From' => $this->fromEmail,
                 'To' => $toEmail,
                 'Subject' => $subject,
-                'TextBody' => 'Please find your iCal event attached.',
-                'Attachments' => [
-                    [
-                        'Name' => 'event.ics',
-                        'Content' => base64_encode($icsAttachment),
-                        'ContentType' => 'text/calendar',
-                    ],
-                ],
+				'HTMLBody' => <<<BODY
+<p>Please find your iCal event attached.</p>
+
+<p>
+---------- Forwarded message ----------<br>
+<b>From</b>: {$originalEmail['FromName']} <{$originalEmail['From']}><br>
+<b>Date</b>: {$originalEmail['Date']}<br>
+<b>To</b>: {$originalEmail['To']}<br>
+<b>Subject</b>: {$originalEmail['Subject']}<br>
+
+
+{$origBody}
+BODY
+				,
+				'Attachments' => $attachments,
             ],
         ]);
 
