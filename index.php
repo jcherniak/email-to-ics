@@ -39,7 +39,6 @@ class EmailProcessor
     private $openaiClient;
     private $httpClient;
     private $logDir;
-    private $authKey;
 
     public function __construct()
     {
@@ -48,7 +47,6 @@ class EmailProcessor
         $this->fromEmail = $_ENV['FROM_EMAIL'];
         $this->toEmail = $_ENV['TO_EMAIL'];
         $this->logDir = $_ENV['LOG_DIR'];
-        $this->authKey = $_ENV['WEBHOOK_AUTH_KEY'];
 
 		$this->openaiClient = OpenAI::client($this->openaiApiKey);
 		$this->httpClient = new Client([
@@ -64,6 +62,7 @@ class EmailProcessor
 	public function processUrl($url, $display) {
 		if (!$this->is_valid_url($url)) {
 			http_response_code(400);
+			error_log('BAD url: ' . $url);
 			echo 'Bad url!';
 			die;
 		}
@@ -102,6 +101,7 @@ TEXT;
 		if ($display != 'email') {
 			http_response_code(400);
 			echo "Invalid display: {$display}";
+			error_log("Invalid display: {$display}");
 		}
 
 		$recipientEmail = $this->toEmail;
@@ -131,24 +131,8 @@ BODY;
 		);
 	}
 
-    public function processPostmarkRequest()
+    public function processPostmarkRequest($body)
     {
-        if (($_GET['auth'] ?? null) != $this->authKey) {
-            http_response_code(403);
-            echo "Invalid auth\n";
-            die;
-        }
-
-        $input = file_get_contents('php://input');
-        file_put_contents($this->logDir . '/inbound-email.' . date('YmdHis') . '.json', $input);
-
-        $body = json_decode($input, true);
-        if (json_last_error() != JSON_ERROR_NONE) {
-            http_response_code(400);
-            echo 'Invalid input: ' . json_last_error_msg();
-            die;
-        }
-
         $emailText = $body['TextBody'];
 		$pdfText = $this->extractPdfText($body['Attachments'] ?? []);
 
@@ -157,6 +141,7 @@ BODY;
             $combinedText .= "\n\n--- Extracted from PDF Attachment ---\n\n" . $pdfText;
 		}
 
+		$downloadedText = null;
 		if ($this->is_valid_url($emailText)) {
 			$downloadedText = $this->fetch_url($emailText);
 
@@ -320,9 +305,6 @@ PROMPT;
 
     private function sendEmailWithAttachment($toEmail, $ics, $subject, $originalEmail, $pdfText = null, $downloadedText = null)
 	{
-		error_log('Orig email: ' . $originalEmail);
-		error_log('Downloaded: ' . $downloadedText);
-
 		$attachments = [];
 		if (!empty($originalEmail['Attachments'])) {
 			$attachments = array_merge($attachments, $originalEmail['Attachments']);
@@ -513,16 +495,22 @@ HTML;
 			session_destroy();
 		} elseif (isset($_POST['url'])) {
             $this->processFormSubmission($_POST['url']);
-        } elseif ($this->isPostmarkInboundWebhook($json_data)) {
+		} else {
 			$post_data = file_get_contents("php://input");
 			$json_data = json_decode($post_data, true);
 
-            $this->processPostmarkInbound($json_data);
-        } else {
-			http_response_code(400);
-			echo "Invalid POST request.";
-			die;
-        }
+			if ($this->isPostmarkInboundWebhook($json_data)) {
+				$this->processPostmarkInbound($json_data);
+			} else {
+				http_response_code(400);
+				echo "Invalid POST request.";
+				error_log('Invalid post request');
+				error_log('JSON: ' . $post_data);
+				error_log('decoded: ' . var_export($json_data, true));
+
+				die;
+			}
+		}
     }
 
     private function processFormSubmission($url)
@@ -534,8 +522,7 @@ HTML;
     private function isPostmarkInboundWebhook($json_data)
     {
         return isset($json_data['MessageStream']) &&
-               $json_data['MessageStream'] === 'inbound' &&
-               isset($_GET['auth']);
+               $json_data['MessageStream'] === 'inbound';
     }
 
     private function processPostmarkInbound($json_data)
@@ -550,6 +537,7 @@ $dotenv->load();
 
 session_start();
 
+ob_start();
 try {
 	$page = new WebPage();
 	$page->handleRequest();
@@ -558,3 +546,6 @@ try {
 	error_log($t);
 	print_r($t);
 }
+
+$out = ob_get_flush();
+error_log('OUTPUT: ' . $out);
