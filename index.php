@@ -350,14 +350,16 @@ BODY;
 		$this->sendEmail($ics, $toEmail, $subject, $htmlBody, $attachments);
 	}
 
-	protected function sendEmail($ics, $toEmail, $subject, $htmlBody, $otherAattachments = []) {
-		$attachments = array_merge([
-			[
-				'Name' => 'event.ics',
-				'Content' => base64_encode($ics),
-				'ContentType' => 'text/calendar',
-			],
-		], $otherAattachments);
+	protected function sendEmail($ics, $toEmail, $subject, $htmlBody, $otherAttachments = []) {
+		if (!empty($ics)) {
+			$attachments = array_merge([
+				[
+					'Name' => 'event.ics',
+					'Content' => base64_encode($ics),
+					'ContentType' => 'text/calendar',
+				],
+			], $otherAttachments);
+		}
 
         $response = $this->httpClient->post('/email', [
             'json' => [
@@ -420,7 +422,7 @@ class WebPage
         $authorized = $this->checkSessionAuth() || $this->checkBasicAuth();
 
         if (!$authorized) {
-            $this->displayLoginForm(); // Display a login form instead of requesting basic auth
+            $this->handleLogin(); // Display a login form instead of requesting basic auth
             return;
         }
 
@@ -473,13 +475,19 @@ HTML;
     }
 
     private function handleLogin()
-    {
-        if ($_POST['username'] === $_ENV['HTTP_AUTH_USERNAME'] &&
-            $_POST['password'] === $_ENV['HTTP_AUTH_PASSWORD']) {
+	{
+		if (
+			($_POST['username'] ?? null) === $_ENV['HTTP_AUTH_USERNAME'] &&
+			($_POST['password'] ?? null) === $_ENV['HTTP_AUTH_PASSWORD']
+		)
+		{
             $_SESSION['authenticated'] = true;
             $this->displayGetForm(); // Successfully authenticated
-        } else {
-            echo 'Invalid credentials. Please try again.';
+		} else {
+			if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+				echo '<h1 style="color: red">Invalid credentials. Please try again.</h1>';
+			}
+
             $this->displayLoginForm();
         }
     }
@@ -545,6 +553,15 @@ try {
 	header('Content-type: text/plain');
 	error_log($t);
 	print_r($t);
+
+	$err = '<h1>ERROR PROCESSING CALENDAR EVENT</h1>' .
+		'<p>Error: <b>' . $t->getMessage() . '</b></p>' .
+		'<p>' . var_export($t, true) . '</p>' .
+		'<p>Original POST:</p>' .
+		'<pre>' . json_encode($_POST) . '</pre>';
+
+	$this->sendEmail(null, $_ENV['TO_EMAIL'], 'ERROR PROCESSING CALENDAR EVENT', $err);
+
 }
 
 $out = ob_get_flush();
