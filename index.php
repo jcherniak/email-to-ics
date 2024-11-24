@@ -8,8 +8,6 @@ use Symfony\Component\HtmlSanitizer\HtmlSanitizerConfig;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
 use ICal\ICal;
 
-ini_set('session.cookie_lifetime', 60 * 60 * 24 * 30);
-
 ignore_user_abort();
 ini_set('display_errors', 'On');
 ini_set('error_reporting', E_ALL);
@@ -39,6 +37,7 @@ class EmailProcessor
     private $openaiClient;
     private $httpClient;
     private $logDir;
+	private $googleMapsKey;
 
     public function __construct()
     {
@@ -47,6 +46,7 @@ class EmailProcessor
         $this->fromEmail = $_ENV['FROM_EMAIL'];
         $this->toEmail = $_ENV['TO_EMAIL'];
         $this->logDir = $_ENV['LOG_DIR'];
+		$this->googleMapsKey = $_ENV['GOOGLE_MAPS_API_KEY'];
 
 		$this->openaiClient = OpenAI::client($this->openaiApiKey);
 		$this->httpClient = new Client([
@@ -59,20 +59,70 @@ class EmailProcessor
         ]);
 	}
 
-	public function processUrl($url, $display) {
-		if (!$this->is_valid_url($url)) {
-			http_response_code(400);
-			error_log('BAD url: ' . $url);
-			echo 'Bad url!';
-			die;
+	private function extractTextFromHtml($html) {
+		// Create a new DOMDocument object
+		$dom = new DOMDocument;
+
+		// Load the HTML
+		// Suppress errors due to malformed HTML
+		libxml_use_internal_errors(true);
+		$dom->loadHTML($html, LIBXML_NOERROR | LIBXML_NOWARNING);
+		libxml_clear_errors();
+
+		// Remove <style> and <script> elements
+		$scriptTags = $dom->getElementsByTagName('script');
+		while ($scriptTags->length > 0) {
+			$scriptTags->item(0)->parentNode->removeChild($scriptTags->item(0));
 		}
 
-		$downloadedText = $this->fetch_url($url);
+		$styleTags = $dom->getElementsByTagName('style');
+		while ($styleTags->length > 0) {
+			$styleTags->item(0)->parentNode->removeChild($styleTags->item(0));
+		}
+
+		// Attempt to get the <body> content
+		$body = $dom->getElementsByTagName('body')->item(0);
+		if ($body) {
+			$textContent = $body->textContent;
+		} else {
+			// If no <body> tag, use the entire document
+			$textContent = $dom->textContent;
+		}
+
+		// Remove extra white spaces, new lines etc.
+		$textContent = trim(preg_replace('/\s+/', ' ', $textContent));
+
+		return $textContent;
+	}
+
+
+	public function processUrl($url, $downloadedText, $display) {
+		if (!isset($downloadedText)) {
+			if (!$this->is_valid_url($url)) {
+				http_response_code(400);
+				error_log('BAD url: ' . $url);
+				echo 'Bad url!';
+				die;
+			}
+
+			$downloadedText = $this->fetch_url($url);
+		} elseif (substr($downloadedText, 0, 1) === '\'' &&
+			substr($downloadedText, -1, 1) === '\''
+		) {
+			$downloadedText = trim($downloadedText);
+			$dec = json_decode($downloadedText);
+			if (json_last_error() === JSON_ERROR_NONE)
+			{
+				$downloadedText = $dec;
+			}
+		}
+
+		$downloadedText = $this->extractTextFromHtml($downloadedText);
 
 		$combinedText = <<<TEXT
 {$url}
 
---- HTML fetched from URL above ---
+--- Text content fetched from URL above ---
 {$downloadedText}
 TEXT;
 
@@ -239,6 +289,19 @@ If there is no year in the provided content, assume it is {$curYear} if the mont
 
 Make sure the date/time of the ICS are in pacific time. Adjust as necessary from the input timezone.
 
+If the content describes a flight:
+- Using the airport codes, determine the start and end timezone and set the event to start and end in the appropriate timezones. Override all timezone instructions above. For example, if the destination is EWR, then the end timezone should be America/New_York. SFO, America/Los_Angeles, ORD, America/Chicago, etc...
+- Include the confirmation number in the top of the description.
+- Include the flight number in the top of the description and the title. Prefix it with the airline code such as UA1234 or DL4456
+- Don't include any text about special deals.
+- The description field should be in the format: ```
+Flight number: UA1234
+Confirmation number: GJGJGJ
+Departure airport: SFO
+Arrival airport: EWR
+```
+- The location field should contain a google maps link to the departure airport
+
 For the ICS file, ensure it matches RFC5545. Specifically:
 - Ensure all lines are terminated by CRLF
 - Lines of text SHOULD NOT be longer than 75 octets, excluding the line break. Long content lines SHOULD be split into a multiple line representations using a line "folding" technique. That is, a long line can be split between any two characters by inserting a CRLF immediately followed by a single linear white-space character (i.e., SPACE or HTAB). Any sequence of CRLF followed immediately by a single linear white-space character is ignored (i.e., removed) when processing the content type.
@@ -249,6 +312,7 @@ For the ICS file, ensure it matches RFC5545. Specifically:
 Return a JSON object with 2 keys:
 - ICS - the ical file contents
 - EmailSubject - the title of the event, as specified above.
+- LocationLookup - location information that we can pass to the Google Places API to lookup. should be a string
 PROMPT;
 
 			$data = [
@@ -257,8 +321,30 @@ PROMPT;
 					['role' => 'system', 'content' => $system],
 					['role' => 'user', 'content' => $combinedText],
 				],
-				'max_tokens' => 4095,
-				'response_format' => ['type' => 'json_object'],
+				'max_tokens' => 16*1024,
+				'response_format' => [
+					'type' => 'json_schema',
+					'json_schema' =>  [
+						'name' => 'cal_response',
+						'strict' => true,
+						'schema' => [
+							'type' => 'object',
+							'properties' => [
+								'ICS' => [
+									'type' => 'string'
+								],
+								'EmailSubject' => [
+									'type' => 'string'
+								],
+								'LocationLookup' => [
+									'type' => 'string'
+								],
+							],
+							'required' => ['ICS', 'EmailSubject', 'LocationLookup'],
+							'additionalProperties' => false,
+						],
+					],
+				],
 			];
 
 			$response = $this->openaiClient->chat()->create($data);
@@ -297,10 +383,102 @@ PROMPT;
 				throw $e;
 			}
 
+			if (!empty($ret['LocationLookup'])) {
+				try {
+					$place = $this->getGoogleMapsLink($ret['LocationLookup']);
+					error_log("Google maps lookup for '{$ret['LocationLookup']}' returned '{$place}'");
+
+					if ($place) {
+						$ret['ICS'] = $this->updateIcsLocation($ret['ICS'], $place);
+					}
+				} catch (Throwable $e) {
+					error_log("Error(s) doing google maps lookup: " . var_export($e, true));
+				}
+			}
+
+
 			return $ret;
 		}
 
 		throw new Exception('should never reach here...');
+	}
+
+	private function updateIcsLocation($icsContent, $location) {
+		$lines = explode("\n", $icsContent);
+		$output = [];
+		$locationUpdated = false;
+
+		foreach ($lines as $line) {
+			// Check if the line starts with "LOCATION:" to find an existing location
+			if (strpos($line, 'LOCATION:') === 0) {
+				// Replace existing location with the new location
+				$output[] = 'LOCATION:' . $location;
+				$locationUpdated = true;
+			} else {
+				$output[] = $line;
+			}
+		}
+
+		// If no LOCATION field was originally present, add it before END:VEVENT
+		if (!$locationUpdated) {
+			$updatedOutput = [];
+			foreach ($output as $line) {
+				if (trim($line) == "END:VEVENT") {
+					// Add location before the line END:VEVENT
+					$updatedOutput[] = 'LOCATION:' . $location;
+				}
+				$updatedOutput[] = $line;
+			}
+			$output = $updatedOutput;
+		}
+
+		// Join the lines back into a single ICS formatted string
+		return implode("\n", $output);
+	}
+
+	private function getGoogleMapsLink($lookup) {
+		// Base URL for the Google Places Text Search API
+		$baseUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json";
+
+		// Construct the request URL
+		$requestUrl = sprintf(
+			"%s?query=%s&key=%s",
+			$baseUrl,
+			urlencode($lookup),
+			$this->googleMapsKey
+		);
+
+		// Initialize cURL session
+		$ch = curl_init();
+
+		// Set cURL options
+		curl_setopt($ch, CURLOPT_URL, $requestUrl);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+		// Execute cURL request and fetch response
+		$response = curl_exec($ch);
+
+		// Close cURL session
+		curl_close($ch);
+
+		// Decode the JSON response
+		$data = json_decode($response, true);
+
+		// Check if we got a valid response and return the place id
+		if (!empty($data['results'])) {
+			// Return the place_id of the first result
+			$placeId = $data['results'][0]['place_id'];
+
+			// Base URL for Google Maps search with API parameter
+			$baseUrl = "https://www.google.com/maps/search/?api=1";
+
+			// Construct the URL with query and place_id
+			$url = sprintf("%s&query=%s&query_place_id=%s", $baseUrl, urlencode($lookup), urlencode($placeId));
+
+			return $url;
+		}
+
+		return null;
 	}
 
     private function sendEmailWithAttachment($toEmail, $ics, $subject, $originalEmail, $pdfText = null, $downloadedText = null)
@@ -350,7 +528,7 @@ BODY;
 		$this->sendEmail($ics, $toEmail, $subject, $htmlBody, $attachments);
 	}
 
-	protected function sendEmail($ics, $toEmail, $subject, $htmlBody, $otherAttachments = []) {
+	public function sendEmail($ics, $toEmail, $subject, $htmlBody, $otherAttachments = []) {
 		if (!empty($ics)) {
 			$attachments = array_merge([
 				[
@@ -444,22 +622,43 @@ class WebPage
 
     private function checkSessionAuth()
     {
-        return !empty($_SESSION['authenticated']);
+		$pass = $_ENV['HTTP_AUTH_USERNAME'] . $_ENV['HTTP_AUTH_PASSWORD'];
+		return (
+			isset($_COOKIE['pass']) &&
+			password_verify($pass, $_COOKIE['pass'])
+		);
     }
 
     private function checkBasicAuth()
-    {
+	{
 		if (
 			isset($_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW']) &&
             $_SERVER['PHP_AUTH_USER'] === $_ENV['HTTP_AUTH_USERNAME'] &&
 			$_SERVER['PHP_AUTH_PW'] === $_ENV['HTTP_AUTH_PASSWORD']
 		) {
-            $_SESSION['authenticated'] = true; // Store authentication in session
+			$this->setCookie();
             return true;
 		}
 
         return false;
-    }
+	}
+
+	private function setCookie()
+	{
+		$pass = $_ENV['HTTP_AUTH_USERNAME'] . $_ENV['HTTP_AUTH_PASSWORD'];
+		setcookie(
+			'pass',
+			password_hash($pass, PASSWORD_DEFAULT),
+			time() + 30*24*60*60
+		);
+
+	}
+
+	private function clearCookie()
+	{
+		setcookie('pass','', -1);
+		unset($_COOKIE['pass']);
+	}
 
     private function displayLoginForm()
     {
@@ -481,7 +680,7 @@ HTML;
 			($_POST['password'] ?? null) === $_ENV['HTTP_AUTH_PASSWORD']
 		)
 		{
-            $_SESSION['authenticated'] = true;
+			$this->setCookie();
             $this->displayGetForm(); // Successfully authenticated
 		} else {
 			if ($_SERVER['REQUEST_METHOD'] == 'POST') {
@@ -500,9 +699,9 @@ HTML;
     private function handlePostRequest()
 	{
 		if (isset($_POST['logout'])) {
-			session_destroy();
+			$this->clearCookie();
 		} elseif (isset($_POST['url'])) {
-            $this->processFormSubmission($_POST['url']);
+			$this->processFormSubmission($_POST['url'], $_POST['html']);
 		} else {
 			$post_data = file_get_contents("php://input");
 			$json_data = json_decode($post_data, true);
@@ -521,10 +720,10 @@ HTML;
 		}
     }
 
-    private function processFormSubmission($url)
+    private function processFormSubmission($url, $fetchedText = null)
     {
 		$processor = new EmailProcessor();
-		$processor->processUrl($url, $_REQUEST['display'] ?? 'email');
+		$processor->processUrl($url, $fetchedText, $_REQUEST['display'] ?? 'email');
     }
 
     private function isPostmarkInboundWebhook($json_data)
@@ -543,8 +742,6 @@ HTML;
 $dotenv = Dotenv::createImmutable(__DIR__);
 $dotenv->load();
 
-session_start();
-
 ob_start();
 try {
 	$page = new WebPage();
@@ -560,8 +757,8 @@ try {
 		'<p>Original POST:</p>' .
 		'<pre>' . json_encode($_POST) . '</pre>';
 
-	$this->sendEmail(null, $_ENV['TO_EMAIL'], 'ERROR PROCESSING CALENDAR EVENT', $err);
-
+	$processor = new EmailProcessor;
+	$processor->sendEmail(null, $_ENV['TO_EMAIL'], 'ERROR PROCESSING CALENDAR EVENT', $err);
 }
 
 $out = ob_get_flush();
