@@ -701,7 +701,7 @@ HTML;
 		if (isset($_POST['logout'])) {
 			$this->clearCookie();
 		} elseif (isset($_POST['url'])) {
-			$this->processFormSubmission($_POST['url'], $_POST['html']);
+			$this->processFormSubmission($_POST['url'], $_POST['html'] ?? null);
 		} else {
 			$post_data = file_get_contents("php://input");
 			$json_data = json_decode($post_data, true);
@@ -747,6 +747,7 @@ try {
 	$page = new WebPage();
 	$page->handleRequest();
 } catch (Throwable $t) {
+	http_response_code(500);
 	header('Content-type: text/plain');
 	error_log($t);
 	print_r($t);
