@@ -31,9 +31,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
 class EmailProcessor
 {
     private $openaiApiKey;
-    private $postmarkApiKey;
-    private $fromEmail;
-    private $toEmail;
+	private $postmarkApiKey;
+
+	private $fromEmail;
+
+	private $inboundConfirmedEmail;
+	private $inboundTentativeEmail;
+	private $toTentativeEmail;
+	private $toConfirmedEmail;
+	private $errorEmail;
+
     private $openaiClient;
     private $httpClient;
     private $logDir;
@@ -43,8 +50,13 @@ class EmailProcessor
     {
         $this->openaiApiKey = $_ENV['OPENAI_API_KEY'];
         $this->postmarkApiKey = $_ENV['POSTMARK_API_KEY'];
-        $this->fromEmail = $_ENV['FROM_EMAIL'];
-        $this->toEmail = $_ENV['TO_EMAIL'];
+		$this->fromEmail = $_ENV['FROM_EMAIL'];
+		$this->inboundConfirmedEmail = $_ENV['INBOUND_CONFIRMED_EMAIL'];
+		$this->inboundTentativeEmail = $_ENV['INBOUND_TENTATIVE_EMAIL'];
+		$this->toTentativeEmail = $_ENV['TO_TENTATIVE_EMAIL'];
+		$this->toConfirmedEmail = $_ENV['TO_CONFIRMED_EMAIL'];
+		$this->errorEmail = $_ENV['ERROR_EMAIL'];
+
         $this->logDir = $_ENV['LOG_DIR'];
 		$this->googleMapsKey = $_ENV['GOOGLE_MAPS_API_KEY'];
 
@@ -96,7 +108,8 @@ class EmailProcessor
 	}
 
 
-	public function processUrl($url, $downloadedText, $display) {
+	public function processUrl($url, $downloadedText, $display, $tentative = true)
+	{
 		if (!isset($downloadedText)) {
 			if (!$this->is_valid_url($url)) {
 				http_response_code(400);
@@ -154,7 +167,7 @@ TEXT;
 			error_log("Invalid display: {$display}");
 		}
 
-		$recipientEmail = $this->toEmail;
+		$recipientEmail = $tentative ? $this->toTentativeEmail : $this->toConfirmedEmail;
 		$htmlBody =  <<<BODY
 <p>Please find your iCal event attached.</p>
 
@@ -203,9 +216,11 @@ BODY;
 
         $calendarEvent = $ret['ICS'];
         $subject = $ret['EmailSubject'];
+		$recipientEmail = $this->toTentativeEmail;
 
-        // Use recipient email from environment or default to FromFull email
-        $recipientEmail = !empty($this->toEmail) ? $this->toEmail : $body['FromFull']['Email'];
+		if (strcasecmp($body['ToFull'][0]['Email'], $this->inboundConfirmedEmail) === 0) {
+			$recipientEmail = $this->toConfirmedEmail;
+		}
 
         $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body, $pdfText, $downloadedText);
 
@@ -275,7 +290,7 @@ Assume the timezone is pacific time if not specified in the email. Based on the 
 
 Render escaped characters from the input. So "\n" becomes rendered as a newline in the output.
 
-Make the organizer of the event "Email-to-ICS <{$this->toEmail}>".
+Make the organizer of the event "Email-to-ICS <{$this->fromEmail}>".
 
 Include the entirety of email, as written, for the description of the event.
 
@@ -308,6 +323,38 @@ For the ICS file, ensure it matches RFC5545. Specifically:
 - Ensure a UID is generated. Make it look like Ymd-His@calendar.postmark.justin-c.com. AKA 20240530-195600@calendar.postmark.justin-c.com
 - Ensure a VTIMEZONE object is present
 - For the description, include newlines to make it look good.
+- Keep the description under 1000 characters.
+- Keep the description in plain text, not HTML.
+
+If the content comes from Eventbrite, include the ticket link in the description, even at the expense of other details.
+
+# Output Format
+- Combine all individual events into one .ics file.
+- Ensure the format adheres to the iCalendar standards for compatibility.
+- Ensure the .ics file can be imported into calendar applications like Google Calendar, Apple Calendar, or Microsoft Outlook.
+
+# Examples
+```plaintext
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Your Organization//NONSGML Your Product//EN
+BEGIN:VEVENT
+UID:1234@example.com
+DTSTAMP:20211010T090000Z
+DTSTART;TZID=America/Los_Angeles:20211028T063000
+DTEND;TZID=America/Los_Angeles:20211028T070000
+SUMMARY:Wake up
+DESCRIPTION:Start your day with a refreshing morning.
+END:VEVENT
+END:VCALENDAR
+```
+
+# Notes
+- Ensure `UID` values are unique across events.
+- Update `DTSTAMP` with the current timestamp when generating the .ics file.
+- Check for any overlapping events and resolve any conflicts.
+- Ensure that all dates and times are formatted correctly, using `YYYYMMDDTHHMMSS` format where necessary.
+- ```SUMMARY``` should be concise and descriptive to easily convey the purpose of the event at a glance.
 
 Return a JSON object with 2 keys:
 - ICS - the ical file contents
@@ -466,16 +513,19 @@ PROMPT;
 
 		// Check if we got a valid response and return the place id
 		if (!empty($data['results'])) {
-			// Return the place_id of the first result
-			$placeId = $data['results'][0]['place_id'];
+			$result = $data['results'][0];
 
-			// Base URL for Google Maps search with API parameter
-			$baseUrl = "https://www.google.com/maps/search/?api=1";
-
-			// Construct the URL with query and place_id
-			$url = sprintf("%s&query=%s&query_place_id=%s", $baseUrl, urlencode($lookup), urlencode($placeId));
-
-			return $url;
+			return $result['name'] . ' ' . $result['formatted_address'];
+//			// Return the place_id of the first result
+//			$placeId = $data['results'][0]['place_id'];
+//
+//			// Base URL for Google Maps search with API parameter
+//			$baseUrl = "https://www.google.com/maps/search/?api=1";
+//
+//			// Construct the URL with query and place_id
+//			$url = sprintf("%s&query=%s&query_place_id=%s", $baseUrl, urlencode($lookup), urlencode($placeId));
+//
+//			return $url;
 		}
 
 		return null;
@@ -528,7 +578,8 @@ BODY;
 		$this->sendEmail($ics, $toEmail, $subject, $htmlBody, $attachments);
 	}
 
-	public function sendEmail($ics, $toEmail, $subject, $htmlBody, $otherAttachments = []) {
+	public function sendEmail($ics, $toEmail, $subject, $htmlBody, array $otherAttachments = []) {
+		$attachments = [];
 		if (!empty($ics)) {
 			$attachments = array_merge([
 				[
@@ -539,14 +590,19 @@ BODY;
 			], $otherAttachments);
 		}
 
+		$request = [
+			'From' => $this->fromEmail,
+			'To' => $toEmail,
+			'Subject' => $subject,
+			'HTMLBody' => $htmlBody,
+		];
+
+		if (!empty($attachments)) {
+			$request['Attachments'] = $attachments;
+		}
+
         $response = $this->httpClient->post('/email', [
-            'json' => [
-                'From' => $this->fromEmail,
-                'To' => $toEmail,
-                'Subject' => $subject,
-				'HTMLBody' => $htmlBody,
-				'Attachments' => $attachments,
-            ],
+            'json' => $request,
         ]);
 
         if ($response->getStatusCode() !== 200) {
@@ -608,7 +664,9 @@ class WebPage
             case 'GET':
                 $this->displayGetForm();
                 break;
-            case 'POST':
+			case 'POST':
+				file_put_contents(sys_get_temp_dir() . '/post.' . date('Ymd.His'), file_get_contents('php://input'));
+
                 if (isset($_POST['username'], $_POST['password'])) {
                     $this->handleLogin();
                 } else {
@@ -683,6 +741,7 @@ HTML;
 			$this->setCookie();
             $this->displayGetForm(); // Successfully authenticated
 		} else {
+			http_response_code(401);
 			if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 				echo '<h1 style="color: red">Invalid credentials. Please try again.</h1>';
 			}
@@ -723,7 +782,9 @@ HTML;
     private function processFormSubmission($url, $fetchedText = null)
     {
 		$processor = new EmailProcessor();
-		$processor->processUrl($url, $fetchedText, $_REQUEST['display'] ?? 'email');
+		$processor->processUrl($url, $fetchedText, $_REQUEST['display'] ?? 'email',
+			$_REQUEST['tentative'] ?? true
+		);
     }
 
     private function isPostmarkInboundWebhook($json_data)
@@ -754,12 +815,12 @@ try {
 
 	$err = '<h1>ERROR PROCESSING CALENDAR EVENT</h1>' .
 		'<p>Error: <b>' . $t->getMessage() . '</b></p>' .
-		'<p>' . var_export($t, true) . '</p>' .
+		'<pre>' . var_export($t, true) . '</pre>' .
 		'<p>Original POST:</p>' .
 		'<pre>' . json_encode($_POST) . '</pre>';
 
 	$processor = new EmailProcessor;
-	$processor->sendEmail(null, $_ENV['TO_EMAIL'], 'ERROR PROCESSING CALENDAR EVENT', $err);
+	$processor->sendEmail(null, $_ENV['ERROR_EMAIL'], 'ERROR PROCESSING CALENDAR EVENT', $err);
 }
 
 $out = ob_get_flush();
