@@ -71,46 +71,9 @@ class EmailProcessor
         ]);
 	}
 
-	private function extractTextFromHtml($html) {
-		// Create a new DOMDocument object
-		$dom = new DOMDocument;
-
-		// Load the HTML
-		// Suppress errors due to malformed HTML
-		libxml_use_internal_errors(true);
-		$dom->loadHTML($html, LIBXML_NOERROR | LIBXML_NOWARNING);
-		libxml_clear_errors();
-
-		// Remove <style> and <script> elements
-		$scriptTags = $dom->getElementsByTagName('script');
-		while ($scriptTags->length > 0) {
-			$scriptTags->item(0)->parentNode->removeChild($scriptTags->item(0));
-		}
-
-		$styleTags = $dom->getElementsByTagName('style');
-		while ($styleTags->length > 0) {
-			$styleTags->item(0)->parentNode->removeChild($styleTags->item(0));
-		}
-
-		// Attempt to get the <body> content
-		$body = $dom->getElementsByTagName('body')->item(0);
-		if ($body) {
-			$textContent = $body->textContent;
-		} else {
-			// If no <body> tag, use the entire document
-			$textContent = $dom->textContent;
-		}
-
-		// Remove extra white spaces, new lines etc.
-		$textContent = trim(preg_replace('/\s+/', ' ', $textContent));
-
-		return $textContent;
-	}
-
-
 	public function processUrl($url, $downloadedText, $display, $tentative = true)
 	{
-		if (!isset($downloadedText)) {
+		if (empty(trim($downloadedText))) {
 			if (!$this->is_valid_url($url)) {
 				http_response_code(400);
 				error_log('BAD url: ' . $url);
@@ -130,7 +93,9 @@ class EmailProcessor
 			}
 		}
 
-		$downloadedText = $this->extractTextFromHtml($downloadedText);
+		$downloadedText = $this->extractMainContent($downloadedText);
+
+		$downloadedText = (new \Html2Text\Html2Text($downloadedText))->getText();
 
 		$combinedText = <<<TEXT
 {$url}
@@ -183,6 +148,33 @@ BODY;
 		echo htmlspecialchars($this->unescapeNewlines($ics));
 		echo '</pre>';
 		exit;
+	}
+
+	protected function extractMainContent(string $html) : string
+	{
+		// If the html contains a <main> element, extract and return it.
+		$doc = new \Dom\HTMLDocument();
+		$doc->createFromString($html);
+
+		$xpath = new DOMXPath($doc);
+
+		$elems = ['main', 'article'];
+		foreach ($elems as $elem) {
+			$main = $xpath->query("//{$elem}")->item(0);
+			if ($main) {
+				return $doc->saveHTML($main);
+			}
+		}
+
+		$classes = ['main', 'content', 'container', 'container-fluid', 'wrapper'];
+		foreach ($classes as $class) {
+			$main = $xpath->query("//div[contains(concat(' ', normalize-space(@class), ' '), ' $class ')]")->item(0);
+			if ($main) {
+				return $doc->saveHTML($main);
+			}
+		}
+
+		return $html;
 	}
 
 	protected function unescapeNewlines($str)
@@ -245,8 +237,16 @@ BODY;
 			return false;
 		}
 
-		// Attempt to fetch the HTML content from the given URL
-		$htmlContent = @file_get_contents($url);
+		// Use Guzzle to get the HTML content, adding appropriate headers to make
+		// it look like the request is coming from a browser
+		$client = new Client();
+		$response = $client->get($url, [
+			'headers' => [
+				'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
+			],
+		]);
+
+		$htmlContent = $response->getBody()->getContents();
 
 		// Check if the fetching was successful
 		if ($htmlContent === FALSE) {
@@ -360,39 +360,48 @@ Return a JSON object with 2 keys:
 - ICS - the ical file contents
 - EmailSubject - the title of the event, as specified above.
 - LocationLookup - location information that we can pass to the Google Places API to lookup. should be a string
+
+EXTREMELY IMPORTANT: the output must be JSON and match this schema EXACTLY!
+[
+	'type' => 'json_schema',
+	'json_schema' =>  [
+		'name' => 'cal_response',
+		'strict' => true,
+		'schema' => [
+			'type' => 'object',
+			'properties' => [
+				'ICS' => [
+					'type' => 'string'
+				],
+				'EmailSubject' => [
+					'type' => 'string'
+				],
+				'LocationLookup' => [
+					'type' => 'string'
+				],
+			],
+			'required' => ['ICS', 'EmailSubject', 'LocationLookup'],
+			'additionalProperties' => false,
+		],
+	],
+],
+
+Even if URLs are in the next prompt, you won't be directly accessing them. Treat them as text.
+
+
+The actual content will come in the next message, so treat this message as a system prompt.
 PROMPT;
 
 			$data = [
-				'model' => 'gpt-4o',  // Use 'gpt-4' for the latest version of GPT
+				'model' => 'o1-mini',
 				'messages' => [
-					['role' => 'system', 'content' => $system],
+					['role' => 'user', 'content' => $system],
 					['role' => 'user', 'content' => $combinedText],
 				],
-				'max_tokens' => 16*1024,
-				'response_format' => [
-					'type' => 'json_schema',
-					'json_schema' =>  [
-						'name' => 'cal_response',
-						'strict' => true,
-						'schema' => [
-							'type' => 'object',
-							'properties' => [
-								'ICS' => [
-									'type' => 'string'
-								],
-								'EmailSubject' => [
-									'type' => 'string'
-								],
-								'LocationLookup' => [
-									'type' => 'string'
-								],
-							],
-							'required' => ['ICS', 'EmailSubject', 'LocationLookup'],
-							'additionalProperties' => false,
-						],
-					],
-				],
+				'max_completion_tokens' => 16*1024,
 			];
+
+			dd($data);
 
 			$response = $this->openaiClient->chat()->create($data);
 
@@ -825,3 +834,13 @@ try {
 
 $out = ob_get_flush();
 error_log('OUTPUT: ' . $out);
+
+function dd($var)
+{
+	http_response_code(505);
+	echo '<pre>';
+	var_dump($var);
+	echo '</pre>';
+
+	die;
+}
