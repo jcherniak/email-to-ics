@@ -10,15 +10,15 @@ use ICal\ICal;
 
 ignore_user_abort();
 ini_set('display_errors', 'On');
-ini_set('error_reporting', E_ALL);
-function exception_error_handler(int $errno, string $errstr, string $errfile = null, int $errline) {
+ini_set('error_reporting', E_ALL & ~E_DEPRECATED);
+function exception_error_handler(int $errno, string $errstr, ?string $errfile = null, ?int $errline = null, ?array $errcontext = null) {
     if (!(error_reporting() & $errno)) {
         // This error code is not included in error_reporting
         return;
 	}
 	throw new \ErrorException($errstr, 0, $errno, $errfile, $errline);
 }
-set_error_handler(exception_error_handler(...));
+set_error_handler('exception_error_handler');
 
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
@@ -71,7 +71,7 @@ class EmailProcessor
         ]);
 	}
 
-	public function processUrl($url, $downloadedText, $display, $tentative = true)
+	public function processUrl($url, $downloadedText, $display, $tentative = true, $instructions = null)
 	{
 		if (empty(trim($downloadedText))) {
 			if (!$this->is_valid_url($url)) {
@@ -104,7 +104,7 @@ class EmailProcessor
 {$downloadedText}
 TEXT;
 
-		$calEvent = $this->generateIcalEvent($combinedText);
+		$calEvent = $this->generateIcalEvent($combinedText, $instructions);
 		$ics = $calEvent['ICS'];
 		$subject = $calEvent['EmailSubject'];
 		if ($display == 'download') {
@@ -153,10 +153,9 @@ BODY;
 	protected function extractMainContent(string $html) : string
 	{
 		// If the html contains a <main> element, extract and return it.
-		$doc = new \Dom\HTMLDocument();
-		$doc->createFromString($html);
+		$doc = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
 
-		$xpath = new DOMXPath($doc);
+		$xpath = new \Dom\XPath($doc);
 
 		$elems = ['main', 'article'];
 		foreach ($elems as $elem) {
@@ -168,7 +167,7 @@ BODY;
 
 		$classes = ['main', 'content', 'container', 'container-fluid', 'wrapper'];
 		foreach ($classes as $class) {
-			$main = $xpath->query("//div[contains(concat(' ', normalize-space(@class), ' '), ' $class ')]")->item(0);
+			$main = $xpath->query("//*[contains(concat(' ', normalize-space(@class), ' '), ' {$class} ')]")->item(0);
 			if ($main) {
 				return $doc->saveHTML($main);
 			}
@@ -191,20 +190,41 @@ BODY;
         $emailText = $body['TextBody'];
 		$pdfText = $this->extractPdfText($body['Attachments'] ?? []);
 
-        $combinedText = $emailText;
+        // Extract URL and instructions from email body
+        $url = null;
+        $instructions = null;
+        $lines = explode("\n", $emailText);
+        $remainingLines = [];
+        
+        foreach ($lines as $line) {
+            if (preg_match('/^URL:\s*(.+)$/i', $line, $matches)) {
+                $url = trim($matches[1]);
+            } elseif (preg_match('/^Instructions:\s*(.+)$/i', $line, $matches)) {
+                $instructions = trim($matches[1]);
+            } else {
+                $remainingLines[] = $line;
+            }
+        }
+        
+        // If no explicit URL found, check if the entire text is a URL
+        if (!$url && $this->is_valid_url(trim($emailText))) {
+            $url = trim($emailText);
+        }
+
+        $combinedText = implode("\n", $remainingLines);
         if ($pdfText) {
             $combinedText .= "\n\n--- Extracted from PDF Attachment ---\n\n" . $pdfText;
 		}
 
 		$downloadedText = null;
-		if ($this->is_valid_url($emailText)) {
-			$downloadedText = $this->fetch_url($emailText);
+		if ($url) {
+			$downloadedText = $this->fetch_url($url);
 
 			$combinedText .= "\n\n--- HTML fetched from URL above ---\n\n";
 			$combinedText .= $downloadedText;
 		}
 
-        $ret = $this->generateIcalEvent($combinedText);
+        $ret = $this->generateIcalEvent($combinedText, $instructions);
 
         $calendarEvent = $ret['ICS'];
         $subject = $ret['EmailSubject'];
@@ -276,8 +296,25 @@ BODY;
         return null;
     }
 
-    private function generateIcalEvent($combinedText)
+    private function generateIcalEvent($combinedText, $instructions = null)
 	{
+		$schema =  [
+			'type' => 'object',
+			'properties' => [
+				'ICS' => [
+					'type' => 'string'
+				],
+				'EmailSubject' => [
+					'type' => 'string'
+				],
+				'LocationLookup' => [
+					'type' => 'string'
+				],
+			],
+			'required' => ['ICS', 'EmailSubject', 'LocationLookup'],
+			'additionalProperties' => false,
+		];
+
 		$retries = $_ENV['OPENAI_RETRIES'];
 		for ($i = 0; $i < $retries; $i++) {
 			$curYear = date('Y');
@@ -387,39 +424,116 @@ EXTREMELY IMPORTANT: the output must be JSON and match this schema EXACTLY!
 ],
 
 Even if URLs are in the next prompt, you won't be directly accessing them. Treat them as text.
-
-
-The actual content will come in the next message, so treat this message as a system prompt.
 PROMPT;
 
-			$data = [
-				'model' => 'o1-mini',
-				'messages' => [
-					['role' => 'user', 'content' => $system],
-					['role' => 'user', 'content' => $combinedText],
-				],
-				'max_completion_tokens' => 16*1024,
-			];
+			$messages = [
+                ['role' => 'user', 'content' => $system],
+            ];
 
-			dd($data);
+            if ($instructions) {
+                $messages[] = ['role' => 'user', 'content' => "Additional instructions: " . $instructions];
+            }
 
+            $messages[] = ['role' => 'user', 'content' => $combinedText];
+
+            $data = [
+                'model' => 'o1-mini',
+                'messages' => $messages,
+                'max_completion_tokens' => 16*1024,
+            ];
+
+			error_log('Sending initial OpenAI request...');
 			$response = $this->openaiClient->chat()->create($data);
+			error_log('Received initial OpenAI response...');
 
 			$returnedData = $response['choices'][0]['message']['content'];
 			$data = trim($returnedData);
+
+			$data = str_replace(['```json', '```'], '', $data);
 			$ret = json_decode($data, true);
+	
+			$valid = true;
 			if (json_last_error() != JSON_ERROR_NONE) {
-				if ($i < $retries - 1) {
-					error_log("OpenAI returned invalid JSON, retrying...\n\nJSON: {$data}");
-					continue;
+				$err = json_last_error_msg();
+				error_log("OpenAI returned invalid JSON:\nError: {$err}\nJSON: {$data}");
+				$valid = false;
+			}
+
+			if ($valid) {
+				$validator = new \Opis\JsonSchema\Validator();
+				$validator->setMaxErrors(10);
+				$validator->setStopAtFirstError(false);
+				$result = $validator->validate((object)$ret, json_encode($schema));
+				$valid = $result->isValid();
+
+				if ($valid) {
+					error_log("OpenAI response passed schema validation");
+				} else {
+					error_log("OpenAI response failed schema validation: " . $result->error()->message());
+				}
+			}
+
+			if (!$valid) {
+				// Try and correct the JSON using openai
+				$messages = [
+					['role' => 'assistant', 'content' => $data],
+					['role' => 'user', 'content' => 'The JSON returned is invalid. Please correct it to match the schema.'],
+				];
+
+				$data = [
+					'model' => 'gpt-4o-mini',
+					'messages' => $messages,
+					'max_completion_tokens' => 16 * 1024,
+					'response_format' => [
+						'type' => 'json_schema',
+						'json_schema' =>  [
+							'name' => 'cal_response',
+							'strict' => true,
+							'schema' => $schema,
+						],
+					],
+				];
+
+				error_log("Retrying with OpenAI gpt-4o-mini to correct JSON...");
+
+				$response = $this->openaiClient->chat()->create($data);
+				$returnedData = $response['choices'][0]['message']['content'];
+				$newData = trim($returnedData);
+
+				$ret = json_decode($newData, true, 512, JSON_INVALID_UTF8_IGNORE);
+							
+				$valid = true;
+				if (json_last_error() != JSON_ERROR_NONE) {
+					$err = json_last_error_msg();
+					error_log("OpenAI returned invalid JSON:\nError: {$err}\nJSON: {$data}");
+					$valid = false;
+				}
+	
+				if ($valid) {
+					$validator = new \Opis\JsonSchema\Validator();
+					$validator->setMaxErrors(10);
+					$validator->setStopAtFirstError(false);
+					$result = $validator->validate((object)$ret, json_encode($schema));
+					$valid = $result->isValid();
+	
+					if (!$valid) {
+						error_log("OpenAI response failed schema validation: " . $result->error()->message());
+					}
 				}
 
-				http_response_code(500);
-				echo "<h1>Openai returned invalid json:</h1>";
-				echo '<pre>';
-					echo htmlspecialchars($this->unescapeNewlines($returnedData));
-				echo '</pre>';
-				die;
+				if (!$valid) {
+					if ($i < $retries - 1) {
+						error_log("OpenAI returned invalid JSON a second time.., retrying whole operation...\n\nJSON: {$newData}");
+						continue;
+					}
+
+					http_response_code(500);
+					echo "<h1>Openai returned invalid json:</h1>";
+					echo '<pre>';
+						echo htmlspecialchars($this->unescapeNewlines($returnedData));
+					echo '</pre>';
+					die;
+				}
 			}
 
 			try
@@ -769,7 +883,7 @@ HTML;
 		if (isset($_POST['logout'])) {
 			$this->clearCookie();
 		} elseif (isset($_POST['url'])) {
-			$this->processFormSubmission($_POST['url'], $_POST['html'] ?? null);
+			$this->processFormSubmission();
 		} else {
 			$post_data = file_get_contents("php://input");
 			$json_data = json_decode($post_data, true);
@@ -791,8 +905,12 @@ HTML;
     private function processFormSubmission($url, $fetchedText = null)
     {
 		$processor = new EmailProcessor();
-		$processor->processUrl($url, $fetchedText, $_REQUEST['display'] ?? 'email',
-			$_REQUEST['tentative'] ?? true
+		$processor->processUrl(
+			$_REQUEST['url'],
+			$_REQUEST['html'] ?? '',
+			$_REQUEST['display'] ?? 'email',
+			$_REQUEST['tentative'] ?? true,
+			$_REQUEST['instructions'] ?? null
 		);
     }
 
@@ -833,10 +951,12 @@ try {
 }
 
 $out = ob_get_flush();
-error_log('OUTPUT: ' . $out);
+//error_log('OUTPUT: ' . $out);
 
 function dd($var)
 {
+	ob_end_clean();
+	
 	http_response_code(505);
 	echo '<pre>';
 	var_dump($var);

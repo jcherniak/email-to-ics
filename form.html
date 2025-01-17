@@ -18,11 +18,26 @@
                     Please enter a URL.
                 </div>
             </div>
+            <div class="mb-3">
+                <label for="instructions" class="form-label">Additional instructions:</label>
+                <textarea name="instructions" class="form-control"></textarea>
+            </div>
+
 			<div class="mb-3">
 				<label for="html" class="form-label">HTML to use:</label>
 				<textarea name="html" class="form-control">
 				</textarea>
 			</div>
+            <div class="mb-3">
+                <div class="form-check">
+                    <input type="radio" id="tentative" name="tentative" value="1" class="form-check-input" checked>
+                    <label class="form-check-label" for="tentative">Tentative</label>
+                </div>
+                <div class="form-check">
+                    <input type="radio" id="confirmed" name="tentative" value="0" class="form-check-input">
+                    <label class="form-check-label" for="confirmed">Confirmed</label>
+                </div>
+            </div>
             <div class="mb-3">
                 <div class="form-check">
                     <input type="radio" id="email" name="display" value="email" class="form-check-input" checked>
@@ -44,8 +59,13 @@
     </div>
 
     <script>
+        let currentController = null;
+
         document.getElementById('icsForm').addEventListener('submit', function(event) {
             event.preventDefault();
+            
+            // Clear any existing alerts and abort any pending requests
+            clearAlerts();
             
             const form = event.target;
             const submitButton = document.getElementById('submitBtn');
@@ -60,14 +80,16 @@
             const formData = new FormData(form);
             const displayOption = formData.get('display');
 
-            // Disable the submit button
+            // Create new abort controller for this request
+            currentController = new AbortController();
             submitButton.disabled = true;
 
             showAlert('Processing your request...', 'info', true);
 
             fetch('index.php', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: currentController.signal
             })
             .then(response => {
                 if (!response.ok) {
@@ -84,10 +106,14 @@
                 showAlert('Completed', 'success');
             })
             .catch(error => {
-                console.error('Fetch error:', error);
+                if (error.name === 'AbortError') {
+                    console.log('Request was aborted');
+                } else {
+                    console.error('Fetch error:', error);
+                }
             })
             .finally(() => {
-                // Re-enable the submit button
+                currentController = null;
                 submitButton.disabled = false;
             });
         });
@@ -117,7 +143,7 @@
                 <div class="alert alert-${type} alert-dismissible fade show" role="alert">
                     ${withSpinner ? '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>' : ''}
                     ${message}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close" onclick="clearAlerts()"></button>
                 </div>
             `;
         }
@@ -146,6 +172,19 @@
 			document.getElementById('nl2br').addEventListener('click', function() {
 				document.querySelector('pre.card-text').innerHTML = document.querySelector('pre.card-text').innerHTML.replaceAll("\\n","<br>")
 			});
+        }
+
+        function clearAlerts() {
+            if (currentController) {
+                currentController.abort();
+                currentController = null;
+            }
+            const submitButton = document.getElementById('submitBtn');
+            submitButton.disabled = false;
+            const alertContainer = document.getElementById('alertContainer');
+            const resultContainer = document.getElementById('resultContainer');
+            alertContainer.innerHTML = '';
+            resultContainer.innerHTML = '';
         }
     </script>
 </body>
