@@ -11,6 +11,8 @@ use ICal\ICal;
 ignore_user_abort();
 ini_set('display_errors', 'On');
 ini_set('error_reporting', E_ALL & ~E_DEPRECATED);
+
+/** @SuppressWarnings(PHPMD.UnusedFormalParameter)*/
 function exception_error_handler(int $errno, string $errstr, ?string $errfile = null, ?int $errline = null, ?array $errcontext = null) {
     if (!(error_reporting() & $errno)) {
         // This error code is not included in error_reporting
@@ -46,6 +48,9 @@ class EmailProcessor
     private $logDir;
 	private $googleMapsKey;
 
+	private $useDeepseek = false;
+	private $deepseekApiKey;
+
     public function __construct()
     {
         $this->openaiApiKey = $_ENV['OPENAI_API_KEY'];
@@ -60,7 +65,10 @@ class EmailProcessor
         $this->logDir = $_ENV['LOG_DIR'];
 		$this->googleMapsKey = $_ENV['GOOGLE_MAPS_API_KEY'];
 
-		$this->openaiClient = OpenAI::client($this->openaiApiKey);
+		$this->useDeepseek = $_ENV['USE_DEEPSEEK'] ?? false;
+		$this->deepseekApiKey = $_ENV['DEEPSEEK_API_KEY'] ?? null;
+
+		$this->openaiClient = $this->buildOpenAiClient();
 		$this->httpClient = new Client([
             'base_uri' => 'https://api.postmarkapp.com',
             'headers' => [
@@ -69,6 +77,20 @@ class EmailProcessor
                 'X-Postmark-Server-Token' => $this->postmarkApiKey,
             ],
         ]);
+	}
+
+	private function buildOpenAiClient()
+	{
+		$factory = OpenAI::factory();
+
+		if ($this->useDeepseek) {
+			$factory->withBaseUri('https://api.deepseek.com/v1');
+			$factory->withApiKey($this->deepseekApiKey);
+		} else {
+			$factory->withApiKey($this->openaiApiKey);
+		}
+
+		return $factory->make();
 	}
 
 	public function processUrl($url, $downloadedText, $display, $tentative = true, $instructions = null)
@@ -171,6 +193,11 @@ BODY;
 			if ($main) {
 				return $doc->saveHTML($main);
 			}
+		}
+
+		$body = $xpath->query("//body")->item(0);
+		if ($body) {
+			return $doc->saveHTML($body);
 		}
 
 		return $html;
@@ -354,6 +381,9 @@ Arrival airport: EWR
 ```
 - The location field should contain a google maps link to the departure airport
 
+- The description for non-flight events should include information from the HTML body. Keep it under 1500 characters. Include the URL at the bottom of the description.  Put HTML into an X-ALT-DESC;FMTTYPE=text/html: field
+as well as formatted plain text in the DESCRIPTION field.
+
 For the ICS file, ensure it matches RFC5545. Specifically:
 - Ensure all lines are terminated by CRLF
 - Lines of text SHOULD NOT be longer than 75 octets, excluding the line break. Long content lines SHOULD be split into a multiple line representations using a line "folding" technique. That is, a long line can be split between any two characters by inserting a CRLF immediately followed by a single linear white-space character (i.e., SPACE or HTAB). Any sequence of CRLF followed immediately by a single linear white-space character is ignored (i.e., removed) when processing the content type.
@@ -369,6 +399,8 @@ If the content comes from Eventbrite, include the ticket link in the description
 - Combine all individual events into one .ics file.
 - Ensure the format adheres to the iCalendar standards for compatibility.
 - Ensure the .ics file can be imported into calendar applications like Google Calendar, Apple Calendar, or Microsoft Outlook.
+- Only include a single SUMMARY and DESCRIPTION field
+- Include a URL field if at all possible
 
 # Examples
 ```plaintext
@@ -381,7 +413,8 @@ DTSTAMP:20211010T090000Z
 DTSTART;TZID=America/Los_Angeles:20211028T063000
 DTEND;TZID=America/Los_Angeles:20211028T070000
 SUMMARY:Wake up
-DESCRIPTION:Start your day with a refreshing morning.
+DESCRIPTION:Start your day with a refreshing morning.\\nGo to the park and enjoy yourself.\\nNOTE THE USE OF ESCAPED NEWLINES HERE
+URL:https://sfcmp.org/concerts/2024-2025-season/tracing-paths/
 END:VEVENT
 END:VCALENDAR
 ```
@@ -392,6 +425,8 @@ END:VCALENDAR
 - Check for any overlapping events and resolve any conflicts.
 - Ensure that all dates and times are formatted correctly, using `YYYYMMDDTHHMMSS` format where necessary.
 - ```SUMMARY``` should be concise and descriptive to easily convey the purpose of the event at a glance.
+- Even though non-standard, include a URL field.
+- No fields should contain native newlines. Use \\n instead. AKA ESCAPE NEWLINES INSIDE OF FIELDS.
 
 Return a JSON object with 2 keys:
 - ICS - the ical file contents
@@ -437,10 +472,27 @@ PROMPT;
             $messages[] = ['role' => 'user', 'content' => $combinedText];
 
             $data = [
-                'model' => 'o1-mini',
-                'messages' => $messages,
-                'max_completion_tokens' => 16*1024,
-            ];
+				'model' => $this->useDeepseek ?
+					'deepseek-reasoner' :
+					'o1-mini',
+				'messages' => $messages,
+				'temperature' => 0.25,
+			];
+
+			if ($this->useDeepseek) {
+				$data['max_tokens'] = 8 * 1024;
+				$data['messages'] = [
+					[
+						'role' => 'user',
+						'content' => implode("\n\n", array_map(
+							fn($msg) => $msg['content'],
+							$messages
+						)),
+					]
+				];
+			} else {
+				$data['max_completion_tokens'] = 16 * 1024;
+			}
 
 			error_log('Sending initial OpenAI request...');
 			$response = $this->openaiClient->chat()->create($data);
@@ -451,7 +503,7 @@ PROMPT;
 
 			$data = str_replace(['```json', '```'], '', $data);
 			$ret = json_decode($data, true);
-	
+
 			$valid = true;
 			if (json_last_error() != JSON_ERROR_NONE) {
 				$err = json_last_error_msg();
@@ -481,16 +533,16 @@ PROMPT;
 				];
 
 				$data = [
-					'model' => 'gpt-4o-mini',
+					'model' => $this->useDeepseek ? 'deepseek-chat' : 'gpt-4o-mini',
 					'messages' => $messages,
-					'max_completion_tokens' => 16 * 1024,
+//					'max_completion_tokens' => 16 * 1024,
 					'response_format' => [
-						'type' => 'json_schema',
-						'json_schema' =>  [
-							'name' => 'cal_response',
-							'strict' => true,
-							'schema' => $schema,
-						],
+						'type' => 'json_object',//'json_schema',
+//						'json_schema' =>  [
+//							'name' => 'cal_response',
+//							'strict' => true,
+//							'schema' => $schema,
+//						],
 					],
 				];
 
@@ -902,7 +954,7 @@ HTML;
 		}
     }
 
-    private function processFormSubmission($url, $fetchedText = null)
+    private function processFormSubmission()
     {
 		$processor = new EmailProcessor();
 		$processor->processUrl(
