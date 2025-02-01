@@ -3,6 +3,7 @@ require 'vendor/autoload.php';
 
 use GuzzleHttp\Client;
 use Dotenv\Dotenv;
+use OpenAI\Exceptions\UnserializableResponse;
 use Spatie\PdfToText\Pdf;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizerConfig;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
@@ -344,6 +345,15 @@ BODY;
 
 		$retries = $_ENV['OPENAI_RETRIES'];
 		for ($i = 0; $i < $retries; $i++) {
+			if (
+				$this->useDeepseek &&
+				$i == $_ENV['OPENAI_RETRIES'] - 2
+			) {
+				error_log("Deepseek is down, using OpenAI");
+				$this->useDeepseek = false;
+				$this->openaiClient = $this->buildOpenAiClient();
+			}
+
 			$curYear = date('Y');
 			$curDate = date('m/d');
 			$nextYear = $curYear + 1;
@@ -476,7 +486,6 @@ PROMPT;
 					'deepseek-reasoner' :
 					'o1-mini',
 				'messages' => $messages,
-				'temperature' => 0.25,
 			];
 
 			if ($this->useDeepseek) {
@@ -490,12 +499,22 @@ PROMPT;
 						)),
 					]
 				];
+				$data['temperature'] = 0.25;
 			} else {
 				$data['max_completion_tokens'] = 16 * 1024;
 			}
 
 			error_log('Sending initial OpenAI request...');
-			$response = $this->openaiClient->chat()->create($data);
+			try
+			{
+				$response = $this->openaiClient->chat()->create($data);
+			}
+			catch (UnserializableResponse $e)
+			{
+				error_log("UnserializableResponse: " . $e->getMessage());
+				continue;
+			}
+
 			error_log('Received initial OpenAI response...');
 
 			$returnedData = $response['choices'][0]['message']['content'];
