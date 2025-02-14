@@ -214,7 +214,15 @@ BODY;
 	}
 
     public function processPostmarkRequest($body)
-    {
+	{
+		if (
+			strpos($body['Subject'], 'Accepted:') === 0 ||
+			strpos($body['Subject'], 'Declined:') === 0 ||
+			strpos($body['Subject'], 'Tentative:') === 0
+		) {
+			error_log('Skipping response email with subject ' . $body['Subject']);
+			return;
+		}
         $emailText = $body['TextBody'];
 		$pdfText = $this->extractPdfText($body['Attachments'] ?? []);
 
@@ -223,7 +231,7 @@ BODY;
         $instructions = null;
         $lines = explode("\n", $emailText);
         $remainingLines = [];
-        
+
         foreach ($lines as $line) {
             if (preg_match('/^URL:\s*(.+)$/i', $line, $matches)) {
                 $url = trim($matches[1]);
