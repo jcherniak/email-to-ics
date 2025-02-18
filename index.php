@@ -99,7 +99,7 @@ class EmailProcessor
 		if (empty(trim($downloadedText))) {
 			if (!$this->is_valid_url($url)) {
 				http_response_code(400);
-				error_log('BAD url: ' . $url);
+				errlog('BAD url: ' . $url);
 				echo 'Bad url!';
 				die;
 			}
@@ -152,7 +152,7 @@ TEXT;
 		if ($display != 'email') {
 			http_response_code(400);
 			echo "Invalid display: {$display}";
-			error_log("Invalid display: {$display}");
+			errlog("Invalid display: {$display}");
 		}
 
 		$recipientEmail = $tentative ? $this->toTentativeEmail : $this->toConfirmedEmail;
@@ -215,12 +215,14 @@ BODY;
 
     public function processPostmarkRequest($body)
 	{
+		errlog("Received email with subject of " . $body['Subject']);
+
 		if (
 			strpos($body['Subject'], 'Accepted:') === 0 ||
 			strpos($body['Subject'], 'Declined:') === 0 ||
 			strpos($body['Subject'], 'Tentative:') === 0
 		) {
-			error_log('Skipping response email with subject ' . $body['Subject']);
+			errlog('Skipping response email with subject ' . $body['Subject']);
 			return;
 		}
         $emailText = $body['TextBody'];
@@ -325,7 +327,7 @@ BODY;
                     unlink($tempPdfPath); // Clean up temp file
                     return $pdfText;
                 } catch (Exception $e) {
-                    error_log("Error extracting PDF text: " . $e->getMessage());
+                    errlog("Error extracting PDF text: " . $e->getMessage());
                 }
             }
         }
@@ -337,6 +339,12 @@ BODY;
 		$schema =  [
 			'type' => 'object',
 			'properties' => [
+				'success' => [
+					'type' => 'boolean'
+				],
+				'errorMessage' => [
+					'type' => 'string'
+				],
 				'ICS' => [
 					'type' => 'string'
 				],
@@ -347,7 +355,7 @@ BODY;
 					'type' => 'string'
 				],
 			],
-			'required' => ['ICS', 'EmailSubject', 'LocationLookup'],
+			'required' => ['success', 'errorMessage', 'ICS', 'EmailSubject', 'LocationLookup'],
 			'additionalProperties' => false,
 		];
 
@@ -357,7 +365,7 @@ BODY;
 				$this->useDeepseek &&
 				$i == $_ENV['OPENAI_RETRIES'] - 2
 			) {
-				error_log("Deepseek is down, using OpenAI");
+				errlog("Deepseek is down, using OpenAI");
 				$this->useDeepseek = false;
 				$this->openaiClient = $this->buildOpenAiClient();
 			}
@@ -447,6 +455,8 @@ END:VCALENDAR
 - No fields should contain native newlines. Use \\n instead. AKA ESCAPE NEWLINES INSIDE OF FIELDS.
 
 Return a JSON object with 2 keys:
+- Success - whether the operation was successful or not. If false, include an error message.
+- ErrorMessage - if success is false, include an error message.
 - ICS - the ical file contents
 - EmailSubject - the title of the event, as specified above.
 - LocationLookup - location information that we can pass to the Google Places API to lookup. should be a string
@@ -460,6 +470,12 @@ EXTREMELY IMPORTANT: the output must be JSON and match this schema EXACTLY!
 		'schema' => [
 			'type' => 'object',
 			'properties' => [
+				'success' => [
+					'type' => 'boolean'
+				],
+				'errorMessage' => [
+					'type' => 'string'
+				],
 				'ICS' => [
 					'type' => 'string'
 				],
@@ -470,21 +486,29 @@ EXTREMELY IMPORTANT: the output must be JSON and match this schema EXACTLY!
 					'type' => 'string'
 				],
 			],
-			'required' => ['ICS', 'EmailSubject', 'LocationLookup'],
+			'required' => ['success', 'errorMessage', 'ICS', 'EmailSubject', 'LocationLookup'],
 			'additionalProperties' => false,
 		],
 	],
 ],
 
 Even if URLs are in the next prompt, you won't be directly accessing them. Treat them as text.
+
+***IF NO DATES ARE FOUND ANYWHERE IN THE EMAIL, RETURN success = false with an error message of "Email didn't contain dates or times". Ignore dates of the incoming email or forwarded messages. This overrides any directives above. ***
 PROMPT;
 
 			$messages = [
-                ['role' => 'user', 'content' => $system],
+				[
+					'role' => ($this->useDeepseek ? 'user' : 'system'),
+					'content' => $system
+				],
             ];
 
             if ($instructions) {
-                $messages[] = ['role' => 'user', 'content' => "Additional instructions: " . $instructions];
+				$messages[] = [
+					'role' => ($this->useDeepseek ? 'user' : 'system'),
+					'content' => "Additional instructions: " . $instructions
+				];
             }
 
             $messages[] = ['role' => 'user', 'content' => $combinedText];
@@ -492,7 +516,7 @@ PROMPT;
             $data = [
 				'model' => $this->useDeepseek ?
 					'deepseek-reasoner' :
-					'o1-mini',
+					'o3-mini',
 				'messages' => $messages,
 			];
 
@@ -510,20 +534,28 @@ PROMPT;
 				$data['temperature'] = 0.25;
 			} else {
 				$data['max_completion_tokens'] = 16 * 1024;
+				$data['response_format'] = [
+					'type' => 'json_schema',
+					'json_schema' =>  [
+						'name' => 'cal_response',
+						'strict' => true,
+						'schema' => $schema,
+					],
+				];
 			}
 
-			error_log('Sending initial OpenAI request...');
+			errlog('Sending initial ' . ($this->useDeepseek ? 'Deepseek' : 'OpenAI') . ' request...');
 			try
 			{
 				$response = $this->openaiClient->chat()->create($data);
 			}
 			catch (UnserializableResponse $e)
 			{
-				error_log("UnserializableResponse: " . $e->getMessage());
+				errlog("UnserializableResponse: " . $e->getMessage());
 				continue;
 			}
 
-			error_log('Received initial OpenAI response...');
+			errlog('Received initial ' . ($this->useDeepseek ? 'Deepseek' : 'OpenAI') . ' response...');
 
 			$returnedData = $response['choices'][0]['message']['content'];
 			$data = trim($returnedData);
@@ -534,7 +566,7 @@ PROMPT;
 			$valid = true;
 			if (json_last_error() != JSON_ERROR_NONE) {
 				$err = json_last_error_msg();
-				error_log("OpenAI returned invalid JSON:\nError: {$err}\nJSON: {$data}");
+				errlog("OpenAI returned invalid JSON:\nError: {$err}\nJSON: {$data}");
 				$valid = false;
 			}
 
@@ -546,9 +578,9 @@ PROMPT;
 				$valid = $result->isValid();
 
 				if ($valid) {
-					error_log("OpenAI response passed schema validation");
+					errlog("OpenAI response passed schema validation");
 				} else {
-					error_log("OpenAI response failed schema validation: " . $result->error()->message());
+					errlog("OpenAI response failed schema validation: " . $result->error()->message());
 				}
 			}
 
@@ -573,36 +605,36 @@ PROMPT;
 					],
 				];
 
-				error_log("Retrying with OpenAI gpt-4o-mini to correct JSON...");
+				errlog("Retrying with OpenAI gpt-4o-mini to correct JSON...");
 
 				$response = $this->openaiClient->chat()->create($data);
 				$returnedData = $response['choices'][0]['message']['content'];
 				$newData = trim($returnedData);
 
 				$ret = json_decode($newData, true, 512, JSON_INVALID_UTF8_IGNORE);
-							
+
 				$valid = true;
 				if (json_last_error() != JSON_ERROR_NONE) {
 					$err = json_last_error_msg();
-					error_log("OpenAI returned invalid JSON:\nError: {$err}\nJSON: {$data}");
+					errlog("OpenAI returned invalid JSON:\nError: {$err}\nJSON: {$data}");
 					$valid = false;
 				}
-	
+
 				if ($valid) {
 					$validator = new \Opis\JsonSchema\Validator();
 					$validator->setMaxErrors(10);
 					$validator->setStopAtFirstError(false);
 					$result = $validator->validate((object)$ret, json_encode($schema));
 					$valid = $result->isValid();
-	
+
 					if (!$valid) {
-						error_log("OpenAI response failed schema validation: " . $result->error()->message());
+						errlog("OpenAI response failed schema validation: " . $result->error()->message());
 					}
 				}
 
 				if (!$valid) {
 					if ($i < $retries - 1) {
-						error_log("OpenAI returned invalid JSON a second time.., retrying whole operation...\n\nJSON: {$newData}");
+						errlog("OpenAI returned invalid JSON a second time.., retrying whole operation...\n\nJSON: {$newData}");
 						continue;
 					}
 
@@ -615,6 +647,20 @@ PROMPT;
 				}
 			}
 
+			if (empty($ret['success'])) {
+				if ($i < $retries - 1) {
+					errlog("OpenAI returned success = false with error message: {$ret['errorMessage']}\n\nJSON: {$data}");
+					continue;
+				}
+
+				http_response_code(200);
+				echo "<h1>Openai returned error message:</h1>";
+				echo '<pre>';
+					echo htmlspecialchars($this->unescapeNewlines($returnedData));
+				echo '</pre>';
+				die;
+			}
+
 			try
 			{
 				$file = tempnam(sys_get_temp_dir(), 'ical-ai');
@@ -625,7 +671,7 @@ PROMPT;
 			catch (Throwable $e)
 			{
 				if ($i < $retries - 1) {
-					error_log("ICS couldn't be parsed: {$e}.\n\nICS: {$data}\n");
+					errlog("ICS couldn't be parsed: {$e}.\n\nICS: {$data}\n");
 					continue;
 				}
 
@@ -635,13 +681,13 @@ PROMPT;
 			if (!empty($ret['LocationLookup'])) {
 				try {
 					$place = $this->getGoogleMapsLink($ret['LocationLookup']);
-					error_log("Google maps lookup for '{$ret['LocationLookup']}' returned '{$place}'");
+					errlog("Google maps lookup for '{$ret['LocationLookup']}' returned '{$place}'");
 
 					if ($place) {
 						$ret['ICS'] = $this->updateIcsLocation($ret['ICS'], $place);
 					}
 				} catch (Throwable $e) {
-					error_log("Error(s) doing google maps lookup: " . var_export($e, true));
+					errlog("Error(s) doing google maps lookup: " . var_export($e, true));
 				}
 			}
 
@@ -811,7 +857,7 @@ BODY;
             throw new Exception('Failed to send email via Postmark');
         }
 
-        error_log("Postmark response:\n" . $response->getBody()->getContents());
+        errlog("Postmark response:\n" . $response->getBody()->getContents());
 	}
 
 	private function html_sanitize($html) : string {
@@ -972,9 +1018,9 @@ HTML;
 			} else {
 				http_response_code(400);
 				echo "Invalid POST request.";
-				error_log('Invalid post request');
-				error_log('JSON: ' . $post_data);
-				error_log('decoded: ' . var_export($json_data, true));
+				errlog('Invalid post request');
+				errlog('JSON: ' . $post_data);
+				errlog('decoded: ' . var_export($json_data, true));
 
 				die;
 			}
@@ -1014,9 +1060,9 @@ try {
 	$page = new WebPage();
 	$page->handleRequest();
 } catch (Throwable $t) {
-	http_response_code(500);
+	http_response_code(200); // 500 - Postmark will just keep resending if it gets a 500
 	header('Content-type: text/plain');
-	error_log($t);
+	errlog($t);
 	print_r($t);
 
 	$err = '<h1>ERROR PROCESSING CALENDAR EVENT</h1>' .
@@ -1030,7 +1076,7 @@ try {
 }
 
 $out = ob_get_flush();
-//error_log('OUTPUT: ' . $out);
+//errlog('OUTPUT: ' . $out);
 
 function dd($var)
 {
@@ -1042,4 +1088,12 @@ function dd($var)
 	echo '</pre>';
 
 	die;
+}
+
+global $requestId;
+$requestId = uniqid('request-');
+function errlog($msg)
+{
+	global $requestId;
+	error_log("{$requestId} - {$msg}");
 }
