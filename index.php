@@ -49,8 +49,10 @@ class EmailProcessor
     private $logDir;
 	private $googleMapsKey;
 
-	private $useDeepseek = false;
+	private $aiProvider;
+	private $aiModel;
 	private $deepseekApiKey;
+	private $anthropicKey;
 
     public function __construct()
     {
@@ -66,10 +68,12 @@ class EmailProcessor
         $this->logDir = $_ENV['LOG_DIR'];
 		$this->googleMapsKey = $_ENV['GOOGLE_MAPS_API_KEY'];
 
-		$this->useDeepseek = $_ENV['USE_DEEPSEEK'] ?? false;
+		$this->aiProvider = $_ENV['AI_PROVIDER'] ?? 'openai';
+		$this->aiModel = $_ENV['AI_MODEL'] ?? 'o3-mini';
 		$this->deepseekApiKey = $_ENV['DEEPSEEK_API_KEY'] ?? null;
+		$this->anthropicKey = $_ENV['ANTHROPIC_KEY'] ?? null;
 
-		$this->openaiClient = $this->buildOpenAiClient();
+		$this->openaiClient = $this->buildAiClient();
 		$this->httpClient = new Client([
             'base_uri' => 'https://api.postmarkapp.com',
             'headers' => [
@@ -80,15 +84,23 @@ class EmailProcessor
         ]);
 	}
 
-	private function buildOpenAiClient()
+	private function buildAiClient()
 	{
 		$factory = OpenAI::factory();
 
-		if ($this->useDeepseek) {
-			$factory->withBaseUri('https://api.deepseek.com/v1');
-			$factory->withApiKey($this->deepseekApiKey);
-		} else {
-			$factory->withApiKey($this->openaiApiKey);
+		switch ($this->aiProvider) {
+			case 'deepseek':
+				$factory->withBaseUri('https://api.deepseek.com/v1');
+				$factory->withApiKey($this->deepseekApiKey);
+				break;
+			case 'anthropic':
+				$factory->withBaseUri('https://api.anthropic.com/v1');
+				$factory->withApiKey($this->anthropicKey);
+				break;
+			case 'openai':
+			default:
+				$factory->withApiKey($this->openaiApiKey);
+				break;
 		}
 
 		return $factory->make();
@@ -118,7 +130,7 @@ class EmailProcessor
 
 		$downloadedText = $this->extractMainContent($downloadedText);
 
-		$downloadedText = (new \Html2Text\Html2Text($downloadedText))->getText();
+//		$downloadedText = (new \Html2Text\Html2Text($downloadedText))->getText();
 
 		$combinedText = <<<TEXT
 {$url}
@@ -361,15 +373,6 @@ BODY;
 
 		$retries = $_ENV['OPENAI_RETRIES'];
 		for ($i = 0; $i < $retries; $i++) {
-			if (
-				$this->useDeepseek &&
-				$i == $_ENV['OPENAI_RETRIES'] - 2
-			) {
-				errlog("Deepseek is down, using OpenAI");
-				$this->useDeepseek = false;
-				$this->openaiClient = $this->buildOpenAiClient();
-			}
-
 			$curYear = date('Y');
 			$curDate = date('m/d');
 			$nextYear = $curYear + 1;
@@ -384,7 +387,7 @@ Make the organizer of the event "Email-to-ICS <{$this->fromEmail}>".
 
 Include the entirety of email, as written, for the description of the event.
 
-PRODID should say "Email-to-ICS via OpenAI by Justin".
+PRODID should say "Email-to-ICS via {$this->aiProvider} by Justin".
 
 For a event title, generate a relevant one for this event. Don't use the subject of the original email, but provide a summary based on the content. For example a doctors appointment reminder should say "Dr. White Appointment". If it's a video appointment, say "Dr. White Video Appointment". For a concert ticket confirmation, it should say something like "SF Symphony Concert - beethoven, mozart".
 
@@ -420,6 +423,8 @@ For the ICS file, ensure it matches RFC5545. Specifically:
 - Keep the description in plain text, not HTML.
 
 If the content comes from Eventbrite, include the ticket link in the description, even at the expense of other details.
+
+IMPORTANT: If there are multiple events in the body, take the one that seems like the primary one.  For example, if there is text that says "Other events", then a series of dates below that, ignore that and find the date/time listed earlier on the page. If an event comes from a <section> with a class of "upcoming_events", then ignore it.
 
 # Output Format
 - Combine all individual events into one .ics file.
@@ -499,28 +504,26 @@ PROMPT;
 
 			$messages = [
 				[
-					'role' => ($this->useDeepseek ? 'user' : 'system'),
+					'role' => ($this->aiProvider === 'deepseek' ? 'user' : 'system'),
 					'content' => $system
 				],
             ];
 
-            if ($instructions) {
+			if ($instructions) {
 				$messages[] = [
-					'role' => ($this->useDeepseek ? 'user' : 'system'),
+					'role' => ($this->aiProvider === 'deepseek' ? 'user' : 'system'),
 					'content' => "Additional instructions: " . $instructions
 				];
-            }
+			}
 
-            $messages[] = ['role' => 'user', 'content' => $combinedText];
+			$messages[] = ['role' => 'user', 'content' => $combinedText];
 
-            $data = [
-				'model' => $this->useDeepseek ?
-					'deepseek-reasoner' :
-					'o3-mini',
+			$data = [
+				'model' => $this->aiModel,
 				'messages' => $messages,
 			];
 
-			if ($this->useDeepseek) {
+			if ($this->aiProvider === 'deepseek') {
 				$data['max_tokens'] = 8 * 1024;
 				$data['messages'] = [
 					[
@@ -542,9 +545,16 @@ PROMPT;
 						'schema' => $schema,
 					],
 				];
+
+				if ($this->aiProvider === 'anthropic') {
+					$data['thinking'] = [
+						'type' => 'enabled',
+						'budget_tokens' => 4000,
+					];
+				}
 			}
 
-			errlog('Sending initial ' . ($this->useDeepseek ? 'Deepseek' : 'OpenAI') . ' request...');
+			errlog('Sending initial ' . $this->aiProvider . ' request...');
 			try
 			{
 				$response = $this->openaiClient->chat()->create($data);
@@ -555,7 +565,7 @@ PROMPT;
 				continue;
 			}
 
-			errlog('Received initial ' . ($this->useDeepseek ? 'Deepseek' : 'OpenAI') . ' response...');
+			errlog('Received initial ' . $this->aiProvider . ' response...');
 
 			$returnedData = $response['choices'][0]['message']['content'];
 			$data = trim($returnedData);
@@ -566,7 +576,7 @@ PROMPT;
 			$valid = true;
 			if (json_last_error() != JSON_ERROR_NONE) {
 				$err = json_last_error_msg();
-				errlog("OpenAI returned invalid JSON:\nError: {$err}\nJSON: {$data}");
+				errlog("AI returned invalid JSON:\nError: {$err}\nJSON: {$data}");
 				$valid = false;
 			}
 
@@ -578,88 +588,97 @@ PROMPT;
 				$valid = $result->isValid();
 
 				if ($valid) {
-					errlog("OpenAI response passed schema validation");
+					errlog("AI response passed schema validation");
 				} else {
-					errlog("OpenAI response failed schema validation: " . $result->error()->message());
+					errlog("AI response failed schema validation: " . $result->error()->message());
 				}
 			}
 
 			if (!$valid) {
-				// Try and correct the JSON using openai
-				$messages = [
-					['role' => 'assistant', 'content' => $data],
-					['role' => 'user', 'content' => 'The JSON returned is invalid. Please correct it to match the schema.'],
-				];
+				$oldAiProvider = $this->aiProvider;
+				$oldAiModel = $this->aiModel;
+				try {
+					$this->aiProvider = 'openai';
+					$this->aiModel = 'o1-pro';
+					$this->openaiClient = $this->buildAiClient();
 
-				$data = [
-					'model' => $this->useDeepseek ? 'deepseek-chat' : 'gpt-4o-mini',
-					'messages' => $messages,
-//					'max_completion_tokens' => 16 * 1024,
-					'response_format' => [
-						'type' => 'json_object',//'json_schema',
-//						'json_schema' =>  [
-//							'name' => 'cal_response',
-//							'strict' => true,
-//							'schema' => $schema,
-//						],
-					],
-				];
+					// Try and correct the JSON using openai
+					$messages = [
+						['role' => 'assistant', 'content' => $data],
+						['role' => 'user', 'content' => 'The JSON returned is invalid. Please correct it to match the schema.'],
+					];
 
-				errlog("Retrying with OpenAI gpt-4o-mini to correct JSON...");
+					$data = [
+						'model' => $this->aiModel,
+						'messages' => $messages,
+						'response_format' => [
+							'type' => 'json_object',
+						],
+					];
 
-				$response = $this->openaiClient->chat()->create($data);
-				$returnedData = $response['choices'][0]['message']['content'];
-				$newData = trim($returnedData);
+					errlog("Retrying with {$this->aiProvider} to correct JSON...");
 
-				$ret = json_decode($newData, true, 512, JSON_INVALID_UTF8_IGNORE);
+					$response = $this->openaiClient->chat()->create($data);
+					$returnedData = $response['choices'][0]['message']['content'];
+					$newData = trim($returnedData);
 
-				$valid = true;
-				if (json_last_error() != JSON_ERROR_NONE) {
-					$err = json_last_error_msg();
-					errlog("OpenAI returned invalid JSON:\nError: {$err}\nJSON: {$data}");
-					$valid = false;
-				}
+					$ret = json_decode($newData, true, 512, JSON_INVALID_UTF8_IGNORE);
 
-				if ($valid) {
-					$validator = new \Opis\JsonSchema\Validator();
-					$validator->setMaxErrors(10);
-					$validator->setStopAtFirstError(false);
-					$result = $validator->validate((object)$ret, json_encode($schema));
-					$valid = $result->isValid();
+					$valid = true;
+					if (json_last_error() != JSON_ERROR_NONE) {
+						$err = json_last_error_msg();
+						errlog("AI returned invalid JSON:\nError: {$err}\nJSON: {$data}");
+						$valid = false;
+					}
+
+					if ($valid) {
+						$validator = new \Opis\JsonSchema\Validator();
+						$validator->setMaxErrors(10);
+						$validator->setStopAtFirstError(false);
+						$result = $validator->validate((object)$ret, json_encode($schema));
+						$valid = $result->isValid();
+
+						if (!$valid) {
+							errlog("AI response failed schema validation: " . $result->error()->message());
+						}
+					}
 
 					if (!$valid) {
-						errlog("OpenAI response failed schema validation: " . $result->error()->message());
-					}
-				}
+						if ($i < $retries - 1) {
+							errlog("AI returned invalid JSON a second time.., retrying whole operation...\n\nJSON: {$newData}");
+							continue;
+						}
 
-				if (!$valid) {
-					if ($i < $retries - 1) {
-						errlog("OpenAI returned invalid JSON a second time.., retrying whole operation...\n\nJSON: {$newData}");
-						continue;
+						http_response_code(500);
+						echo "<h1>AI returned invalid json:</h1>";
+						echo '<pre>';
+							echo htmlspecialchars($this->unescapeNewlines($returnedData));
+						echo '</pre>';
+						die;
 					}
-
-					http_response_code(500);
-					echo "<h1>Openai returned invalid json:</h1>";
-					echo '<pre>';
-						echo htmlspecialchars($this->unescapeNewlines($returnedData));
-					echo '</pre>';
-					die;
+				} finally {
+					$this->aiProvider = $oldAiProvider;
+					$this->aiModel = $oldAiModel;
+					$this->openaiClient = $this->buildAiClient();
 				}
 			}
-
-			if (empty($ret['success'])) {
+			
+			if (!empty($ret['success']) && $ret['success'] === false) {
 				if ($i < $retries - 1) {
-					errlog("OpenAI returned success = false with error message: {$ret['errorMessage']}\n\nJSON: {$data}");
+					errlog("AI returned success = false with error message: {$ret['errorMessage']}\n\nJSON: {$data}");
 					continue;
 				}
 
 				http_response_code(200);
-				echo "<h1>Openai returned error message:</h1>";
+				echo "<h1>AI returned error message:</h1>";
 				echo '<pre>';
 					echo htmlspecialchars($this->unescapeNewlines($returnedData));
 				echo '</pre>';
 				die;
 			}
+
+			// Clean up the ICS description
+			$ret['ICS'] = $this->cleanupIcsDescription($ret['ICS']);
 
 			try
 			{
@@ -696,6 +715,44 @@ PROMPT;
 		}
 
 		throw new Exception('should never reach here...');
+	}
+
+	private function cleanupIcsDescription($icsContent) {
+		$lines = explode("\n", $icsContent);
+		$output = [];
+		$inDescription = false;
+		$descriptionLines = [];
+
+		foreach ($lines as $line) {
+			if (strpos($line, 'DESCRIPTION:') === 0) {
+				$inDescription = true;
+				$output[] = $line;
+			} elseif ($inDescription && strpos($line, ' ') === 0) {
+				// This is a continuation line of the description
+				$descriptionLines[] = trim($line);
+			} elseif ($inDescription) {
+				// We've reached the end of the description
+				$inDescription = false;
+				// Clean up the description lines
+				$description = implode(' ', $descriptionLines);
+				$description = preg_replace('/\s+/', ' ', $description); // Replace multiple spaces with single space
+				
+				// Recursively replace multiple newlines until no more than 2 in a row
+				do {
+					$oldDescription = $description;
+					$description = str_replace('\\n\\n\\n', '\\n\\n', $description);
+				} while ($oldDescription !== $description);
+				
+				$description = trim($description);
+				// Add the cleaned description back
+				$output[] = 'DESCRIPTION:' . $description;
+				$output[] = $line;
+			} else {
+				$output[] = $line;
+			}
+		}
+
+		return implode("\n", $output);
 	}
 
 	private function updateIcsLocation($icsContent, $location) {
@@ -874,7 +931,7 @@ BODY;
 		// expressions, ...
 			->allowStaticElements()
 
-		// Allow the "div" element and no attribute can be on it
+		// Allow the "div" element, and no attribute can be on it
 			->allowElement('div')
 
 		// Allow the "a" element, and the "title" attribute to be on it
