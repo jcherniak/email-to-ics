@@ -130,12 +130,10 @@ class EmailProcessor
 
 		$downloadedText = $this->extractMainContent($downloadedText);
 
-//		$downloadedText = (new \Html2Text\Html2Text($downloadedText))->getText();
-
 		$combinedText = <<<TEXT
 {$url}
 
---- Text content fetched from URL above ---
+--- HTML content fetched from URL above ---
 {$downloadedText}
 TEXT;
 
@@ -212,7 +210,18 @@ HasBody:
 		$this->removeAttributes($body);
 		$this->removeEmptyElements($body);
 
+		$this->ensureUtf8($body);
+
 		return $body->innerHTML;
+	}
+
+	protected function ensureUtf8(\Dom\Element $body)
+	{
+		$body->textContent = mb_convert_encoding(
+			$body->textContent,
+			'UTF-8',
+			mb_detect_encoding($body->textContent)
+		);
 	}
 
 	/**
@@ -503,7 +512,7 @@ HasBody:
 			$curDate = date('m/d');
 			$nextYear = $curYear + 1;
 			$system = <<<PROMPT
-Create an iCal event from the following email text. Provide the ICS file content only. Do not add any comments or other information other than the contents of the ICS file.
+Create an iCal event from the following email text or downloaded HTML. Provide the ICS file content only. Do not add any comments or other information other than the contents of the ICS file.
 
 Assume the timezone is pacific time if not specified in the email. Based on the date, determine if it should be PST or PDT.
 
@@ -515,7 +524,7 @@ Include the entirety of email, as written, for the description of the event.
 
 PRODID should say "Email-to-ICS via {$this->aiProvider} by Justin".
 
-For a event title, generate a relevant one for this event. Don't use the subject of the original email, but provide a summary based on the content. For example a doctors appointment reminder should say "Dr. White Appointment". If it's a video appointment, say "Dr. White Video Appointment". For a concert ticket confirmation, it should say something like "SF Symphony Concert - beethoven, mozart".
+For the event title (SUMMARY field), generate a relevant one. Don't use the subject of the original email, but provide a summary based on the content. For example a doctors appointment reminder should say "Dr. White Appointment". If it's a video appointment, say "Dr. White Video Appointment". For a concert ticket confirmation, it should say something like "SF Symphony Concert - beethoven, mozart".
 
 If a date/time exists in the PDF attachment, use it. If no end-date is found, assume the event is 2 hours. If it's an opera, 3 hours. A doctor's appointment, 30 minutes.
 
@@ -550,13 +559,17 @@ For the ICS file, ensure it matches RFC5545. Specifically:
 
 If the content comes from Eventbrite, include the ticket link in the description, even at the expense of other details.
 
-IMPORTANT: If there are multiple events in the body, take the one that seems like the primary one.  For example, if there is text that says "Other events", then a series of dates below that, ignore that and find the date/time listed earlier on the page. If an event comes from a <section> with a class of "upcoming_events", then ignore it.
+# Multiple Events
+STRONGLY PREFER CREATING ONLY ONE VEVENT corresponding to the primary event described in the text.
+ONLY create multiple VEVENT blocks if the input text is clearly a schedule or list with NO single primary event (e.g., a multi-day conference schedule).
+IGNORE events found in sections explicitly labeled "Upcoming Events", "Other Events", "Related Events", or similar secondary listings, even if they have dates/times. Focus on the main content.
+If an event comes from a <section> with a class of "upcoming_events", ignore it completely.
 
 # Output Format
-- Combine all individual events into one .ics file.
-- Ensure the format adheres to the iCalendar standards for compatibility.
-- Ensure the .ics file can be imported into calendar applications like Google Calendar, Apple Calendar, or Microsoft Outlook.
-- Only include a single SUMMARY and DESCRIPTION field
+- The output ICS file should typically contain only one VEVENT block inside the VCALENDAR structure.  If there are multiple events, create one VEVENT per event and combine them into a single .ics file.
+- Ensure the format adheres to iCalendar standards (RFC5545).
+- Ensure the .ics file can be imported into standard calendar applications.
+- Each VEVENT block must have its own SUMMARY and DESCRIPTION fields.
 - Include a URL field if at all possible
 
 # Examples
@@ -577,11 +590,11 @@ END:VCALENDAR
 ```
 
 # Notes
-- Ensure `UID` values are unique across events.
+- Ensure `UID` values are unique for EACH VEVENT.
 - Update `DTSTAMP` with the current timestamp when generating the .ics file.
 - Check for any overlapping events and resolve any conflicts.
 - Ensure that all dates and times are formatted correctly, using `YYYYMMDDTHHMMSS` format where necessary.
-- ```SUMMARY``` should be concise and descriptive to easily convey the purpose of the event at a glance.
+- Each ```SUMMARY``` should be concise and descriptive for its respective event.
 - Even though non-standard, include a URL field.
 - No fields should contain native newlines. Use \\n instead. AKA ESCAPE NEWLINES INSIDE OF FIELDS.
 
@@ -589,8 +602,8 @@ Return a JSON object with 2 keys:
 - Success - whether the operation was successful or not. If false, include an error message.
 - ErrorMessage - if success is false, include an error message.
 - ICS - the ical file contents
-- EmailSubject - the title of the event, as specified above.
-- LocationLookup - location information that we can pass to the Google Places API to lookup. should be a string
+- EmailSubject - the title (SUMMARY) of the *first* or most prominent event in the ICS file.
+- LocationLookup - location information for the *first* or most prominent event that we can pass to the Google Places API to lookup. Should be a string.
 
 EXTREMELY IMPORTANT: the output must be JSON and match this schema EXACTLY!
 [
