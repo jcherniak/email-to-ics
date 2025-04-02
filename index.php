@@ -39,20 +39,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
 
 class EmailProcessor
 {
-    private $openaiApiKey;
+	private $openaiApiKey;
 	private $postmarkApiKey;
 
 	private $fromEmail;
 
 	private $inboundConfirmedEmail;
-	private $inboundTentativeEmail;
 	private $toTentativeEmail;
 	private $toConfirmedEmail;
-	private $errorEmail;
 
-    private $openaiClient;
-    private $httpClient;
-    private $logDir;
+	private $openaiClient;
+	private $httpClient;
 	private $googleMapsKey;
 
 	private $aiProvider;
@@ -66,12 +63,9 @@ class EmailProcessor
         $this->postmarkApiKey = $_ENV['POSTMARK_API_KEY'];
 		$this->fromEmail = $_ENV['FROM_EMAIL'];
 		$this->inboundConfirmedEmail = $_ENV['INBOUND_CONFIRMED_EMAIL'];
-		$this->inboundTentativeEmail = $_ENV['INBOUND_TENTATIVE_EMAIL'];
 		$this->toTentativeEmail = $_ENV['TO_TENTATIVE_EMAIL'];
 		$this->toConfirmedEmail = $_ENV['TO_CONFIRMED_EMAIL'];
-		$this->errorEmail = $_ENV['ERROR_EMAIL'];
 
-        $this->logDir = $_ENV['LOG_DIR'];
 		$this->googleMapsKey = $_ENV['GOOGLE_MAPS_API_KEY'];
 
 		$this->aiProvider = $_ENV['AI_PROVIDER'] ?? 'openai';
