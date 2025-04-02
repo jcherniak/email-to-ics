@@ -13,15 +13,21 @@ ignore_user_abort();
 ini_set('display_errors', 'On');
 ini_set('error_reporting', E_ALL & ~E_DEPRECATED);
 
-/** @SuppressWarnings(PHPMD.UnusedFormalParameter)*/
-function exception_error_handler(int $errno, string $errstr, ?string $errfile = null, ?int $errline = null, ?array $errcontext = null) {
-    if (!(error_reporting() & $errno)) {
-        // This error code is not included in error_reporting
-        return;
+if (
+	!function_exists('xdebug_is_debugger_active') ||
+	!xdebug_is_debugger_active()
+) {
+	/** @SuppressWarnings(PHPMD.UnusedFormalParameter)*/
+	function exception_error_handler(int $errno, string $errstr, ?string $errfile = null, ?int $errline = null, ?array $errcontext = null) {
+		if (!(error_reporting() & $errno)) {
+			// This error code is not included in error_reporting
+			return;
+		}
+		throw new \ErrorException($errstr, 0, $errno, $errfile, $errline);
 	}
-	throw new \ErrorException($errstr, 0, $errno, $errfile, $errline);
+
+	set_error_handler('exception_error_handler');
 }
-set_error_handler('exception_error_handler');
 
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
@@ -190,30 +196,156 @@ BODY;
 		// If the html contains a <main> element, extract and return it.
 		$doc = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
 
-		$xpath = new \Dom\XPath($doc);
-
+		$body = null;
 		$elems = ['main', 'article'];
 		foreach ($elems as $elem) {
-			$main = $xpath->query("//{$elem}")->item(0);
-			if ($main) {
-				return $doc->saveHTML($main);
+			$elements = $doc->getElementsByTagName($elem);
+			if ($elements->length > 0) {
+				$body = $this->removeNonTextTags($elements->item(0));
+				goto HasBody;
 			}
 		}
 
-		$classes = ['main', 'content', 'container', 'container-fluid', 'wrapper'];
-		foreach ($classes as $class) {
-			$main = $xpath->query("//*[contains(concat(' ', normalize-space(@class), ' '), ' {$class} ')]")->item(0);
-			if ($main) {
-				return $doc->saveHTML($main);
+		$bodies = $doc->getElementsByTagName('body');
+		if ($bodies->length > 0) {
+			$body = $this->removeNonTextTags($bodies->item(0));
+			goto HasBody;
+		}
+
+		$body = $this->removeNonTextTags($doc->documentElement);
+HasBody:
+
+		$this->removeAttributes($body);
+		$this->removeEmptyElements($body);
+
+		return $body->innerHTML;
+	}
+
+	/**
+	 * Removes non-text tags like svg, img, script, style, etc. from HTML content
+	 *
+	 * @param \Dom\Element $body The body element to clean
+	 * @return \Dom\Element The cleaned body element
+	 */
+	protected function removeNonTextTags(\Dom\Element $body) : \Dom\Element
+	{
+		// Tags to remove
+		$tagsToRemove = [
+			'svg', 
+			'img', 
+			'script', 
+			'style', 
+			'iframe', 
+			'video', 
+			'audio', 
+			'canvas',
+			'object',
+			'embed',
+			'noscript',
+			'map',
+			'button',
+			'select',
+			'option',
+			'form',
+			'input',
+			'textarea',
+			'progress',
+			'figure',
+			'figcaption',
+			'picture',
+			'source',
+			'link',
+			'meta',
+			'title',
+			'track',
+			'param',
+			'applet',
+			'area',
+			'base',
+			'col',
+			'command',
+			'dialog',
+			'frame',
+			'frameset',
+			'hr',
+			'wbr',
+			'slot',
+			'template',
+			'portal',
+		];
+		
+		// Remove each type of non-text element
+		foreach ($tagsToRemove as $tag) {
+			$elements = $body->getElementsByTagName($tag);
+			// We need to remove elements in reverse order because the NodeList is live
+			for ($i = $elements->length - 1; $i >= 0; $i--) {
+				$element = $elements->item($i);
+				$element->parentNode?->removeChild($element);
 			}
 		}
+		
+		return $body;
+	}
 
-		$body = $xpath->query("//body")->item(0);
-		if ($body) {
-			return $doc->saveHTML($body);
+	protected function removeAttributes(\Dom\Element $body)
+	{
+		// Define allowed attributes
+		$allowedAttributes = ['class', 'id', 'for'];
+		
+		// Recursively process all child nodes
+		$elements = $body->getElementsByTagName('*');
+		// Process in reverse order since the NodeList is live
+		for ($i = $elements->length - 1; $i >= 0; $i--) {
+			$element = $elements->item($i);
+			if ($element) {
+				// Remove all attributes except allowed ones
+				$attributes = $element->attributes;
+				if ($attributes) {
+					for ($j = $attributes->length - 1; $j >= 0; $j--) {
+						$attrName = $attributes->item($j)->name;
+						if (!in_array($attrName, $allowedAttributes)) {
+							$element->removeAttribute($attrName);
+						} elseif ($attrName === 'class') {
+							// Remove jsx- classes
+							$classes = explode(' ', $element->getAttribute('class'));
+							$filteredClasses = array_filter($classes, function($class) {
+								return strpos($class, 'jsx-') !== 0;
+							});
+							$element->setAttribute('class', implode(' ', $filteredClasses));
+						}
+					}
+				}
+			}
 		}
+		
+		// Also remove attributes from the body element itself except allowed ones
+		$attributes = $body->attributes;
+		if ($attributes) {
+			for ($j = $attributes->length - 1; $j >= 0; $j--) {
+				$attrName = $attributes->item($j)->name;
+				if (!in_array($attrName, $allowedAttributes)) {
+					$body->removeAttribute($attrName);
+				} elseif ($attrName === 'class') {
+					// Remove jsx- classes from body element
+					$classes = explode(' ', $body->getAttribute('class'));
+					$filteredClasses = array_filter($classes, function($class) {
+						return strpos($class, 'jsx-') !== 0;
+					});
+					$body->setAttribute('class', implode(' ', $filteredClasses));
+				}
+			}
+		}
+	}
 
-		return $html;
+	protected function removeEmptyElements(\Dom\Element $body)
+	{
+		$elements = $body->getElementsByTagName('*');
+		for ($i = $elements->length - 1; $i >= 0; $i--) {
+			$element = $elements->item($i);
+			if ($element->childNodes->length === 0 && $element->textContent === '') {
+				$element->parentNode?->removeChild($element);
+			}
+		}
 	}
 
 	protected function unescapeNewlines($str)
@@ -1111,6 +1243,12 @@ HTML;
 
 $dotenv = Dotenv::createImmutable(__DIR__);
 $dotenv->load();
+
+if (function_exists('xdebug_is_debugger_active') && xdebug_is_debugger_active()) {
+	$page = new WebPage();
+	$page->handleRequest();
+	exit;
+}
 
 ob_start();
 try {
