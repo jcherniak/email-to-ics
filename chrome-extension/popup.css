@@ -5,6 +5,12 @@ body {
     min-height: 150px;
     padding: 10px;
     font-size: 14px;
+    transition: min-height 0.2s ease-in-out; /* Add transition for smoother size change */
+}
+
+/* Make popup taller when error is shown */
+body.error-state {
+    min-height: 300px; /* Increased min-height */
 }
 
 #container {
@@ -35,6 +41,8 @@ body {
 #status.error {
     background-color: #f8d7da;
     color: #721c24;
+    /* Optionally make status div itself take more space */
+    /* min-height: 150px; */ 
 }
 
 .hidden {
@@ -153,7 +161,10 @@ h3 {
 
 iframe.error-frame {
      width: 100%;
-     height: 80px;
+     /* height: 80px; */ /* Remove fixed height */
+     min-height: 100px; /* Set a minimum height */
+     max-height: 200px; /* Allow it to grow, but cap it */
+     height: auto;      /* Let content determine height up to max */
      border: none;
      margin-top: 10px;
 }

@@ -411,6 +411,19 @@ function showForm(preferences = {}) {
     statusDiv.className = 'hidden';
     contentDiv.style.display = 'block';
 
+    // Check for instructions passed from the context menu
+    chrome.storage.local.get(['contextMenuInstructions'], (result) => {
+        if (result.contextMenuInstructions) {
+            const instructionsTextArea = document.getElementById('instructions');
+            if (instructionsTextArea) {
+                console.log("Populating instructions from context menu:", result.contextMenuInstructions);
+                instructionsTextArea.value = result.contextMenuInstructions;
+            }
+            // Clear the stored instruction so it's not reused
+            chrome.storage.local.remove('contextMenuInstructions');
+        }
+    });
+
     // Store selected model from dropdown
     const modelSelect = document.getElementById('model');
     if (modelSelect) {
@@ -442,13 +455,37 @@ function showForm(preferences = {}) {
     document.getElementById('ics-form').addEventListener('submit', handleSubmit);
     document.getElementById('config-button').addEventListener('click', () => showCredentialsForm());
     document.getElementById('logout-button').addEventListener('click', logout);
+
+    // --- BEGIN ADDED CODE for Cmd/Ctrl+Enter ---
+    const instructionsTextarea = document.getElementById('instructions');
+    if (instructionsTextarea) {
+        instructionsTextarea.addEventListener('keydown', (event) => {
+            // Check for Cmd+Enter or Ctrl+Enter
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault(); // Prevent adding a newline
+                console.log("Cmd/Ctrl+Enter detected, submitting form.");
+                // Find the form and trigger the submit handler
+                // Note: We pass null instead of the event because handleSubmit expects
+                //       an optional event from the form submit, not the keydown event.
+                handleSubmit(null); 
+            }
+        });
+    }
+    // --- END ADDED CODE ---
 }
 
-// Modify showStatus to add Retry button always
+// Modify showStatus to add Retry button always and manage body class
 function showStatus(type, messageHtml) {
     statusDiv.innerHTML = messageHtml;
     statusDiv.className = type; 
     contentDiv.style.display = 'none'; 
+
+    // Add/remove error class to body for sizing
+    if (type === 'error') {
+        document.body.classList.add('error-state');
+    } else {
+        document.body.classList.remove('error-state');
+    }
 
     // Always add a retry button if there are params to retry with
     // (and remove any existing one first to avoid duplicates)
@@ -456,28 +493,32 @@ function showStatus(type, messageHtml) {
     if (existingRetryButton) {
         existingRetryButton.remove();
     }
+    
+    // Create button container
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.marginTop = '10px'; // Add space above buttons
 
     // Only add retry if there's something to retry
     if (lastSubmitParams) { 
         const retryButton = document.createElement('button');
         retryButton.textContent = 'Retry Last Submission';
         retryButton.id = 'retry-button';
-        retryButton.style.marginTop = '10px';
         retryButton.style.marginRight = '5px'; // Add some space
         retryButton.addEventListener('click', handleRetry);
-        // Prepend the button so it appears above potential error details
-        statusDiv.prepend(retryButton); 
+        buttonContainer.appendChild(retryButton); // Append to container
     }
 
     // Add a button to go back to the form
     const backButton = document.createElement('button');
     backButton.textContent = 'New Request';
-    backButton.style.marginTop = '10px';
     backButton.addEventListener('click', () => {
         lastSubmitParams = null; // Clear retry state when going back
         init(); // Re-initialize to show the form
     });
-    statusDiv.appendChild(backButton);
+    buttonContainer.appendChild(backButton);
+
+    // Append the container with buttons to the status div
+    statusDiv.appendChild(buttonContainer);
 
     /* Original logic for adding button only on error:
     if (type === 'error') {
@@ -576,9 +617,10 @@ async function executeSubmit(params) {
              if (!pageScreenshot) {
                 console.warn("Visible tab screenshot capture failed or was skipped, proceeding without it.");
                 showStatus('generating', `Screenshot failed. Generating ICS... <span id="spinner"></span>`);
-             } else {
-                 showStatus('generating', `Screenshot captured. Generating ICS... <span id="spinner"></span>`);
-             }
+             } 
+        } else {
+            // If not taking screenshot, ensure status is updated before sending
+             showStatus('generating', `Generating ICS... <span id="spinner"></span>`);
         }
 
         // Prepare request body (URLSearchParams)
@@ -596,6 +638,9 @@ async function executeSubmit(params) {
         if (includeScreenshot && pageScreenshot) {
             body.append('screenshot', pageScreenshot.split(',')[1]);
         }
+
+        // --> ADDED: Update status before sending the request <--
+        showStatus('generating', `Sending request, waiting for response... <span id="spinner"></span>`);
 
         requestBody = {
             method: 'POST',

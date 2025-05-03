@@ -5,14 +5,23 @@ error_log('Script started at ' . date('Y-m-d H:i:s'));
 require 'vendor/autoload.php';
 error_log('Autoloader loaded');
 
-use GuzzleHttp\Client;
+// Load environment variables early
 use Dotenv\Dotenv;
+$dotenv = Dotenv::createImmutable(__DIR__);
+$dotenv->load();
+error_log('Dotenv loaded'); // Add log to confirm loading
+
+use GuzzleHttp\Client;
 use OpenAI\Exceptions\UnserializableResponse;
 use Spatie\PdfToText\Pdf;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizerConfig;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
 use ICal\ICal;
 use Opis\JsonSchema\Errors\ValidationError;
+
+// Define cache settings
+define('MODEL_CACHE_FILE', __DIR__ . '/.models_cache.json');
+define('MODEL_CACHE_DURATION', 7 * 24 * 60 * 60); // 7 days in seconds
 
 ignore_user_abort();
 ini_set('display_errors', 'On');
@@ -55,7 +64,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
 
 class EmailProcessor
 {
-	private $openaiApiKey;
 	private $postmarkApiKey;
 
 	private $fromEmail;
@@ -68,44 +76,16 @@ class EmailProcessor
 	private $httpClient;
 	private $googleMapsKey;
 
-	private $aiProvider;
 	private $aiModel;
-	private $deepseekApiKey;
-	private $anthropicKey;
-	
-	// Available AI models with capabilities
-	public static $availableModels = [
-		'openai' => [
-			'models' => [
-				'o4-mini' => [
-					'name' => 'OpenAI Mini (o4-mini)',
-					'description' => 'Good balance of speed and accuracy',
-					'vision_capable' => true,
-					'default' => true
-				],
-				'o3' => [
-					'name' => 'OpenAI o3',
-					'description' => 'Highest accuracy, best for complex events',
-					'vision_capable' => true,
-					'default' => false
-				]
-			]
-		],
-		'anthropic' => [
-			'models' => [
-				'claude-3-7-sonnet-20250219' => [
-					'name' => 'Claude 3.7 Sonnet',
-					'description' => 'Most capable Claude model',
-					'vision_capable' => true,
-					'default' => true
-				],
-			]
-		]
-	];
+	private $openRouterKey;
+	private $maxTokens = 20000;
+
+	// Available models will be loaded dynamically
+	private $availableModels = [];
 
     public function __construct()
     {
-        $this->openaiApiKey = $_ENV['OPENAI_API_KEY'];
+        $this->openRouterKey = $_ENV['OPENROUTER_KEY'];
         $this->postmarkApiKey = $_ENV['POSTMARK_API_KEY'];
 		$this->fromEmail = $_ENV['FROM_EMAIL'];
 		$this->inboundConfirmedEmail = $_ENV['INBOUND_CONFIRMED_EMAIL'];
@@ -114,10 +94,19 @@ class EmailProcessor
 
 		$this->googleMapsKey = $_ENV['GOOGLE_MAPS_API_KEY'];
 
-		$this->aiProvider = $_ENV['AI_PROVIDER'] ?? 'openai';
-		$this->aiModel = $_ENV['AI_MODEL'] ?? 'o3-mini';
-		$this->deepseekApiKey = $_ENV['DEEPSEEK_API_KEY'] ?? null;
-		$this->anthropicKey = $_ENV['ANTHROPIC_KEY'] ?? null;
+		// Load models (from cache or API)
+		$this->availableModels = $this->loadAvailableModels();
+
+		// Set default model based on loaded models
+		$this->aiModel = $this->getDefaultModelId();
+		// Allow overriding default via environment variable if needed
+		if (isset($_ENV['AI_MODEL']) && isset($this->availableModels[$_ENV['AI_MODEL']])) {
+			$this->aiModel = $_ENV['AI_MODEL'];
+		}
+
+		if (isset($_ENV['MAX_TOKENS'])) {
+			$this->maxTokens = $_ENV['MAX_TOKENS'];
+		}
 
 		$this->openaiClient = $this->buildAiClient();
 		$this->httpClient = new Client([
@@ -130,28 +119,123 @@ class EmailProcessor
         ]);
 	}
 
+	/**
+	 * Initialize the AI client connection to OpenRouter
+	 * 
+	 * @return \OpenAI\Client OpenAI client configured for OpenRouter
+	 */
 	private function buildAiClient()
 	{
 		$factory = OpenAI::factory();
 
-		switch ($this->aiProvider) {
-			case 'deepseek':
-				$factory->withBaseUri('https://api.deepseek.com/v1');
-				$factory->withApiKey($this->deepseekApiKey);
-				break;
-			case 'anthropic':
-				$factory->withBaseUri('https://api.anthropic.com/v1');
-				$factory->withApiKey($this->anthropicKey);
-				break;
-			case 'openai':
-			default:
-				$factory->withApiKey($this->openaiApiKey);
-				break;
-		}
+		// Configure for OpenRouter API 
+		$factory->withBaseUri('https://openrouter.ai/api/v1'); // Point to OpenRouter API endpoint
+		$factory->withApiKey($this->openRouterKey); // Use OpenRouter key instead of OpenAI key
+		// Add recommended headers for OpenRouter
+		// $factory->withHttpHeader('HTTP-Referer', $_ENV['SITE_URL'] ?? 'https://example.com'); // Removed - Optional/potentially sensitive
+		$factory->withHttpHeader('X-Title', $_ENV['APP_TITLE'] ?? 'Email-to-ICS'); // Help identify app in OpenRouter logs
 
 		return $factory->make();
 	}
 
+	/**
+	 * Load available models, using cache if available and valid.
+	 * Fetches from OpenRouter API if cache is invalid or missing.
+	 * 
+	 * @return array Associative array of models keyed by ID.
+	 */
+	public function loadAvailableModels(): array
+	{
+		if (file_exists(MODEL_CACHE_FILE)) {
+			try {
+				$cacheContent = file_get_contents(MODEL_CACHE_FILE);
+				$cachedData = json_decode($cacheContent, true);
+
+				if (json_last_error() === JSON_ERROR_NONE && isset($cachedData['timestamp']) && (time() - $cachedData['timestamp'] < MODEL_CACHE_DURATION)) {
+					errlog("Loading models from valid cache.");
+					unset($cachedData['timestamp']); // Don't return timestamp with model data
+					return $cachedData['models'] ?? [];
+				} else {
+					errlog("Model cache is invalid or expired.");
+				}
+			} catch (\Throwable $e) {
+				errlog("Error reading model cache file: " . $e->getMessage());
+				// Proceed to fetch from API
+			}
+		}
+
+		errlog("Fetching available models from OpenRouter API...");
+		try {
+			// Use a separate Guzzle client for this, as httpClient is for Postmark
+			$apiClient = new Client();
+			$response = $apiClient->get('https://openrouter.ai/api/v1/models');
+
+			if ($response->getStatusCode() !== 200) {
+				$errorMsg = "Failed to fetch models from OpenRouter API. Status code: " . $response->getStatusCode();
+				errlog($errorMsg);
+				throw new \RuntimeException($errorMsg);
+			}
+
+			$apiData = json_decode($response->getBody()->getContents(), true);
+
+			if (json_last_error() !== JSON_ERROR_NONE || !isset($apiData['data']) || !is_array($apiData['data'])) {
+				$errorMsg = "Invalid JSON response from OpenRouter models API.";
+				errlog($errorMsg);
+				throw new \RuntimeException($errorMsg);
+			}
+
+			$parsedModels = [];
+			foreach ($apiData['data'] as $model) {
+				if (empty($model['id'])) continue; // Skip models without an ID
+
+				$supportsVision = false;
+				if (isset($model['architecture']['input_modalities']) && is_array($model['architecture']['input_modalities'])) {
+					$supportsVision = in_array('image', $model['architecture']['input_modalities']);
+				} elseif (isset($model['architecture']['modality']) && str_contains($model['architecture']['modality'], '+image')) {
+					$supportsVision = true;
+				}
+
+				$parsedModels[$model['id']] = [
+					'name' => $model['name'] ?? $model['id'],
+					'description' => $model['description'] ?? 'No description available.',
+					'vision_capable' => $supportsVision,
+					// 'default' will be determined later based on a preferred list or first model
+				];
+			}
+
+			// Cache the result
+			$cacheData = [
+				'timestamp' => time(),
+				'models' => $parsedModels,
+			];
+			try {
+				file_put_contents(MODEL_CACHE_FILE, json_encode($cacheData, JSON_PRETTY_PRINT));
+				errlog("Successfully cached models to " . MODEL_CACHE_FILE);
+			} catch (\Throwable $e) {
+				errlog("Error writing model cache file: " . $e->getMessage());
+			}
+
+			return $parsedModels;
+
+		} catch (\Throwable $e) {
+			errlog("Error fetching or processing models from OpenRouter API: " . $e->getMessage());
+			// Re-throw the exception instead of returning a fallback
+			throw new \RuntimeException("Failed to load models from OpenRouter API: " . $e->getMessage(), 0, $e);
+		}
+	}
+
+    /**
+     * Process a URL to generate an iCal event based on its content
+     * 
+     * @param string $url The URL to process
+     * @param string $downloadedText Pre-downloaded text (optional)
+     * @param string $display How to handle the output ('download', 'display', or 'email')
+     * @param bool $tentative Whether to mark the event as tentative
+     * @param string|null $instructions Additional instructions for the AI
+     * @param string|null $screenshot Base64-encoded screenshot (optional)
+     * @param string|null $requestedModel Specific AI model to use (optional)
+     * @return void
+     */
 	public function processUrl($url, $downloadedText, $display, $tentative = true, $instructions = null, $screenshot = null, $requestedModel = null)
 	{
 		if (empty(trim($downloadedText))) {
@@ -175,11 +259,13 @@ class EmailProcessor
 		}
 
 		// If a specific model was requested, check if it's valid and override the default
-		if ($requestedModel && $this->isValidModel($requestedModel)) {
-			list($provider, $model) = $this->parseModelString($requestedModel);
-			$this->aiProvider = $provider;
-			$this->aiModel = $model;
-			errlog("Using requested model: {$provider}:{$model}");
+		if ($requestedModel && isset($this->availableModels[$requestedModel])) {
+			$this->aiModel = $requestedModel;
+			errlog("Using requested model: {$this->aiModel}");
+		} else {
+			// Ensure a valid default model is set if the requested one is invalid
+			$this->aiModel = $this->getDefaultModelId();
+			errlog("Requested model '{$requestedModel}' invalid or not provided. Using default model: {$this->aiModel}");
 		}
 
 		$downloadedText = $this->extractMainContent($downloadedText);
@@ -556,6 +642,16 @@ HasBody:
         return null;
     }
 
+    /**
+     * Generate an ICS calendar event from text content
+     * 
+     * Uses AI to extract event details from text and generate a structured calendar event
+     * 
+     * @param string $combinedText Text content to process
+     * @param string|null $instructions Additional instructions for the AI
+     * @param string|null $screenshot Base64-encoded screenshot for vision models
+     * @return array Array containing ICS content and metadata
+     */
     private function generateIcalEvent($combinedText, $instructions = null, $screenshot = null)
 	{
 		// Define the NEW schema for structured event data
@@ -582,7 +678,7 @@ HasBody:
 			'properties' => [
 				'success' => ['type' => 'boolean'],
 				'errorMessage' => ['type' => 'string'],
-				'eventData' => $eventSchema, // Embed the event schema here
+				'eventData' => $eventSchema,
 				'emailSubject' => ['type' => 'string', 'description' => 'The generated summary, used for the email subject line.'],
 				'locationLookup' => ['type' => 'string', 'description' => 'Location string for Google Maps lookup.'],
 			],
@@ -590,14 +686,11 @@ HasBody:
 			'additionalProperties' => false,
 		];
 
+		$curYear = date('Y');
+		$curDate = date('m/d');
+		$nextYear = $curYear + 1;
 
-		$retries = $_ENV['OPENAI_RETRIES'];
-		for ($i = 0; $i < $retries; $i++) {
-			$curYear = date('Y');
-			$curDate = date('m/d');
-			$nextYear = $curYear + 1;
-			// Modify the prompt to request the new JSON structure
-			$system = <<<PROMPT
+		$system = <<<PROMPT
 Create calendar event data from the following email text or downloaded HTML.
 
 # PRIMARY EVENT IDENTIFICATION - READ THIS FIRST
@@ -708,15 +801,15 @@ PROMPT;
 
 			$messages = [
 				[
-					'role' => ($this->aiProvider === 'deepseek' ? 'user' : 'system'),
+					'role' => 'system',
 					'content' => $system
 				],
-            ];
+			];
 
 			if ($instructions) {
 				$messages[] = [
-					'role' => ($this->aiProvider === 'deepseek' ? 'user' : 'system'),
-					'content' => "Additional instructions: " . $instructions
+					'role' => 'system',
+					'content' => "*** EXTREMELY IMPORTANT INSTRUCTIONS ***\n" . $instructions
 				];
 			}
 
@@ -724,228 +817,130 @@ PROMPT;
 			$hasScreenshot = !empty($screenshot);
 			$modelSupportsVision = $this->doesModelSupportVision();
 			
-			// Create the content message considering screenshot support
-			$userMessage = [
-				'role' => 'user'
+			$userContent = [];
+			$userContent[] = [
+				'type' => 'text',
+				'text' => $combinedText
 			];
-			
+
 			if ($hasScreenshot && $modelSupportsVision) {
-				$userMessage['content'] = [
-					[
-						'type' => 'text',
-						'text' => $combinedText
-					],
-					[
-						'type' => 'image_url',
-						'image_url' => [
-							'url' => 'data:image/jpeg;base64,' . $screenshot,
-							'detail' => 'high'
-						]
+				errlog("Adding screenshot to request for vision model {$this->aiModel}");
+				$userContent[] = [
+					'type' => 'image_url',
+					'image_url' => [
+						'url' => 'data:image/jpeg;base64,' . $screenshot,
 					]
 				];
-			} else {
-				$userMessage['content'] = $combinedText;
+			} elseif ($hasScreenshot && !$modelSupportsVision) {
+				errlog("Screenshot provided but model {$this->aiModel} does not support vision. Ignoring screenshot.");
 			}
-			
-			$messages[] = $userMessage;
+
+			$messages[] = [
+				'role' => 'user',
+				'content' => $userContent
+			];
 
 			$data = [
 				'model' => $this->aiModel,
 				'messages' => $messages,
-			];
-
-			if ($this->aiProvider === 'deepseek') {
-				$data['max_tokens'] = 8 * 1024;
-				$data['messages'] = [
-					[
-						'role' => 'user',
-						'content' => implode("\n\n", array_map(
-							fn($msg) => $msg['content'],
-							$messages
-						)),
-					]
-				];
-				$data['temperature'] = 0.25;
-			} else {
-				$data['max_completion_tokens'] = 16 * 1024;
-				// Ensure the response_format uses the $responseSchema
-				$data['response_format'] = [
+				'response_format' => [
 					'type' => 'json_schema',
 					'json_schema' =>  [
 						'name' => 'cal_response_structured',
 						'strict' => true,
-						'schema' => $responseSchema, // Use the new schema
+						'schema' => $responseSchema,
 					],
-				];
+				],
+				'reasoning' => [
+					'effort' => 'high'
+				],
+				'max_tokens' => $this->maxTokens,
+			];
 
-				if ($this->aiProvider === 'anthropic') {
-					$data['thinking'] = [
-						'type' => 'enabled',
-						'budget_tokens' => 4000,
-					];
-				}
-
-				if ($this->aiProvider === 'openai' && strpos($this->aiModel, 'o') === 0) {
-					$data['reasoning_effort'] = 'high';
-				}
-			}
-
-			errlog('Sending initial ' . $this->aiProvider . ' request...');
+			errlog('Sending OpenRouter request to model: ' . $this->aiModel);
 			try
 			{
 				$response = $this->openaiClient->chat()->create($data);
 			}
 			catch (UnserializableResponse $e)
 			{
-				errlog("UnserializableResponse: " . $e->getMessage());
-				continue;
+				errlog("OpenRouter UnserializableResponse: " . $e->getMessage());
+				http_response_code(500);
+				echo "<h1>Error communicating with AI Provider</h1><p>Could not decode the response.</p>";
+				echo '<pre>' . htmlspecialchars($e->getMessage()) . '</pre>';
+				die;
+			}
+			catch (\OpenAI\Exceptions\ErrorException $e) {
+				errlog("OpenRouter API Error: " . $e->getMessage());
+				http_response_code(500);
+				echo "<h1>Error communicating with AI Provider</h1>";
+				echo '<p>Details: ' . htmlspecialchars($e->getMessage()) . '</p>';
+				die;
+			}
+			catch (\Throwable $e) {
+				errlog("General Error during OpenRouter request: " . $e->getMessage());
+				throw $e;
 			}
 
-			errlog('Received initial ' . $this->aiProvider . ' response...');
+			errlog('Received OpenRouter response.');
 
 			$returnedData = $response['choices'][0]['message']['content'];
-			$data = trim($returnedData);
+			// $jsonData = trim($returnedData); // Old simple trim
 
-			$data = str_replace(['```json', '```'], '', $data);
-			$ret = json_decode($data, true, 512, JSON_INVALID_UTF8_IGNORE);
+			// Use regex to extract JSON block, handling potential markdown fences and surrounding text
+			$jsonData = null;
+			if (preg_match('/```json\s*({.*?})\s*```/is', $returnedData, $matches)) {
+				$jsonData = $matches[1];
+				errlog("Extracted JSON using ```json fences.");
+			} elseif (preg_match('/({\s*"success":.*?})/is', $returnedData, $matches)) {
+				// Fallback: Try to find the JSON object directly if no fences are present
+				// This regex looks for the start of our expected structure {"success":...
+				$jsonData = $matches[1];
+				errlog("Extracted JSON using direct object match.");
+			} else {
+				// If no JSON block found, use the trimmed data as a last resort (might still fail)
+				errlog("Could not extract JSON block reliably, using trimmed response.");
+				$jsonData = trim($returnedData);
+			}
 
-			$valid = true;
+			// Basic JSON decoding, rely on response_format for structure
+			$ret = json_decode($jsonData, true, 512, JSON_INVALID_UTF8_IGNORE);
+
 			if (json_last_error() != JSON_ERROR_NONE) {
 				$err = json_last_error_msg();
-				errlog("AI returned invalid JSON:\nError: {$err}\nJSON: {$data}");
-				$valid = false;
-			}
-
-			if ($valid) {
-				$validator = new \Opis\JsonSchema\Validator();
-				$validator->setMaxErrors(10);
-				$validator->setStopAtFirstError(false);
-				// Validate against new schema
-				$result = $validator->validate((object)$ret, json_encode($responseSchema));
-				$validationError = $result->error(); // Get error object or null
-				$valid = $result->isValid();
-
-				if ($valid) {
-					errlog("AI response passed schema validation");
-				} else {
-					function_exists('xdebug_break') && xdebug_break();
-					if ($validationError) { // Check if error object exists
-						$this->handleValidationError($validationError, $ret, $responseSchema);
-					} else {
-						// Handle case where validation fails but no error object is returned (less common)
-						errlog("AI response failed initial schema validation (no specific error object returned). Failing JSON: " . $data);
-					}
-				}
-			}
-
-			if (false && !$valid) {
-				$oldAiProvider = $this->aiProvider;
-				$oldAiModel = $this->aiModel;
-				try {
-					$this->aiProvider = 'openai';
-					$this->aiModel = 'o1-pro';
-					$this->openaiClient = $this->buildAiClient();
-
-					// Try and correct the JSON using openai
-					$messages = [
-						['role' => 'assistant', 'content' => $data],
-						['role' => 'user', 'content' => 'The JSON returned is invalid. Please correct it to match the schema.'],
-					];
-
-					$data = [
-						'model' => $this->aiModel,
-						'messages' => $messages,
-						'response_format' => [
-							'type' => 'json_object',
-						],
-					];
-
-					errlog("Retrying with {$this->aiProvider} to correct JSON...");
-
-					$response = $this->openaiClient->chat()->create($data);
-					$returnedData = $response['choices'][0]['message']['content'];
-					$newData = trim($returnedData);
-
-					$ret = json_decode($newData, true, 512, JSON_INVALID_UTF8_IGNORE);
-
-					$valid = true;
-					if (json_last_error() != JSON_ERROR_NONE) {
-						$err = json_last_error_msg();
-						errlog("AI returned invalid JSON:\nError: {$err}\nJSON: {$data}");
-						$valid = false;
-					}
-
-					if ($valid) {
-						$validator = new \Opis\JsonSchema\Validator();
-						$validator->setMaxErrors(10);
-						$validator->setStopAtFirstError(false);
-						$result = $validator->validate((object)$ret, json_encode($responseSchema));
-						$valid = $result->isValid();
-
-						if (!$valid) {
-						}
-					}
-
-					if (!$valid) {
-						if ($i < $retries - 1) {
-							errlog("AI returned invalid JSON a second time.., retrying whole operation...\n\nJSON: {$newData}");
-							continue;
-						}
-
-						http_response_code(500);
-						echo "<h1>AI returned invalid json:</h1>";
-						echo '<pre>';
-							echo htmlspecialchars($this->unescapeNewlines($returnedData));
-						echo '</pre>';
-						die;
-					}
-				} finally {
-					$this->aiProvider = $oldAiProvider;
-					$this->aiModel = $oldAiModel;
-					$this->openaiClient = $this->buildAiClient();
-				}
-			}
-			
-			if (!empty($ret['success']) && $ret['success'] === false) {
-				if ($i < $retries - 1) {
-					errlog("AI returned success = false with error message: {$ret['errorMessage']}\n\nJSON: {$data}");
-					continue;
-				}
-
-				http_response_code(200);
-				echo "<h1>AI returned error message:</h1>";
-				echo '<pre>';
-					echo htmlspecialchars($this->unescapeNewlines($returnedData));
-				echo '</pre>';
-				die;
-			}
-
-			// **** ADDED CHECKS (Adjust for new structure) ****
-			if (empty($ret['eventData'] ?? null) || empty(trim($ret['eventData']['summary'] ?? ''))) {
-				errlog("AI returned empty event data or summary. Retrying... Attempt " . ($i + 1) . "/" . $retries);
-				if ($i < $retries - 1) continue;
+				errlog("AI returned invalid JSON despite requesting JSON format:\nError: {$err}\nRaw Response: {$jsonData}");
 				http_response_code(500);
-				echo "<h1>AI failed to generate event data after {$retries} attempts.</h1>";
-				echo '<pre>' . htmlspecialchars($data) . '</pre>';
+				echo "<h1>AI did not return valid JSON</h1>";
+				echo '<p>Error: ' . htmlspecialchars($err) . '</p>';
+				echo '<pre>' . htmlspecialchars($this->unescapeNewlines($jsonData)) . '</pre>';
 				die;
 			}
-            // EmailSubject check remains the same
-			if (empty(trim($ret['emailSubject'] ?? ''))) {
-				errlog("AI returned empty EmailSubject. Retrying... Attempt " . ($i + 1) . "/" . $retries);
-				if ($i < $retries - 1) continue; // Retry if not the last attempt
-				// If last attempt, fall through to throw error outside loop
+
+			if (isset($ret['success']) && $ret['success'] === false) {
+				$errorMessage = $ret['errorMessage'] ?? 'AI indicated failure with no specific message.';
+				errlog("AI returned success = false: {$errorMessage}\nJSON: {$jsonData}");
 				http_response_code(500);
-				echo "<h1>AI failed to generate EmailSubject after {$retries} attempts.</h1>";
-				echo '<pre>' . htmlspecialchars($data) . '</pre>';
+				echo "<h1>AI Processing Error</h1>";
+				echo '<p>' . htmlspecialchars($errorMessage) . '</p>';
+				echo '<pre>' . htmlspecialchars($this->unescapeNewlines($jsonData)) . '</pre>';
 				die;
 			}
-			// **** END ADDED CHECKS ****
 
+			if (empty($ret['eventData']['summary'] ?? null)) {
+				errlog("AI response missing required 'eventData.summary'. JSON: {$jsonData}");
+				http_response_code(500);
+				echo "<h1>AI response missing required event summary.</h1>";
+				echo '<pre>' . htmlspecialchars($jsonData) . '</pre>';
+				die;
+			}
+			if (empty($ret['emailSubject'] ?? null)) {
+				errlog("AI response missing required 'emailSubject'. JSON: {$jsonData}");
+				http_response_code(500);
+				echo "<h1>AI response missing required email subject.</h1>";
+				echo '<pre>' . htmlspecialchars($jsonData) . '</pre>';
+				die;
+			}
 
-			// Clean up the ICS description - This is less relevant now, but keep for potential folding issues if needed
-			// $ret['ICS'] = $this->cleanupIcsDescription($ret['ICS']); // Commented out
-
-            // Update location in the JSON structure before generating ICS
 			if (!empty($ret['locationLookup'])) {
 				try {
 					$place = $this->getGoogleMapsLink($ret['locationLookup']);
@@ -960,20 +955,11 @@ PROMPT;
 			}
 
 			$icsString = $this->convertJsonToIcs($ret['eventData']);
-			// Validate the generated ICS string
-			$tempFile = tempnam(sys_get_temp_dir(), 'ical-ai-');
-			file_put_contents($tempFile, $icsString);
-			new ICal($tempFile); // Use the parser to validate
-			unlink($tempFile);
-
-			// Replace the structured data with the generated ICS string for downstream use
+			
 			$ret['ICS'] = $icsString;
-			unset($ret['eventData']); // Remove the structured data
+			unset($ret['eventData']);
 
-			return $ret; // Return the structure containing 'ICS', 'emailSubject', etc.
-		}
-
-		throw new Exception('should never reach here...');
+			return $ret;
 	}
 
     /**
@@ -985,12 +971,11 @@ PROMPT;
      */
     private function convertJsonToIcs(array $eventData): string
     {
-        $uid = date('Ymd-His') . '@calendar.postmark.justin-c.com'; // Generate UID
-        $dtstamp = gmdate('Ymd\THis\Z'); // Current UTC timestamp
+        $uid = date('Ymd-His') . '@calendar.postmark.justin-c.com';
+        $dtstamp = gmdate('Ymd\THis\Z');
 
-        $tzid = $eventData['timezone'] ?? 'America/Los_Angeles'; // Default timezone
+        $tzid = $eventData['timezone'] ?? 'America/Los_Angeles';
 
-        // Basic validation
         if (empty($eventData['summary']) || empty($eventData['dtstart']) || empty($tzid)) {
             throw new Exception('Missing required event data for ICS conversion (summary, dtstart, timezone).');
         }
@@ -1039,8 +1024,7 @@ PROMPT;
         $icsLines = [
             "BEGIN:VCALENDAR",
             "VERSION:2.0",
-            "PRODID:-//Email-to-ICS via {$this->aiProvider} by Justin//NONSGML//EN",
-            // TODO: Consider adding VTIMEZONE component if needed for broader compatibility, though TZID often suffices
+            "PRODID:-//Email-to-ICS via OpenRouter by Justin//NONSGML//EN",
             "BEGIN:VEVENT",
             "UID:{$uid}",
             "DTSTAMP:{$dtstamp}",
@@ -1052,7 +1036,7 @@ PROMPT;
         }
 
         $icsLines[] = $this->foldLine("SUMMARY:" . $this->escapeIcsText($eventData['summary']));
-        $icsLines[] = $this->foldLine("DESCRIPTION:" . $this->escapeIcsText($eventData['description'])); // Assumes AI provided \n
+        $icsLines[] = $this->foldLine("DESCRIPTION:" . $this->escapeIcsText($eventData['description']));
 
         if (!empty($eventData['htmlDescription'])) {
              $icsLines[] = $this->foldLine("X-ALT-DESC;FMTTYPE=text/html:" . $this->escapeIcsText($eventData['htmlDescription']));
@@ -1064,9 +1048,7 @@ PROMPT;
             $icsLines[] = $this->foldLine("URL:" . $this->escapeIcsText($eventData['url']));
         }
 
-        // Add Organizer
         $icsLines[] = $this->foldLine("ORGANIZER;CN=\"Email-to-ICS\":mailto:{$this->fromEmail}");
-
 
         $icsLines[] = "END:VEVENT";
         $icsLines[] = "END:VCALENDAR";
@@ -1216,11 +1198,15 @@ BODY;
         errlog("Postmark response:\n" . $response->getBody()->getContents());
 	}
 
+    /**
+     * Query Google Maps API to get a formatted location string
+     * 
+     * @param string $lookup Location string to look up
+     * @return string|null Formatted location or null if not found
+     */
 	private function getGoogleMapsLink($lookup) {
-		// Base URL for the Google Places Text Search API
 		$baseUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json";
 
-		// Construct the request URL
 		$requestUrl = sprintf(
 			"%s?query=%s&key=%s",
 			$baseUrl,
@@ -1228,42 +1214,32 @@ BODY;
 			$this->googleMapsKey
 		);
 
-		// Initialize cURL session
 		$ch = curl_init();
 
-		// Set cURL options
 		curl_setopt($ch, CURLOPT_URL, $requestUrl);
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 
-		// Execute cURL request and fetch response
 		$response = curl_exec($ch);
 
-		// Close cURL session
 		curl_close($ch);
 
-		// Decode the JSON response
 		$data = json_decode($response, true);
 
-		// Check if we got a valid response and return the place id
 		if (!empty($data['results'])) {
 			$result = $data['results'][0];
 
 			return $result['name'] . ' ' . $result['formatted_address'];
-//			// Return the place_id of the first result
-//			$placeId = $data['results'][0]['place_id'];
-//
-//			// Base URL for Google Maps search with API parameter
-//			$baseUrl = "https://www.google.com/maps/search/?api=1";
-//
-//			// Construct the URL with query and place_id
-//			$url = sprintf("%s&query=%s&query_place_id=%s", $baseUrl, urlencode($lookup), urlencode($placeId));
-//
-//			return $url;
 		}
 
 		return null;
 	}
 
+    /**
+     * Sanitize HTML content to remove potentially dangerous elements
+     * 
+     * @param string $html HTML content to sanitize
+     * @return string Sanitized HTML content
+     */
 	private function html_sanitize($html) : string {
 		// By default, an element not added to the allowed or blocked elements
 		// will be dropped, including its children
@@ -1297,43 +1273,70 @@ BODY;
 
 		$sanitizer = new HtmlSanitizer($config);
 
-		return $sanitizer->sanitizeFor('div', $html); // Will sanitize as body
+		return $sanitizer->sanitizeFor('div', $html);
 	}
 
-	// Helper method to check if model supports vision capabilities
+    /**
+     * Check if the current model supports vision capabilities
+     * 
+     * @return bool True if the model supports vision, false otherwise
+     */
 	private function doesModelSupportVision()
 	{
-		list($provider, $model) = $this->parseCurrentModel();
-		
-		if (!isset(self::$availableModels[$provider]['models'][$model])) {
+		if (!isset($this->availableModels[$this->aiModel])) {
+			errlog("Vision check: Model {$this->aiModel} not found in available models list.");
 			return false;
 		}
-		
-		return self::$availableModels[$provider]['models'][$model]['vision_capable'] ?? false;
+		$supportsVision = $this->availableModels[$this->aiModel]['vision_capable'] ?? false;
+		errlog("Vision check: Model {$this->aiModel} supports vision: " . ($supportsVision ? 'Yes' : 'No'));
+		return $supportsVision;
 	}
 	
-	// Parse the current model into provider and model name
+    /**
+     * Get the current model ID
+     * 
+     * @return string The current model ID
+     */
 	private function parseCurrentModel()
 	{
-		return [$this->aiProvider, $this->aiModel];
+		return $this->aiModel;
 	}
-	
-	// Parse a model string like "openai:o3-mini" into provider and model
-	private function parseModelString($modelString)
+
+    /**
+     * Get the ID of the default model
+     * 
+     * @return string The default model ID
+     */
+	public function getDefaultModelId()
 	{
-		$parts = explode(':', $modelString);
-		if (count($parts) === 2) {
-			return $parts;
+		// Define preferred default model
+		$preferredDefault = 'anthropic/claude-3.7-sonnet';
+
+		if (isset($this->availableModels[$preferredDefault])) {
+			return $preferredDefault;
 		}
-		// Default fallback
-		return ['openai', 'o3-mini'];
+
+		// Fallback to the first model in the list if preferred is not available
+		if (!empty($this->availableModels)) {
+			reset($this->availableModels); // Ensure pointer is at the beginning
+			return key($this->availableModels);
+		}
+
+		// Absolute fallback if even the static list failed (should not happen)
+		errlog("CRITICAL: No models available, cannot determine default.");
+		// This case should ideally not be reachable if loadAvailableModels throws an exception
+		throw new \RuntimeException("Cannot determine default model as no models were loaded.");
 	}
-	
-	// Check if a model string is valid
-	private function isValidModel($modelString)
+
+    /**
+     * Check if a model ID is valid (exists in our list)
+     * 
+     * @param string $modelId Model ID to check
+     * @return bool True if the model ID is valid, false otherwise
+     */
+	private function isValidModel($modelId)
 	{
-		list($provider, $model) = $this->parseModelString($modelString);
-		return isset(self::$availableModels[$provider]['models'][$model]);
+		return isset($this->availableModels[$modelId]);
 	}
 
     /**
@@ -1436,20 +1439,31 @@ BODY;
 // Function to get available models for the extension
 function getAvailableModels()
 {
-	$result = [];
-	
-	foreach (EmailProcessor::$availableModels as $provider => $providerData) {
-		foreach ($providerData['models'] as $modelId => $modelInfo) {
-			$result[] = [
-				'id' => $provider . ':' . $modelId,
-				'name' => $modelInfo['name'],
-				'description' => $modelInfo['description'],
-				'vision_capable' => $modelInfo['vision_capable'],
-				'default' => $modelInfo['default']
-			];
-		}
+	// Instantiate EmailProcessor to access loaded models
+	try {
+		$processor = new EmailProcessor();
+		$modelsData = $processor->loadAvailableModels(); // Use the public loader method
+		$defaultModelId = $processor->getDefaultModelId(); // Get the determined default
+	} catch (\Throwable $e) {
+		errlog("Error initializing EmailProcessor in getAvailableModels: " . $e->getMessage());
+		// Return empty list or a hardcoded minimal list on error
+		return [
+			'models' => [],
+			'server_preference' => false // Indicate failure
+		];
 	}
-	
+
+	$result = [];
+	foreach ($modelsData as $modelId => $modelInfo) {
+		$result[] = [
+			'id' => $modelId, // Use the full OpenRouter ID
+			'name' => $modelInfo['name'] ?? $modelId,
+			'description' => $modelInfo['description'] ?? 'No description',
+			'vision_capable' => $modelInfo['vision_capable'] ?? false,
+			'default' => ($modelId === $defaultModelId)
+		];
+	}
+
 	// Sort by default (default models first), then by name
 	usort($result, function($a, $b) {
 		if ($a['default'] !== $b['default']) {
@@ -1457,10 +1471,10 @@ function getAvailableModels()
 		}
 		return strcmp($a['name'], $b['name']);
 	});
-	
+
 	return [
 		'models' => $result,
-		'server_preference' => true  // Indicates server has preference for default model
+		'server_preference' => true // Indicates server successfully provided models and a preference
 	];
 }
 
@@ -1641,7 +1655,6 @@ try {
 
 	// Check if the request likely came from the extension
 	if (isset($_REQUEST['fromExtension'])) {
-		// Respond with generic 500 for the extension
 		http_response_code(500);
 		header('Content-type: application/json');
 		echo json_encode(['error' => 'Internal Server Error']);
@@ -1657,14 +1670,12 @@ try {
         echo '<pre>' . htmlspecialchars(substr($t->getTraceAsString(), 0, 1000)) . '...</pre>'; // Limit trace output
 	}
 
-    // Keep sending the detailed error email for debugging
-	$err = '<h1>ERROR PROCESSING CALENDAR EVENT</h1>' .
+    $err = '<h1>ERROR PROCESSING CALENDAR EVENT</h1>' .
 		'<p>Error: <b>' . htmlspecialchars($t->getMessage()) . '</b></p>' .
 		'<pre>' . htmlspecialchars(var_export($t, true)) . '</pre>' .
 		'<p>Original POST/REQUEST:</p>' .
-		'<pre>' . htmlspecialchars(json_encode($_REQUEST)) . '</pre>'; // Log entire REQUEST
+		'<pre>' . htmlspecialchars(json_encode($_REQUEST)) . '</pre>';
 
-	// Use try-catch for sending email to prevent infinite loops if email fails
 	try {
 	    $processor = new EmailProcessor;
 	    $processor->sendEmail(null, $_ENV['ERROR_EMAIL'], 'ERROR PROCESSING CALENDAR EVENT', $err);

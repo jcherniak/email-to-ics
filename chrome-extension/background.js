@@ -14,8 +14,26 @@ chrome.runtime.onInstalled.addListener(() => {
 // --- Context Menu Click Handler ---
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === CONTEXT_MENU_ID && info.selectionText) {
-    console.log("Context menu clicked with selection:", info.selectionText);
-    handleContextMenuAction(info.selectionText, tab);
+    console.log("Context menu storing selection:", info.selectionText);
+    // 1. Store the selection text for the popup to retrieve
+    chrome.storage.local.set({ contextMenuInstructions: info.selectionText }, () => {
+      if (chrome.runtime.lastError) {
+        console.error("Error saving context menu instructions:", chrome.runtime.lastError);
+      } else {
+        console.log("Context menu instructions saved.");
+        // 2. Open the popup
+        chrome.action.openPopup({}, (window) => {
+           if (chrome.runtime.lastError) {
+              // Fallback if openPopup fails (e.g., another popup already open)
+              // You could notify the user or log, but for now, just log.
+              console.warn("Could not open popup via context menu:", chrome.runtime.lastError.message);
+           } else {
+              console.log("Popup opened via context menu.");
+           }
+        });
+      }
+    });
+    // handleContextMenuAction(info.selectionText, tab); // REMOVED - We no longer submit automatically
   }
 });
 
