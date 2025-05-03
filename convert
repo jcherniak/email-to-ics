@@ -1,0 +1,1 @@
+convert logo.png -resize 128x128 -background transparent -flatten logo_resized.png

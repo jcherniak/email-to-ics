@@ -1,5 +1,9 @@
 <?php
+// Debug logging to see where the script fails
+error_log('Script started at ' . date('Y-m-d H:i:s'));
+
 require 'vendor/autoload.php';
+error_log('Autoloader loaded');
 
 use GuzzleHttp\Client;
 use Dotenv\Dotenv;
@@ -8,11 +12,23 @@ use Spatie\PdfToText\Pdf;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizerConfig;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
 use ICal\ICal;
+use Opis\JsonSchema\Errors\ValidationError;
 
 ignore_user_abort();
 ini_set('display_errors', 'On');
 ini_set('error_reporting', E_ALL & ~E_DEPRECATED);
 
+// Add new endpoint for model info
+if (isset($_GET['get_models'])) {
+    header('Content-Type: application/json');
+    header("Access-Control-Allow-Origin: *");
+    header("Access-Control-Allow-Methods: GET, OPTIONS");
+    header("Access-Control-Allow-Headers: Content-Type, Authorization");
+    echo json_encode(getAvailableModels());
+    exit;
+}
+
+/** @disregard */
 if (
 	!function_exists('xdebug_is_debugger_active') ||
 	!xdebug_is_debugger_active()
@@ -56,6 +72,36 @@ class EmailProcessor
 	private $aiModel;
 	private $deepseekApiKey;
 	private $anthropicKey;
+	
+	// Available AI models with capabilities
+	public static $availableModels = [
+		'openai' => [
+			'models' => [
+				'o4-mini' => [
+					'name' => 'OpenAI Mini (o4-mini)',
+					'description' => 'Good balance of speed and accuracy',
+					'vision_capable' => true,
+					'default' => true
+				],
+				'o3' => [
+					'name' => 'OpenAI o3',
+					'description' => 'Highest accuracy, best for complex events',
+					'vision_capable' => true,
+					'default' => false
+				]
+			]
+		],
+		'anthropic' => [
+			'models' => [
+				'claude-3-7-sonnet-20250219' => [
+					'name' => 'Claude 3.7 Sonnet',
+					'description' => 'Most capable Claude model',
+					'vision_capable' => true,
+					'default' => true
+				],
+			]
+		]
+	];
 
     public function __construct()
     {
@@ -106,7 +152,7 @@ class EmailProcessor
 		return $factory->make();
 	}
 
-	public function processUrl($url, $downloadedText, $display, $tentative = true, $instructions = null)
+	public function processUrl($url, $downloadedText, $display, $tentative = true, $instructions = null, $screenshot = null, $requestedModel = null)
 	{
 		if (empty(trim($downloadedText))) {
 			if (!$this->is_valid_url($url)) {
@@ -128,7 +174,27 @@ class EmailProcessor
 			}
 		}
 
+		// If a specific model was requested, check if it's valid and override the default
+		if ($requestedModel && $this->isValidModel($requestedModel)) {
+			list($provider, $model) = $this->parseModelString($requestedModel);
+			$this->aiProvider = $provider;
+			$this->aiModel = $model;
+			errlog("Using requested model: {$provider}:{$model}");
+		}
+
 		$downloadedText = $this->extractMainContent($downloadedText);
+
+		// Process screenshot if provided
+		$screenshotBase64 = null;
+		if ($screenshot) {
+			// Remove the data URL prefix if present
+			if (strpos($screenshot, 'data:image/') === 0) {
+				$screenshotBase64 = substr($screenshot, strpos($screenshot, ',') + 1);
+			} else {
+				$screenshotBase64 = $screenshot;
+			}
+			errlog("Screenshot provided: " . substr($screenshotBase64, 0, 50) . "... (" . strlen($screenshotBase64) . " bytes)");
+		}
 
 		$combinedText = <<<TEXT
 {$url}
@@ -137,7 +203,7 @@ class EmailProcessor
 {$downloadedText}
 TEXT;
 
-		$calEvent = $this->generateIcalEvent($combinedText, $instructions);
+		$calEvent = $this->generateIcalEvent($combinedText, $instructions, $screenshotBase64);
 		$ics = $calEvent['ICS'];
 		$subject = $calEvent['EmailSubject'];
 		if ($display == 'download') {
@@ -283,7 +349,10 @@ HasBody:
 			// We need to remove elements in reverse order because the NodeList is live
 			for ($i = $elements->length - 1; $i >= 0; $i--) {
 				$element = $elements->item($i);
-				$element->parentNode?->removeChild($element);
+				if ($element->parentNode) {
+					// Remove the element from its parent
+					$element->parentNode->removeChild($element);
+				}
 			}
 		}
 		
@@ -346,7 +415,13 @@ HasBody:
 		for ($i = $elements->length - 1; $i >= 0; $i--) {
 			$element = $elements->item($i);
 			if ($element->childNodes->length === 0 && $element->textContent === '') {
-				$element->parentNode?->removeChild($element);
+				if ($element->parentNode) {
+					// Remove the empty element from its parent
+					$element->parentNode->removeChild($element);
+				}
+			} else {
+				// Recursively remove empty elements from child nodes
+				$this->removeEmptyElements($element);
 			}
 		}
 	}
@@ -481,164 +556,154 @@ HasBody:
         return null;
     }
 
-    private function generateIcalEvent($combinedText, $instructions = null)
+    private function generateIcalEvent($combinedText, $instructions = null, $screenshot = null)
 	{
-		$schema =  [
+		// Define the NEW schema for structured event data
+		$eventSchema = [
 			'type' => 'object',
 			'properties' => [
-				'success' => [
-					'type' => 'boolean'
-				],
-				'errorMessage' => [
-					'type' => 'string'
-				],
-				'ICS' => [
-					'type' => 'string'
-				],
-				'EmailSubject' => [
-					'type' => 'string'
-				],
-				'LocationLookup' => [
-					'type' => 'string'
-				],
+				'summary' => ['type' => 'string', 'description' => 'Concise title for the event.'],
+				'description' => ['type' => 'string', 'description' => 'Plain text description of the event (use \\n for newlines).'],
+				'htmlDescription' => ['type' => 'string', 'description' => 'HTML formatted version of the description. REQUIRED - convert plain text to HTML if needed.'],
+				'dtstart' => ['type' => 'string', 'description' => 'Start date/time in ISO 8601 format (e.g., 2024-10-28T06:30:00).'],
+				'dtend' => ['type' => 'string', 'description' => 'End date/time in ISO 8601 format (e.g., 2024-10-28T07:00:00). Optional, defaults based on event type if missing.'],
+				'timezone' => ['type' => 'string', 'description' => 'PHP Timezone identifier (e.g., America/Los_Angeles, America/New_York, UTC).'],
+				'location' => ['type' => 'string', 'description' => 'Physical location or address of the event.'],
+				'url' => ['type' => 'string', 'description' => 'URL related to the event (e.g., event page, ticket link).'],
+				'isAllDay' => ['type' => 'boolean', 'description' => 'True if this is an all-day event (dtstart/dtend should be date only: YYYY-MM-DD).'],
+				// Add other relevant fields like ORGANIZER, ATTENDEE, UID if needed, but keep it simple initially
 			],
-			'required' => ['success', 'errorMessage', 'ICS', 'EmailSubject', 'LocationLookup'],
+			'required' => ['summary', 'description', 'htmlDescription', 'dtstart', 'dtend', 'timezone', 'location', 'url', 'isAllDay'],
+			'additionalProperties' => false
+		];
+
+		$responseSchema = [
+			'type' => 'object',
+			'properties' => [
+				'success' => ['type' => 'boolean'],
+				'errorMessage' => ['type' => 'string'],
+				'eventData' => $eventSchema, // Embed the event schema here
+				'emailSubject' => ['type' => 'string', 'description' => 'The generated summary, used for the email subject line.'],
+				'locationLookup' => ['type' => 'string', 'description' => 'Location string for Google Maps lookup.'],
+			],
+			'required' => ['success', 'errorMessage', 'eventData', 'emailSubject', 'locationLookup'],
 			'additionalProperties' => false,
 		];
+
 
 		$retries = $_ENV['OPENAI_RETRIES'];
 		for ($i = 0; $i < $retries; $i++) {
 			$curYear = date('Y');
 			$curDate = date('m/d');
 			$nextYear = $curYear + 1;
+			// Modify the prompt to request the new JSON structure
 			$system = <<<PROMPT
-Create an iCal event from the following email text or downloaded HTML. Provide the ICS file content only. Do not add any comments or other information other than the contents of the ICS file.
+Create calendar event data from the following email text or downloaded HTML.
 
-Assume the timezone is pacific time if not specified in the email. Based on the date, determine if it should be PST or PDT.
+# PRIMARY EVENT IDENTIFICATION - READ THIS FIRST
+Your primary task is to identify and extract ONLY the MAIN event described in the content.
 
-Render escaped characters from the input. So "\n" becomes rendered as a newline in the output.
+How to identify the primary event:
+- It's typically the most prominently featured and detailed event
+- It's often the first event described in detail
+- It's usually the subject of the email or central content of the webpage
+- For ticketed events, it's the event for which the ticket/confirmation is issued
 
-Make the organizer of the event "Email-to-ICS <{$this->fromEmail}>".
+Explicitly IGNORE these secondary events:
+- Events labeled as "Related Events", "You might also like", "Upcoming Events", "Other shows"
+- Events in sidebars or supplementary sections
+- Events mentioned only in passing or with minimal details
+- Any event clearly not the focus of the email/page
 
-Include the entirety of email, as written, for the description of the event.
+EXTREMELY IMPORTANT: IF you find multiple events and are unsure which is primary, choose the event with:
+1. The most complete details (date, time, location)
+2. The earliest upcoming date
+3. The most prominence in the content
 
-PRODID should say "Email-to-ICS via {$this->aiProvider} by Justin".
+ONLY create multiple VEVENT blocks if the content is explicitly a schedule or calendar listing with NO single primary event (e.g., a multi-day conference schedule or festival lineup).
 
-For the event title (SUMMARY field), generate a relevant one. Don't use the subject of the original email, but provide a summary based on the content. For example a doctors appointment reminder should say "Dr. White Appointment". If it's a video appointment, say "Dr. White Video Appointment". For a concert ticket confirmation, it should say something like "SF Symphony Concert - beethoven, mozart".
+# TIMEZONE AND LOCATION EMPHASIS
+If a location is specified (e.g., New York City, Madison, San Francisco), infer the appropriate timezone immediately.
+If no location is found in the content, default to Pacific Time.
+If a date is given but no specific time, set 'isAllDay' to true and format dtstart/dtend as 'YYYY-MM-DD'.
 
-If a date/time exists in the PDF attachment, use it. If no end-date is found, assume the event is 2 hours. If it's an opera, 3 hours. A doctor's appointment, 30 minutes.
+# IGNORE SPONSOR OR POLICY DISCLAIMERS
+Do not include details about sponsors or policy disclaimers unless they are explicitly part of the main event content.
 
-If there is no year in the provided content, assume it is {$curYear} if the month / date is equal to or after {$curDate} and {$nextYear} if before.
-
-Make sure the date/time of the ICS are in pacific time. Adjust as necessary from the input timezone.
-
-If the content describes a flight:
-- Using the airport codes, determine the start and end timezone and set the event to start and end in the appropriate timezones. Override all timezone instructions above. For example, if the destination is EWR, then the end timezone should be America/New_York. SFO, America/Los_Angeles, ORD, America/Chicago, etc...
-- Include the confirmation number in the top of the description.
-- Include the flight number in the top of the description and the title. Prefix it with the airline code such as UA1234 or DL4456
-- Don't include any text about special deals.
-- The description field should be in the format: ```
-Flight number: UA1234
-Confirmation number: GJGJGJ
-Departure airport: SFO
-Arrival airport: EWR
-```
-- The location field should contain a google maps link to the departure airport
-
-- The description for non-flight events should include information from the HTML body. Keep it under 1500 characters. Include the URL at the bottom of the description.  Put HTML into an X-ALT-DESC;FMTTYPE=text/html: field
-as well as formatted plain text in the DESCRIPTION field.
-
-For the ICS file, ensure it matches RFC5545. Specifically:
-- Ensure all lines are terminated by CRLF
-- Lines of text SHOULD NOT be longer than 75 octets, excluding the line break. Long content lines SHOULD be split into a multiple line representations using a line "folding" technique. That is, a long line can be split between any two characters by inserting a CRLF immediately followed by a single linear white-space character (i.e., SPACE or HTAB). Any sequence of CRLF followed immediately by a single linear white-space character is ignored (i.e., removed) when processing the content type.
-- Ensure a UID is generated. Make it look like Ymd-His@calendar.postmark.justin-c.com. AKA 20240530-195600@calendar.postmark.justin-c.com
-- Ensure a VTIMEZONE object is present
-- For the description, include newlines to make it look good.
-- Keep the description under 1000 characters.
-- Keep the description in plain text, not HTML.
-
-If the content comes from Eventbrite, include the ticket link in the description, even at the expense of other details.
-
-# Multiple Events
-STRONGLY PREFER CREATING ONLY ONE VEVENT corresponding to the primary event described in the text.
-ONLY create multiple VEVENT blocks if the input text is clearly a schedule or list with NO single primary event (e.g., a multi-day conference schedule).
-IGNORE events found in sections explicitly labeled "Upcoming Events", "Other Events", "Related Events", or similar secondary listings, even if they have dates/times. Focus on the main content.
-If an event comes from a <section> with a class of "upcoming_events", ignore it completely.
-
-# Output Format
-- The output ICS file should typically contain only one VEVENT block inside the VCALENDAR structure.  If there are multiple events, create one VEVENT per event and combine them into a single .ics file.
-- Ensure the format adheres to iCalendar standards (RFC5545).
-- Ensure the .ics file can be imported into standard calendar applications.
-- Each VEVENT block must have its own SUMMARY and DESCRIPTION fields.
-- Include a URL field if at all possible
-
-# Examples
-```plaintext
-BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//Your Organization//NONSGML Your Product//EN
-BEGIN:VEVENT
-UID:1234@example.com
-DTSTAMP:20211010T090000Z
-DTSTART;TZID=America/Los_Angeles:20211028T063000
-DTEND;TZID=America/Los_Angeles:20211028T070000
-SUMMARY:Wake up
-DESCRIPTION:Start your day with a refreshing morning.\\nGo to the park and enjoy yourself.\\nNOTE THE USE OF ESCAPED NEWLINES HERE
-URL:https://sfcmp.org/concerts/2024-2025-season/tracing-paths/
-END:VEVENT
-END:VCALENDAR
+# OUTPUT FORMAT - JSON STRUCTURE
+Return a JSON object containing the structured event data. DO NOT return an ICS file string.
+The JSON object MUST conform EXACTLY to the following schema:
+```json
+{
+  "type": "object",
+  "properties": {
+    "success": { "type": "boolean" },
+    "errorMessage": { "type": "string", "description": "Error message if success is false." },
+    "eventData": {
+      "type": "object",
+      "properties": {
+        "summary": { "type": "string", "description": "Concise title for the event." },
+        "description": { "type": "string", "description": "Plain text description (use \\\\n for newlines)." },
+        "htmlDescription": { "type": "string", "description": "HTML formatted version of the description. REQUIRED - convert plain text to HTML if needed." },
+        "dtstart": { "type": "string", "description": "Start date/time (ISO 8601: YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD for all-day)." },
+        "dtend": { "type": "string", "description": "End date/time (ISO 8601: YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD for all-day). Optional." },
+        "timezone": { "type": "string", "description": "PHP Timezone ID (e.g., America/Los_Angeles)." },
+        "location": { "type": "string", "description": "Physical location/address." },
+        "url": { "type": "string", "description": "Related URL." },
+        "isAllDay": { "type": "boolean", "description": "True for all-day events.", "default": false }
+      },
+      "required": ["summary", "description", "dtstart", "timezone"]
+    },
+    "emailSubject": { "type": "string", "description": "Use the generated summary here." },
+    "locationLookup": { "type": "string", "description": "Location string for Google Maps lookup." }
+  },
+  "required": ["success", "errorMessage", "eventData", "emailSubject", "locationLookup"]
+}
 ```
 
-# Notes
-- Ensure `UID` values are unique for EACH VEVENT.
-- Update `DTSTAMP` with the current timestamp when generating the .ics file.
-- Check for any overlapping events and resolve any conflicts.
-- Ensure that all dates and times are formatted correctly, using `YYYYMMDDTHHMMSS` format where necessary.
-- Each ```SUMMARY``` should be concise and descriptive for its respective event.
-- Even though non-standard, include a URL field.
-- No fields should contain native newlines. Use \\n instead. AKA ESCAPE NEWLINES INSIDE OF FIELDS.
+# FIELD SPECIFIC INSTRUCTIONS
+- **summary:** Generate a relevant title (e.g., "Dr. White Appointment", "SF Symphony Concert - Beethoven").
+- **description:** Create a concise plain-text summary. Use `\\n` for newlines. Keep under 1000 chars. DO NOT include raw HTML. For flights, include Flight #, Confirmation #, Departure/Arrival details. Include Eventbrite ticket links prominently if found.
+- **htmlDescription:** (Optional) Include relevant original HTML snippets here (under 1500 chars).
+- **dtstart / dtend:** Use ISO 8601 format. Calculate end time if missing (2h default, 3h opera, 30m doctor). Use YYYY-MM-DD format ONLY if `isAllDay` is true.
+- **timezone:** Provide a valid PHP Timezone identifier (e.g., `America/Los_Angeles`, `America/New_York`, `UTC`). Infer from location if possible, default to `America/Los_Angeles` if unknown/virtual.
+- **location:** The venue name or address.
+- **url:** Link to event page, tickets, etc.
+- **isAllDay:** Set to true only if no specific start/end times are found.
+- **emailSubject:** Should be identical to the `summary`.
+- **locationLookup:** A string suitable for searching on Google Maps (e.g., "Moscone Center, San Francisco, CA").
 
-Return a JSON object with 2 keys:
-- Success - whether the operation was successful or not. If false, include an error message.
-- ErrorMessage - if success is false, include an error message.
-- ICS - the ical file contents
-- EmailSubject - the title (SUMMARY) of the *first* or most prominent event in the ICS file.
-- LocationLookup - location information for the *first* or most prominent event that we can pass to the Google Places API to lookup. Should be a string.
+# DATE AND TIMEZONE HANDLING - CRITICAL INSTRUCTIONS
+When parsing dates and timezones from the content:
 
-EXTREMELY IMPORTANT: the output must be JSON and match this schema EXACTLY!
-[
-	'type' => 'json_schema',
-	'json_schema' =>  [
-		'name' => 'cal_response',
-		'strict' => true,
-		'schema' => [
-			'type' => 'object',
-			'properties' => [
-				'success' => [
-					'type' => 'boolean'
-				],
-				'errorMessage' => [
-					'type' => 'string'
-				],
-				'ICS' => [
-					'type' => 'string'
-				],
-				'EmailSubject' => [
-					'type' => 'string'
-				],
-				'LocationLookup' => [
-					'type' => 'string'
-				],
-			],
-			'required' => ['success', 'errorMessage', 'ICS', 'EmailSubject', 'LocationLookup'],
-			'additionalProperties' => false,
-		],
-	],
-],
+1. If the year IS explicitly mentioned, use that year.
 
-Even if URLs are in the next prompt, you won't be directly accessing them. Treat them as text.
+2. If the year is NOT explicitly mentioned:
+   - Use {$curYear} (current year) if the date is ON or AFTER today ({$curDate})
+   - Use {$nextYear} (next year) if the date is BEFORE today ({$curDate})
+
+3. For timezone determination:
+   - If a location is provided, infer the appropriate timezone based on that location:
+     * Eastern Time: New York, Boston, Miami, Atlanta, Washington DC, Florida, etc.
+     * Central Time: Chicago, Dallas, Houston, Memphis, Minneapolis, New Orleans, etc.
+     * Mountain Time: Denver, Salt Lake City, Phoenix, Albuquerque, etc.
+     * Pacific Time: Los Angeles, San Francisco, Seattle, Portland, San Diego, etc.
+     * Hawaii-Aleutian Time: Hawaii, Honolulu, etc.
+     * Alaska Time: Anchorage, Juneau, etc.
+   - For international locations, determine the appropriate timezone for that region
+   - Only default to Pacific Time if the location is unknown or unclear
+   - For virtual/online events with no specific location, use Pacific Time
+
+4. Make sure to use the correct timezone abbreviation based on the date (e.g., PDT vs PST for Pacific)
+
+5. Be aware that many events are scheduled months in advance, so carefully check if dates are in the past relative to today.
+
+6. If multiple dates are mentioned, prioritize dates that are explicitly associated with the primary event.
 
 ***IF NO DATES ARE FOUND ANYWHERE IN THE EMAIL, RETURN success = false with an error message of "Email didn't contain dates or times". Ignore dates of the incoming email or forwarded messages. This overrides any directives above. ***
+
+# *** SPECIAL USER INSTRUCTIONS ***
+IF the next message block starts with "*** EXTREMELY IMPORTANT INSTRUCTIONS ***", treat those instructions as EXTREMELY HIGH PRIORITY. They should be given strong preference when they provide specific guidance about how to interpret or process the content. While the general rules above still apply, these instructions provide critical context or clarification for this specific request.
 PROMPT;
 
 			$messages = [
@@ -655,7 +720,34 @@ PROMPT;
 				];
 			}
 
-			$messages[] = ['role' => 'user', 'content' => $combinedText];
+			// Check if we have a screenshot and if the model supports vision
+			$hasScreenshot = !empty($screenshot);
+			$modelSupportsVision = $this->doesModelSupportVision();
+			
+			// Create the content message considering screenshot support
+			$userMessage = [
+				'role' => 'user'
+			];
+			
+			if ($hasScreenshot && $modelSupportsVision) {
+				$userMessage['content'] = [
+					[
+						'type' => 'text',
+						'text' => $combinedText
+					],
+					[
+						'type' => 'image_url',
+						'image_url' => [
+							'url' => 'data:image/jpeg;base64,' . $screenshot,
+							'detail' => 'high'
+						]
+					]
+				];
+			} else {
+				$userMessage['content'] = $combinedText;
+			}
+			
+			$messages[] = $userMessage;
 
 			$data = [
 				'model' => $this->aiModel,
@@ -676,12 +768,13 @@ PROMPT;
 				$data['temperature'] = 0.25;
 			} else {
 				$data['max_completion_tokens'] = 16 * 1024;
+				// Ensure the response_format uses the $responseSchema
 				$data['response_format'] = [
 					'type' => 'json_schema',
 					'json_schema' =>  [
-						'name' => 'cal_response',
+						'name' => 'cal_response_structured',
 						'strict' => true,
-						'schema' => $schema,
+						'schema' => $responseSchema, // Use the new schema
 					],
 				];
 
@@ -690,6 +783,10 @@ PROMPT;
 						'type' => 'enabled',
 						'budget_tokens' => 4000,
 					];
+				}
+
+				if ($this->aiProvider === 'openai' && strpos($this->aiModel, 'o') === 0) {
+					$data['reasoning_effort'] = 'high';
 				}
 			}
 
@@ -710,7 +807,7 @@ PROMPT;
 			$data = trim($returnedData);
 
 			$data = str_replace(['```json', '```'], '', $data);
-			$ret = json_decode($data, true);
+			$ret = json_decode($data, true, 512, JSON_INVALID_UTF8_IGNORE);
 
 			$valid = true;
 			if (json_last_error() != JSON_ERROR_NONE) {
@@ -723,17 +820,25 @@ PROMPT;
 				$validator = new \Opis\JsonSchema\Validator();
 				$validator->setMaxErrors(10);
 				$validator->setStopAtFirstError(false);
-				$result = $validator->validate((object)$ret, json_encode($schema));
+				// Validate against new schema
+				$result = $validator->validate((object)$ret, json_encode($responseSchema));
+				$validationError = $result->error(); // Get error object or null
 				$valid = $result->isValid();
 
 				if ($valid) {
 					errlog("AI response passed schema validation");
 				} else {
-					errlog("AI response failed schema validation: " . $result->error()->message());
+					function_exists('xdebug_break') && xdebug_break();
+					if ($validationError) { // Check if error object exists
+						$this->handleValidationError($validationError, $ret, $responseSchema);
+					} else {
+						// Handle case where validation fails but no error object is returned (less common)
+						errlog("AI response failed initial schema validation (no specific error object returned). Failing JSON: " . $data);
+					}
 				}
 			}
 
-			if (!$valid) {
+			if (false && !$valid) {
 				$oldAiProvider = $this->aiProvider;
 				$oldAiModel = $this->aiModel;
 				try {
@@ -774,11 +879,10 @@ PROMPT;
 						$validator = new \Opis\JsonSchema\Validator();
 						$validator->setMaxErrors(10);
 						$validator->setStopAtFirstError(false);
-						$result = $validator->validate((object)$ret, json_encode($schema));
+						$result = $validator->validate((object)$ret, json_encode($responseSchema));
 						$valid = $result->isValid();
 
 						if (!$valid) {
-							errlog("AI response failed schema validation: " . $result->error()->message());
 						}
 					}
 
@@ -816,164 +920,214 @@ PROMPT;
 				die;
 			}
 
-			// Clean up the ICS description
-			$ret['ICS'] = $this->cleanupIcsDescription($ret['ICS']);
-
-			try
-			{
-				$file = tempnam(sys_get_temp_dir(), 'ical-ai');
-				file_put_contents($file, $ret['ICS']);
-
-				new ICal($file);
+			// **** ADDED CHECKS (Adjust for new structure) ****
+			if (empty($ret['eventData'] ?? null) || empty(trim($ret['eventData']['summary'] ?? ''))) {
+				errlog("AI returned empty event data or summary. Retrying... Attempt " . ($i + 1) . "/" . $retries);
+				if ($i < $retries - 1) continue;
+				http_response_code(500);
+				echo "<h1>AI failed to generate event data after {$retries} attempts.</h1>";
+				echo '<pre>' . htmlspecialchars($data) . '</pre>';
+				die;
 			}
-			catch (Throwable $e)
-			{
-				if ($i < $retries - 1) {
-					errlog("ICS couldn't be parsed: {$e}.\n\nICS: {$data}\n");
-					continue;
-				}
-
-				throw $e;
+            // EmailSubject check remains the same
+			if (empty(trim($ret['emailSubject'] ?? ''))) {
+				errlog("AI returned empty EmailSubject. Retrying... Attempt " . ($i + 1) . "/" . $retries);
+				if ($i < $retries - 1) continue; // Retry if not the last attempt
+				// If last attempt, fall through to throw error outside loop
+				http_response_code(500);
+				echo "<h1>AI failed to generate EmailSubject after {$retries} attempts.</h1>";
+				echo '<pre>' . htmlspecialchars($data) . '</pre>';
+				die;
 			}
+			// **** END ADDED CHECKS ****
 
-			if (!empty($ret['LocationLookup'])) {
+
+			// Clean up the ICS description - This is less relevant now, but keep for potential folding issues if needed
+			// $ret['ICS'] = $this->cleanupIcsDescription($ret['ICS']); // Commented out
+
+            // Update location in the JSON structure before generating ICS
+			if (!empty($ret['locationLookup'])) {
 				try {
-					$place = $this->getGoogleMapsLink($ret['LocationLookup']);
-					errlog("Google maps lookup for '{$ret['LocationLookup']}' returned '{$place}'");
-
-					if ($place) {
-						$ret['ICS'] = $this->updateIcsLocation($ret['ICS'], $place);
+					$place = $this->getGoogleMapsLink($ret['locationLookup']);
+					errlog("Google maps lookup for '{$ret['locationLookup']}' returned '{$place}'");
+					if ($place && isset($ret['eventData'])) {
+						// Update the location within the eventData structure
+						$ret['eventData']['location'] = $place;
 					}
 				} catch (Throwable $e) {
 					errlog("Error(s) doing google maps lookup: " . var_export($e, true));
 				}
 			}
 
+			$icsString = $this->convertJsonToIcs($ret['eventData']);
+			// Validate the generated ICS string
+			$tempFile = tempnam(sys_get_temp_dir(), 'ical-ai-');
+			file_put_contents($tempFile, $icsString);
+			new ICal($tempFile); // Use the parser to validate
+			unlink($tempFile);
 
-			return $ret;
+			// Replace the structured data with the generated ICS string for downstream use
+			$ret['ICS'] = $icsString;
+			unset($ret['eventData']); // Remove the structured data
+
+			return $ret; // Return the structure containing 'ICS', 'emailSubject', etc.
 		}
 
 		throw new Exception('should never reach here...');
 	}
 
-	private function cleanupIcsDescription($icsContent) {
-		$lines = explode("\n", $icsContent);
-		$output = [];
-		$inDescription = false;
-		$descriptionLines = [];
+    /**
+     * Converts structured event data (from AI JSON) into an RFC 5545 ICS string.
+     *
+     * @param array $eventData Associative array conforming to the eventSchema.
+     * @return string The generated ICS content.
+     * @throws Exception If required fields are missing or dates are invalid.
+     */
+    private function convertJsonToIcs(array $eventData): string
+    {
+        $uid = date('Ymd-His') . '@calendar.postmark.justin-c.com'; // Generate UID
+        $dtstamp = gmdate('Ymd\THis\Z'); // Current UTC timestamp
 
-		foreach ($lines as $line) {
-			if (strpos($line, 'DESCRIPTION:') === 0) {
-				$inDescription = true;
-				$output[] = $line;
-			} elseif ($inDescription && strpos($line, ' ') === 0) {
-				// This is a continuation line of the description
-				$descriptionLines[] = trim($line);
-			} elseif ($inDescription) {
-				// We've reached the end of the description
-				$inDescription = false;
-				// Clean up the description lines
-				$description = implode(' ', $descriptionLines);
-				$description = preg_replace('/\s+/', ' ', $description); // Replace multiple spaces with single space
-				
-				// Recursively replace multiple newlines until no more than 2 in a row
-				do {
-					$oldDescription = $description;
-					$description = str_replace('\\n\\n\\n', '\\n\\n', $description);
-				} while ($oldDescription !== $description);
-				
-				$description = trim($description);
-				// Add the cleaned description back
-				$output[] = 'DESCRIPTION:' . $description;
-				$output[] = $line;
-			} else {
-				$output[] = $line;
-			}
-		}
+        $tzid = $eventData['timezone'] ?? 'America/Los_Angeles'; // Default timezone
 
-		return implode("\n", $output);
-	}
+        // Basic validation
+        if (empty($eventData['summary']) || empty($eventData['dtstart']) || empty($tzid)) {
+            throw new Exception('Missing required event data for ICS conversion (summary, dtstart, timezone).');
+        }
 
-	private function updateIcsLocation($icsContent, $location) {
-		$lines = explode("\n", $icsContent);
-		$output = [];
-		$locationUpdated = false;
+        $isAllDay = $eventData['isAllDay'] ?? false;
 
-		foreach ($lines as $line) {
-			// Check if the line starts with "LOCATION:" to find an existing location
-			if (strpos($line, 'LOCATION:') === 0) {
-				// Replace existing location with the new location
-				$output[] = 'LOCATION:' . $location;
-				$locationUpdated = true;
-			} else {
-				$output[] = $line;
-			}
-		}
+        // Format DTSTART
+        try {
+            $dtStartObj = new DateTime($eventData['dtstart'], $isAllDay ? null : new DateTimeZone($tzid));
+            if ($isAllDay) {
+                $dtstartFormatted = "DTSTART;VALUE=DATE:" . $dtStartObj->format('Ymd');
+            } else {
+                $dtstartFormatted = "DTSTART;TZID={$tzid}:" . $dtStartObj->format('Ymd\THis');
+            }
+        } catch (\Throwable $e) {
+            throw new Exception("Invalid dtstart format: {$eventData['dtstart']} - " . $e->getMessage());
+        }
 
-		// If no LOCATION field was originally present, add it before END:VEVENT
-		if (!$locationUpdated) {
-			$updatedOutput = [];
-			foreach ($output as $line) {
-				if (trim($line) == "END:VEVENT") {
-					// Add location before the line END:VEVENT
-					$updatedOutput[] = 'LOCATION:' . $location;
-				}
-				$updatedOutput[] = $line;
-			}
-			$output = $updatedOutput;
-		}
+        // Format DTEND
+        $dtendFormatted = '';
+        if (!empty($eventData['dtend'])) {
+             try {
+                $dtEndObj = new DateTime($eventData['dtend'], $isAllDay ? null : new DateTimeZone($tzid));
+                 if ($isAllDay) {
+                    // For all-day events, DTEND is the day AFTER the last day
+                    $dtEndObj->modify('+1 day');
+                    $dtendFormatted = "DTEND;VALUE=DATE:" . $dtEndObj->format('Ymd');
+                } else {
+                    $dtendFormatted = "DTEND;TZID={$tzid}:" . $dtEndObj->format('Ymd\THis');
+                }
+            } catch (\Throwable $e) {
+                throw new Exception("Invalid dtend format: {$eventData['dtend']} - " . $e->getMessage());
+            }
+        } elseif (!$isAllDay) {
+             // Calculate default duration if DTEND is missing and not all-day
+            $dtEndObj = clone $dtStartObj;
+            // Basic duration logic (can be expanded based on summary keywords)
+            $durationHours = 2;
+            if (stripos($eventData['summary'], 'opera') !== false) $durationHours = 3;
+            elseif (stripos($eventData['summary'], 'doctor') !== false || stripos($eventData['summary'], 'appointment') !== false) $durationHours = 0.5;
+            $dtEndObj->modify('+' . ($durationHours * 3600) . ' seconds');
+            $dtendFormatted = "DTEND;TZID={$tzid}:" . $dtEndObj->format('Ymd\THis');
+        }
 
-		// Join the lines back into a single ICS formatted string
-		return implode("\n", $output);
-	}
 
-	private function getGoogleMapsLink($lookup) {
-		// Base URL for the Google Places Text Search API
-		$baseUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json";
+        $icsLines = [
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "PRODID:-//Email-to-ICS via {$this->aiProvider} by Justin//NONSGML//EN",
+            // TODO: Consider adding VTIMEZONE component if needed for broader compatibility, though TZID often suffices
+            "BEGIN:VEVENT",
+            "UID:{$uid}",
+            "DTSTAMP:{$dtstamp}",
+            $dtstartFormatted,
+        ];
 
-		// Construct the request URL
-		$requestUrl = sprintf(
-			"%s?query=%s&key=%s",
-			$baseUrl,
-			urlencode($lookup),
-			$this->googleMapsKey
-		);
+        if ($dtendFormatted) {
+            $icsLines[] = $dtendFormatted;
+        }
 
-		// Initialize cURL session
-		$ch = curl_init();
+        $icsLines[] = $this->foldLine("SUMMARY:" . $this->escapeIcsText($eventData['summary']));
+        $icsLines[] = $this->foldLine("DESCRIPTION:" . $this->escapeIcsText($eventData['description'])); // Assumes AI provided \n
 
-		// Set cURL options
-		curl_setopt($ch, CURLOPT_URL, $requestUrl);
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        if (!empty($eventData['htmlDescription'])) {
+             $icsLines[] = $this->foldLine("X-ALT-DESC;FMTTYPE=text/html:" . $this->escapeIcsText($eventData['htmlDescription']));
+        }
+        if (!empty($eventData['location'])) {
+            $icsLines[] = $this->foldLine("LOCATION:" . $this->escapeIcsText($eventData['location']));
+        }
+        if (!empty($eventData['url'])) {
+            $icsLines[] = $this->foldLine("URL:" . $this->escapeIcsText($eventData['url']));
+        }
 
-		// Execute cURL request and fetch response
-		$response = curl_exec($ch);
+        // Add Organizer
+        $icsLines[] = $this->foldLine("ORGANIZER;CN=\"Email-to-ICS\":mailto:{$this->fromEmail}");
 
-		// Close cURL session
-		curl_close($ch);
 
-		// Decode the JSON response
-		$data = json_decode($response, true);
+        $icsLines[] = "END:VEVENT";
+        $icsLines[] = "END:VCALENDAR";
 
-		// Check if we got a valid response and return the place id
-		if (!empty($data['results'])) {
-			$result = $data['results'][0];
+        return implode("\r\n", $icsLines);
+    }
 
-			return $result['name'] . ' ' . $result['formatted_address'];
-//			// Return the place_id of the first result
-//			$placeId = $data['results'][0]['place_id'];
-//
-//			// Base URL for Google Maps search with API parameter
-//			$baseUrl = "https://www.google.com/maps/search/?api=1";
-//
-//			// Construct the URL with query and place_id
-//			$url = sprintf("%s&query=%s&query_place_id=%s", $baseUrl, urlencode($lookup), urlencode($placeId));
-//
-//			return $url;
-		}
+    /**
+     * Escapes text according to RFC 5545 requirements.
+     * Replaces backslash, comma, semicolon, newline.
+     */
+    private function escapeIcsText(string $text): string
+    {
+        $text = str_replace("\\", "\\\\", $text); // Must be first
+        $text = str_replace(",", "\\,", $text);
+        $text = str_replace(";", "\\;", $text);
+        // Newlines are already expected as \n from the AI for the description
+        // $text = str_replace("\n", "\\n", $text); // Replace literal newlines if any
+        return $text;
+    }
 
-		return null;
-	}
+    /**
+     * Folds a long line according to RFC 5545 (75 octet limit).
+     */
+    private function foldLine(string $line): string
+    {
+        $limit = 75;
+        $folded = '';
+        while (mb_strlen($line, 'UTF-8') > 0) { // Use mb_strlen for UTF-8 safety
+            if (mb_strlen($line, 'UTF-8') <= $limit) {
+                $folded .= $line;
+                break;
+            }
+
+            // Find a safe place to fold (prefer before multi-byte chars)
+            // Work with byte length for folding limit, but use mb_substr for splitting
+            $byteLen = strlen($line);
+            $foldPosBytes = 0;
+            $charCount = 0;
+            $currentBytes = 0;
+            while ($currentBytes < $limit && $charCount < mb_strlen($line, 'UTF-8')) {
+                 $char = mb_substr($line, $charCount, 1, 'UTF-8');
+                 $charBytes = strlen($char);
+                 if ($currentBytes + $charBytes > $limit) {
+                     break; // Next char would exceed limit
+                 }
+                 $currentBytes += $charBytes;
+                 $foldPosBytes = $currentBytes; // Store byte position of last full char within limit
+                 $charCount++;
+            }
+
+            if ($foldPosBytes == 0) $foldPosBytes = $limit; // Force fold if first char is too long (unlikely)
+
+            // Extract the segment using byte length, then get the rest using mb_substr
+            $segment = substr($line, 0, $foldPosBytes);
+            $folded .= $segment . "\r\n "; // Add CRLF + space
+            $line = mb_substr($line, mb_strlen($segment, 'UTF-8'), null, 'UTF-8'); // Get remainder based on char count of segment
+            $limit = 74; // Subsequent lines start with a space
+        }
+        return $folded;
+    }
 
     private function sendEmailWithAttachment($toEmail, $ics, $subject, $originalEmail, $pdfText = null, $downloadedText = null)
 	{
@@ -1032,6 +1186,12 @@ BODY;
 					'ContentType' => 'text/calendar',
 				],
 			], $otherAttachments);
+		} else {
+			errlog("Attempted to send email with empty ICS content to {$toEmail} with subject '{$subject}'. This indicates an issue upstream.");
+		}
+
+		if (empty($subject)) {
+			throw new Exception('Subject is empty');
 		}
 
 		$request = [
@@ -1054,6 +1214,54 @@ BODY;
         }
 
         errlog("Postmark response:\n" . $response->getBody()->getContents());
+	}
+
+	private function getGoogleMapsLink($lookup) {
+		// Base URL for the Google Places Text Search API
+		$baseUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json";
+
+		// Construct the request URL
+		$requestUrl = sprintf(
+			"%s?query=%s&key=%s",
+			$baseUrl,
+			urlencode($lookup),
+			$this->googleMapsKey
+		);
+
+		// Initialize cURL session
+		$ch = curl_init();
+
+		// Set cURL options
+		curl_setopt($ch, CURLOPT_URL, $requestUrl);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+		// Execute cURL request and fetch response
+		$response = curl_exec($ch);
+
+		// Close cURL session
+		curl_close($ch);
+
+		// Decode the JSON response
+		$data = json_decode($response, true);
+
+		// Check if we got a valid response and return the place id
+		if (!empty($data['results'])) {
+			$result = $data['results'][0];
+
+			return $result['name'] . ' ' . $result['formatted_address'];
+//			// Return the place_id of the first result
+//			$placeId = $data['results'][0]['place_id'];
+//
+//			// Base URL for Google Maps search with API parameter
+//			$baseUrl = "https://www.google.com/maps/search/?api=1";
+//
+//			// Construct the URL with query and place_id
+//			$url = sprintf("%s&query=%s&query_place_id=%s", $baseUrl, urlencode($lookup), urlencode($placeId));
+//
+//			return $url;
+		}
+
+		return null;
 	}
 
 	private function html_sanitize($html) : string {
@@ -1091,6 +1299,169 @@ BODY;
 
 		return $sanitizer->sanitizeFor('div', $html); // Will sanitize as body
 	}
+
+	// Helper method to check if model supports vision capabilities
+	private function doesModelSupportVision()
+	{
+		list($provider, $model) = $this->parseCurrentModel();
+		
+		if (!isset(self::$availableModels[$provider]['models'][$model])) {
+			return false;
+		}
+		
+		return self::$availableModels[$provider]['models'][$model]['vision_capable'] ?? false;
+	}
+	
+	// Parse the current model into provider and model name
+	private function parseCurrentModel()
+	{
+		return [$this->aiProvider, $this->aiModel];
+	}
+	
+	// Parse a model string like "openai:o3-mini" into provider and model
+	private function parseModelString($modelString)
+	{
+		$parts = explode(':', $modelString);
+		if (count($parts) === 2) {
+			return $parts;
+		}
+		// Default fallback
+		return ['openai', 'o3-mini'];
+	}
+	
+	// Check if a model string is valid
+	private function isValidModel($modelString)
+	{
+		list($provider, $model) = $this->parseModelString($modelString);
+		return isset(self::$availableModels[$provider]['models'][$model]);
+	}
+
+    /**
+     * Formats validation errors from Opis/JsonSchema into a more readable array.
+     *
+     * @param \Opis\JsonSchema\Errors\ValidationError|null $error
+     * @return array
+     */
+    private function formatValidationErrors(?ValidationError $error): array
+    {
+        if (!$error) {
+            return [];
+        }
+        $formattedErrors = [];
+        
+        // Basic error info that should always be available
+        $errorInfo = [
+            'keyword' => $error->keyword(),
+            'message' => $error->message()
+        ];
+        
+        // Try to safely add pointer information using regex extraction
+        try {
+            // For additionalProperties errors, try to extract property names
+            if ($error->keyword() === 'additionalProperties' && 
+                preg_match('/properties: (.+)/', $error->message(), $matches)) {
+                $errorInfo['invalidProperties'] = $matches[1];
+            }
+            
+            // For type errors, try to extract expected vs actual type
+            if ($error->keyword() === 'type' && 
+                preg_match('/\((.+)\) must match the type: (.+)/', $error->message(), $matches)) {
+                $errorInfo['actualType'] = $matches[1];
+                $errorInfo['expectedType'] = $matches[2];
+            }
+            
+            // For properties errors, try to extract property info
+            if ($error->keyword() === 'properties' && 
+                preg_match('/properties must match schema: (.+)/', $error->message(), $matches)) {
+                $errorInfo['propertySchema'] = $matches[1];
+            }
+        } catch (\Throwable $e) {
+            $errorInfo['extraInfoError'] = $e->getMessage();
+        }
+        
+        $formattedErrors[] = $errorInfo;
+
+        // Recursively format sub-errors if any
+        foreach ($error->subErrors() as $subError) {
+            $formattedErrors = array_merge($formattedErrors, $this->formatValidationErrors($subError));
+        }
+        return $formattedErrors;
+    }
+
+	function handleValidationError($validationError, $ret, $responseSchema)
+	{
+		// Format the errors
+		$formattedValidationErrors = $this->formatValidationErrors($validationError);
+
+		// Enhanced debugging: Check for specific validation issues
+		$additionalInfo = [];
+
+		// Check for additionalProperties violations
+		$hasAdditionalProps = false;
+		foreach ($formattedValidationErrors as $error) {
+			if ($error['keyword'] === 'additionalProperties') {
+				$hasAdditionalProps = true;
+				break;
+			}
+		}
+
+		if ($hasAdditionalProps && isset($ret['eventData']) && is_array($ret['eventData'])) {
+			// Find unexpected properties in eventData
+			$schemaProps = $responseSchema['properties']['eventData']['properties'] ?? [];
+			$unexpectedFields = [];
+
+			foreach ($ret['eventData'] as $key => $value) {
+				if (!isset($schemaProps[$key])) {
+					$unexpectedFields[] = $key;
+				}
+			}
+
+			if (!empty($unexpectedFields)) {
+				$additionalInfo['unexpectedEventDataFields'] = $unexpectedFields;
+			}
+		}
+
+		// Log details including formatted errors and failing JSON
+		$errorLogDetails = [
+			'message' => 'AI response failed initial schema validation',
+			'validationErrors' => $formattedValidationErrors,
+			'additionalInfo' => $additionalInfo,
+			'receivedJson' => $ret,
+			'schema' => $responseSchema
+		];
+		errlog(json_encode($errorLogDetails, JSON_PRETTY_PRINT));
+	}
+}
+
+// Function to get available models for the extension
+function getAvailableModels()
+{
+	$result = [];
+	
+	foreach (EmailProcessor::$availableModels as $provider => $providerData) {
+		foreach ($providerData['models'] as $modelId => $modelInfo) {
+			$result[] = [
+				'id' => $provider . ':' . $modelId,
+				'name' => $modelInfo['name'],
+				'description' => $modelInfo['description'],
+				'vision_capable' => $modelInfo['vision_capable'],
+				'default' => $modelInfo['default']
+			];
+		}
+	}
+	
+	// Sort by default (default models first), then by name
+	usort($result, function($a, $b) {
+		if ($a['default'] !== $b['default']) {
+			return $a['default'] ? -1 : 1;
+		}
+		return strcmp($a['name'], $b['name']);
+	});
+	
+	return [
+		'models' => $result,
+		'server_preference' => true  // Indicates server has preference for default model
+	];
 }
 
 class WebPage
@@ -1231,7 +1602,9 @@ HTML;
 			$_REQUEST['html'] ?? '',
 			$_REQUEST['display'] ?? 'email',
 			$_REQUEST['tentative'] ?? true,
-			$_REQUEST['instructions'] ?? null
+			$_REQUEST['instructions'] ?? null,
+			$_REQUEST['screenshot'] ?? null,
+			$_REQUEST['model'] ?? null
 		);
     }
 
@@ -1251,6 +1624,7 @@ HTML;
 $dotenv = Dotenv::createImmutable(__DIR__);
 $dotenv->load();
 
+/** @disregard */
 if (function_exists('xdebug_is_debugger_active') && xdebug_is_debugger_active()) {
 	$page = new WebPage();
 	$page->handleRequest();
@@ -1262,23 +1636,44 @@ try {
 	$page = new WebPage();
 	$page->handleRequest();
 } catch (Throwable $t) {
-	http_response_code(200); // 500 - Postmark will just keep resending if it gets a 500
-	header('Content-type: text/plain');
+	// Log the full error server-side regardless
 	errlog($t);
-	print_r($t);
 
+	// Check if the request likely came from the extension
+	if (isset($_REQUEST['fromExtension'])) {
+		// Respond with generic 500 for the extension
+		http_response_code(500);
+		header('Content-type: application/json');
+		echo json_encode(['error' => 'Internal Server Error']);
+	} else {
+		// Respond with detailed HTML error for direct access/other sources
+		http_response_code(500); // Still an error
+		header('Content-type: text/html');
+		echo '<h1>Internal Server Error</h1>';
+		echo '<p>An unexpected error occurred. Details have been logged.</p>';
+        // Optionally include basic error details for direct debugging
+        echo '<hr><p><b>Debug Info (Direct Access):</b></p>';
+        echo '<p>Error: ' . htmlspecialchars($t->getMessage()) . '</p>';
+        echo '<pre>' . htmlspecialchars(substr($t->getTraceAsString(), 0, 1000)) . '...</pre>'; // Limit trace output
+	}
+
+    // Keep sending the detailed error email for debugging
 	$err = '<h1>ERROR PROCESSING CALENDAR EVENT</h1>' .
-		'<p>Error: <b>' . $t->getMessage() . '</b></p>' .
-		'<pre>' . var_export($t, true) . '</pre>' .
-		'<p>Original POST:</p>' .
-		'<pre>' . json_encode($_POST) . '</pre>';
+		'<p>Error: <b>' . htmlspecialchars($t->getMessage()) . '</b></p>' .
+		'<pre>' . htmlspecialchars(var_export($t, true)) . '</pre>' .
+		'<p>Original POST/REQUEST:</p>' .
+		'<pre>' . htmlspecialchars(json_encode($_REQUEST)) . '</pre>'; // Log entire REQUEST
 
-	$processor = new EmailProcessor;
-	$processor->sendEmail(null, $_ENV['ERROR_EMAIL'], 'ERROR PROCESSING CALENDAR EVENT', $err);
+	// Use try-catch for sending email to prevent infinite loops if email fails
+	try {
+	    $processor = new EmailProcessor;
+	    $processor->sendEmail(null, $_ENV['ERROR_EMAIL'], 'ERROR PROCESSING CALENDAR EVENT', $err);
+	} catch (Throwable $emailError) {
+	    errlog("Failed to send error email: " . $emailError->getMessage());
+	}
 }
 
 $out = ob_get_flush();
-//errlog('OUTPUT: ' . $out);
 
 function dd($var)
 {

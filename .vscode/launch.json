@@ -13,16 +13,28 @@
         "-dxdebug.mode=debug",
         "-dxdebug.start_with_request=yes",
         "-S",
-        "localhost:9999"
+        "localhost:29999"
       ],
       "program": "",
       "cwd": "${workspaceRoot}",
-      "port": 9003,
-//      "serverReadyAction": {
-//        "pattern": "Development Server \\(http://localhost:([0-9]+)\\) started",
-//        "uriFormat": "http://localhost:%s",
-//        "action": "openExternally"
-//      }
+      "port": 9003
+    },
+//		{
+//			"type": "chrome",
+//			"request": "launch",
+//			"name": "Launch Chrome Extension (Canary)",
+//			"runtimeExecutable": "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+//			"url": "https://mail.google.com", // A URL to open (you can change this)
+//			"runtimeArgs": ["--load-extension=${workspaceFolder}/chrome-extension"],
+//			"userDataDir": "${workspaceFolder}/.vscode/chrome-canary-debug-profile"
+//		},
+    {
+      "name": "Chrome: Attach to Extension",
+      "type": "chrome",
+      "request": "attach",
+      "port": 9222,
+      "webRoot": "${workspaceFolder}/chrome-extension",
+      "sourceMaps": true
     }
   ]
 }

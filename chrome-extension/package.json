@@ -1,0 +1,9 @@
+{
+  "name": "email-to-ics-chrome-extension",
+  "version": "1.0.0",
+  "description": "Packages the Email to ICS Chrome Extension",
+  "scripts": {
+    "package": "mkdir -p dist && zip -r dist/email-to-ics-extension.zip manifest.json background.js popup.html popup.js popup.css icons/* -x '*.DS_Store'"
+  },
+  "devDependencies": {}
+} 
