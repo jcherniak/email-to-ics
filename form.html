@@ -53,7 +53,28 @@
                 </div>
             </div>
             <button type="submit" class="btn btn-primary" id="submitBtn">Submit</button>
+            <button type="button" id="send-email-button" class="btn btn-success">Send Email</button>
+            <button type="button" id="cancel-button" class="btn btn-danger">Cancel</button>
         </form>
+
+        <div id="processingView" class="mt-4" style="display: none;">
+            <div class="card mb-3">
+                <div class="card-header">Request</div>
+                <div class="card-body">
+                    <pre id="requestData"></pre>
+                </div>
+            </div>
+            <div class="card mb-3">
+                <div class="card-header">Status</div>
+                <div class="card-body" id="statusMessage"></div>
+            </div>
+            <div class="card mb-3">
+                <div class="card-header">Response</div>
+                <div class="card-body">
+                    <pre id="responseData"></pre>
+                </div>
+            </div>
+        </div>
 
         <div id="resultContainer" class="mt-4"></div>
     </div>
@@ -69,6 +90,11 @@
             
             const form = event.target;
             const submitButton = document.getElementById('submitBtn');
+            const icsFormElement = document.getElementById('icsForm');
+            const processingViewElement = document.getElementById('processingView');
+            const requestDataElement = document.getElementById('requestData');
+            const statusMessageElement = document.getElementById('statusMessage');
+            const responseDataElement = document.getElementById('responseData');
 
             if (!form.checkValidity()) {
                 event.stopPropagation();
@@ -79,51 +105,76 @@
 
             const formData = new FormData(form);
             const displayOption = formData.get('display');
+            
+            // Display request data
+            let requestText = '';
+            for (const [key, value] of formData.entries()) {
+                requestText += `${key}: ${value}\\n`;
+            }
+            requestDataElement.textContent = requestText;
+
+            // Hide form, show processing view
+            icsFormElement.style.display = 'none';
+            processingViewElement.style.display = 'block';
+            statusMessageElement.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Processing...';
+            responseDataElement.textContent = ''; // Clear previous response
 
             // Create new abort controller for this request
             currentController = new AbortController();
-            submitButton.disabled = true;
+            submitButton.disabled = true; // Keep button disabled state logic
 
-            showAlert('Processing your request...', 'info', true);
+            // No need for separate showAlert for processing anymore
+            // showAlert('Processing your request...', 'info', true); 
 
             fetch('index.php', {
                 method: 'POST',
                 body: formData,
                 signal: currentController.signal
             })
-            .then(response => {
+            .then(async response => { // Changed to async to await response.text()
+                const responseText = await response.text(); // Get text regardless of ok status
                 if (!response.ok) {
-                    return response.text().then(text => {
-                        const content = `Status: ${response.status} ${response.statusText}<br/>${text}`;
-                        createCard('Error Output', content, 'danger', true);
-                        throw new Error('Network response was not ok');
-                    });
+                    statusMessageElement.textContent = `Error: ${response.status} ${response.statusText}`;
+                    responseDataElement.textContent = responseText; // Display error response text
+                    throw new Error(`Network response was not ok: ${response.status} ${response.statusText}`);
                 }
-                return response.text();
+                return responseText; // Pass text to next .then
             })
             .then(data => {
-                handleResult(data, displayOption);
-                showAlert('Completed', 'success');
+                statusMessageElement.textContent = 'Success';
+                responseDataElement.textContent = data; // Display successful response
+                // Original handleResult logic might still be needed if download/email is required
+                // For now, just displaying the response text. 
+                // handleResult(data, displayOption); // Commented out for now
+                // showAlert('Completed', 'success'); // Replaced by status update
             })
             .catch(error => {
                 if (error.name === 'AbortError') {
                     console.log('Request was aborted');
+                    statusMessageElement.textContent = 'Request Aborted';
                 } else {
                     console.error('Fetch error:', error);
+                    // Status might already be set by the !response.ok check
+                    if (!statusMessageElement.textContent.startsWith('Error:')) {
+                         statusMessageElement.textContent = `Fetch Error: ${error.message}`;
+                    }
                 }
             })
             .finally(() => {
                 currentController = null;
-                submitButton.disabled = false;
+                submitButton.disabled = false; // Re-enable button
             });
         });
 
+        // Remove handleResult function as its core logic is integrated or separate
+        /* 
         function handleResult(data, displayOption) {
             const resultContainer = document.getElementById('resultContainer');
-            resultContainer.innerHTML = '';
+            resultContainer.innerHTML = ''; // Clear old results if any
 
             if (displayOption === 'display' || displayOption === 'email') {
-                createCard(displayOption === 'display' ? 'ICS Output' : 'Email Confirmation', data, 'info', true);
+                 // Potentially keep createCard or similar for formatted display if needed later
+                // createCard(displayOption === 'display' ? 'ICS Output' : 'Email Confirmation', data, 'info', true);
             } else if (displayOption === 'download') {
                 const blob = new Blob([data], { type: 'text/calendar' });
                 const url = URL.createObjectURL(blob);
@@ -136,6 +187,7 @@
                 URL.revokeObjectURL(url);
             }
         }
+        */
 
         function showAlert(message, type, withSpinner = false) {
             const alertContainer = document.getElementById('alertContainer');
@@ -146,32 +198,16 @@
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close" onclick="clearAlerts()"></button>
                 </div>
             `;
-        }
-
-        function createCard(title, content, cardType, isHtmlContent) {
+            const submitButton = document.getElementById('submitBtn');
+            submitButton.disabled = false;
             const resultContainer = document.getElementById('resultContainer');
-            const cardHtml = `
-                <div class="card text-bg-${cardType} mb-3">
-                    <div class="card-header">
-                        <button type="button" class="btn-close float-end" data-bs-dismiss="alert" aria-label="Close"></button>
-						<button type="button" class="btn btn-warning btn-sm float-end" id="nl2br">\\n -> &lt;br&gt;</button>
-                        ${title}
-                    </div>
-                    <div class="card-body">
-                        <pre class="card-text"></pre>
-                    </div>
-                </div>`;
-            resultContainer.innerHTML = cardHtml;
-            const preElement = resultContainer.querySelector('pre');
-            if (isHtmlContent) {
-                preElement.innerHTML = content; // Interpret the content as HTML
-            } else {
-                preElement.textContent = content; // Escape the content and display as plain text
-            }
+            resultContainer.innerHTML = '';
 
-			document.getElementById('nl2br').addEventListener('click', function() {
-				document.querySelector('pre.card-text').innerHTML = document.querySelector('pre.card-text').innerHTML.replaceAll("\\n","<br>")
-			});
+            // Hide processing view and show form again
+            const icsFormElement = document.getElementById('icsForm');
+            const processingViewElement = document.getElementById('processingView');
+            if (icsFormElement) icsFormElement.style.display = 'block';
+            if (processingViewElement) processingViewElement.style.display = 'none';
         }
 
         function clearAlerts() {

@@ -1,9 +1,16 @@
 {
-  "name": "email-to-ics-chrome-extension",
+  "name": "email-to-ics-extension-popup",
   "version": "1.0.0",
-  "description": "Packages the Email to ICS Chrome Extension",
+  "description": "Handles popup logic for email-to-ics",
+  "private": true,
   "scripts": {
-    "package": "mkdir -p dist && zip -r dist/email-to-ics-extension.zip manifest.json background.js popup.html popup.js popup.css icons/* -x '*.DS_Store'"
+    "build": "esbuild popup.js --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap",
+    "watch": "esbuild popup.js --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --watch"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "esbuild": "^0.20.0" 
+  },
+  "dependencies": {
+    "ical.js": "^2.0.0" 
+  }
 } 

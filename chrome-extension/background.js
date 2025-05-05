@@ -11,29 +11,64 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log("Context menu created.");
 });
 
+// Function to be injected into the page to get selected HTML
+function getSelectedHtmlFragment() {
+    const selection = window.getSelection();
+    if (!selection.rangeCount) {
+        return null; // No selection
+    }
+    const range = selection.getRangeAt(0);
+    const fragment = range.cloneContents();
+    const div = document.createElement('div');
+    div.appendChild(fragment);
+    return div.innerHTML; // Return the HTML of the selected fragment
+}
+
 // --- Context Menu Click Handler ---
-chrome.contextMenus.onClicked.addListener((info, tab) => {
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === CONTEXT_MENU_ID && info.selectionText) {
-    console.log("Context menu storing selection:", info.selectionText);
-    // 1. Store the selection text for the popup to retrieve
-    chrome.storage.local.set({ contextMenuInstructions: info.selectionText }, () => {
-      if (chrome.runtime.lastError) {
-        console.error("Error saving context menu instructions:", chrome.runtime.lastError);
-      } else {
-        console.log("Context menu instructions saved.");
-        // 2. Open the popup
-        chrome.action.openPopup({}, (window) => {
-           if (chrome.runtime.lastError) {
-              // Fallback if openPopup fails (e.g., another popup already open)
-              // You could notify the user or log, but for now, just log.
-              console.warn("Could not open popup via context menu:", chrome.runtime.lastError.message);
-           } else {
-              console.log("Popup opened via context menu.");
-           }
-        });
-      }
-    });
-    // handleContextMenuAction(info.selectionText, tab); // REMOVED - We no longer submit automatically
+    const prefix = "Focus on this section exclusively. Use surrounding html for other context, but this is the event we want:\n\n";
+        
+        try {
+            // Inject script to get the HTML fragment
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                func: getSelectedHtmlFragment
+            });
+
+            let selectedContent = info.selectionText; // Fallback to plain text
+            if (results && results[0] && results[0].result) {
+                selectedContent = results[0].result; // Use HTML fragment if successful
+                console.log("Context menu got HTML fragment:", selectedContent);
+            } else {
+                 console.warn("Could not get HTML fragment, using selection text instead.");
+            }
+           
+            const instructions = prefix + selectedContent; // Combine prefix and content (HTML or text)
+            console.log("Context menu storing instructions:", instructions);
+
+            // 1. Store the instructions
+            chrome.storage.local.set({ contextMenuInstructions: instructions }, () => {
+                if (chrome.runtime.lastError) {
+                    console.error("Error saving context menu instructions:", chrome.runtime.lastError);
+                } else {
+                    console.log("Context menu instructions saved.");
+                    // 2. Open the popup
+                    chrome.action.openPopup({}, (window) => {
+                        if (chrome.runtime.lastError) {
+                           console.warn("Could not open popup via context menu:", chrome.runtime.lastError.message);
+                        } else {
+                           console.log("Popup opened via context menu.");
+                        }
+                    });
+                }
+            });
+
+        } catch (error) {
+            console.error("Error injecting script or processing selection:", error);
+            // Optionally, handle the error, maybe fall back to just text?
+            // For now, just log it. The popup might open without instructions.
+        }
   }
 });
 

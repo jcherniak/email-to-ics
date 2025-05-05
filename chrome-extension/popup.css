@@ -6,6 +6,9 @@ body {
     padding: 10px;
     font-size: 14px;
     transition: min-height 0.2s ease-in-out; /* Add transition for smoother size change */
+    margin: 10px;
+    min-width: 400px;
+    background-color: #f4f4f4;
 }
 
 /* Make popup taller when error is shown */
@@ -201,4 +204,392 @@ iframe.error-frame {
 
 .logout-button:hover {
     background-color: #dcdcdc;
+}
+
+/* General Styles */
+h1 {
+    text-align: center;
+    color: #333;
+    font-size: 1.2em;
+    margin-bottom: 15px;
+}
+
+/* Input Groups */
+.input-group {
+    margin-bottom: 10px;
+}
+
+.input-group label {
+    display: block;
+    margin-bottom: 3px;
+    font-weight: bold;
+    font-size: 0.9em;
+    color: #555;
+}
+
+.input-group input[type="text"],
+.input-group textarea,
+.input-group select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box; /* Include padding and border in the element's total width and height */
+}
+
+.input-group textarea {
+    resize: vertical;
+    min-height: 40px;
+}
+
+.input-group select {
+    appearance: none; /* Override default system appearance */
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-color: #fff;
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23333" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/><path d="M0 0h24v24H0z" fill="none"/></svg>'); /* Simple dropdown arrow */
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 30px; /* Make space for the arrow */
+}
+
+/* Model Selection Specific */
+#model-select {
+    flex-grow: 1;
+    margin-right: 5px;
+}
+
+.input-group button#refresh-models {
+    padding: 8px 10px;
+    background-color: #eee;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1.1em;
+    line-height: 1;
+}
+
+.input-group button#refresh-models:hover {
+    background-color: #ddd;
+}
+
+/* Inline group for select + button */
+.input-group.inline-group .select-button-wrapper {
+    display: flex;
+    align-items: center; /* Vertically align items */
+}
+
+.input-group.inline-group .select-button-wrapper select {
+    flex-grow: 1; /* Allow select to take up available space */
+    margin-right: 5px; /* Space between select and button */
+}
+
+.input-group.inline-group .select-button-wrapper button {
+    flex-shrink: 0; /* Prevent button from shrinking */
+}
+
+/* Model Description */
+.model-description {
+    margin-top: -5px; /* Reduce space above description */
+    margin-bottom: 10px;
+}
+
+.model-description p {
+    font-size: 0.85em;
+    color: #666;
+    margin: 0;
+    padding: 5px;
+    background-color: #efefef;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    min-height: 1.5em; /* Ensure it doesn't collapse */
+}
+
+/* Button Group */
+.button-group {
+    display: flex;
+    justify-content: space-around; /* Distribute space */
+    margin-top: 15px;
+}
+
+button {
+    padding: 10px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    background-color: #007bff;
+    color: white;
+    font-size: 0.9em;
+    flex-grow: 1; /* Allow buttons to grow */
+    margin: 0 5px; /* Add some space between buttons */
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+/* Status Messages */
+#status, #review-status {
+    margin-top: 10px;
+    text-align: center;
+    font-weight: bold;
+}
+
+.status-success {
+    color: green;
+}
+
+.status-error {
+    color: red;
+}
+
+.status-loading {
+    color: #555;
+}
+
+/* Auth Section */
+#auth-section {
+    text-align: center;
+    padding: 20px;
+    border: 1px solid #ddd;
+    background-color: #fff;
+    border-radius: 5px;
+}
+
+#auth-section p {
+    margin-bottom: 15px;
+}
+
+#auth-section button {
+    padding: 10px 20px;
+}
+
+/* Options Grouping */
+.options-group {
+    display: flex;
+    justify-content: space-between; /* Adjust as needed */
+    align-items: center;
+    margin-top: 15px;
+    padding: 10px;
+    background-color: #eee;
+    border-radius: 4px;
+}
+
+/* Toggle Switch */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px; /* Adjust width */
+    height: 24px; /* Adjust height */
+    margin-right: 10px;
+}
+
+.toggle-switch input { display: none; }
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 18px; /* Adjust size */
+    width: 18px; /* Adjust size */
+    left: 3px; /* Adjust position */
+    bottom: 3px; /* Adjust position */
+    background-color: white;
+    transition: .4s;
+}
+
+input:checked + .slider {
+    background-color: #4CAF50; /* Green for Tentative (or reverse meaning if needed) */
+}
+
+input:checked + .slider:before {
+    transform: translateX(26px); /* Adjust distance */
+}
+
+.slider.round {
+    border-radius: 24px; /* Adjust for height */
+}
+
+.slider.round:before {
+    border-radius: 50%;
+}
+
+.label-text {
+    margin-left: 55px; /* Space for the toggle */
+    vertical-align: middle;
+    line-height: 24px; /* Match toggle height */
+    font-weight: normal;
+    font-size: 0.9em;
+}
+
+/* Checkbox */
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    font-weight: normal;
+    font-size: 0.9em;
+}
+
+.checkbox-label input[type="checkbox"] {
+    margin-right: 8px;
+}
+
+/* Review Section */
+#review-section {
+    margin-top: 20px;
+    padding: 15px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    background-color: #f9f9f9;
+}
+
+#review-section h2 {
+    margin-top: 0;
+    text-align: center;
+    color: #333;
+    font-size: 1.1em;
+}
+
+#review-content {
+    background-color: #fff;
+    border: 1px solid #ddd;
+    padding: 10px;
+    max-height: 200px;
+    overflow-y: auto;
+    white-space: pre-wrap; /* Wrap long lines */
+    word-wrap: break-word;
+    font-family: monospace;
+    font-size: 0.85em;
+    margin-bottom: 10px;
+}
+
+#review-section p {
+    font-size: 0.9em;
+    margin-bottom: 15px;
+}
+
+#review-section .button-group {
+    margin-top: 0;
+}
+
+/* Radio Button Group */
+.radio-group {
+    display: flex;
+    flex-direction: column; /* Stack radios vertically */
+    align-items: flex-start; /* Align radios to the left */
+}
+
+.radio-label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    font-weight: normal;
+    font-size: 0.9em;
+    margin-bottom: 5px; /* Space between radio options */
+}
+
+.radio-label:last-child {
+    margin-bottom: 0;
+}
+
+.radio-label input[type="radio"] {
+    margin-right: 8px;
+}
+
+/* Processing View Specific Styles */
+#processingView #requestData,
+#processingView #responseData,
+#processingView #statusMessage {
+    max-height: 150px; /* Adjust as needed */
+    overflow-y: auto;
+    background-color: #f8f9fa; /* Light background for pre */
+    padding: 10px;
+    border: 1px solid #dee2e6; /* Subtle border */
+    border-radius: 4px;
+    white-space: pre-wrap; /* Ensure wrapping */
+    word-wrap: break-word;
+}
+
+#processingView .card-header {
+    font-weight: bold;
+}
+
+#processingView .card {
+    margin-bottom: 10px; /* Add some space between cards */
+}
+
+/* Add styles for collapse icon toggle */
+[data-bs-toggle="collapse"] .collapse-icon::before {
+    content: '\25BC'; /* ▼ Down arrow by default (collapsed) */
+    display: inline-block;
+    transition: transform 0.2s ease-in-out;
+}
+
+[data-bs-toggle="collapse"][aria-expanded="true"] .collapse-icon::before {
+    content: '\25B2'; /* ▲ Up arrow when expanded */
+}
+
+/* Optional: Remove the placeholder character from the span if it exists */
+.collapse-icon {
+    font-size: 0; /* Hide original character if needed */
+}
+
+.collapse-icon::before {
+     font-size: initial; /* Restore font size for the pseudo-element */
+}
+
+/* Format success message and ICS parsed content */
+.success-message {
+    padding: 10px;
+    margin-bottom: 15px;
+    border-left: 4px solid #28a745;
+    background-color: #f8f9fa;
+    font-size: 14px;
+}
+
+/* Improve display of the ICS details */
+.ics-details {
+    margin: 0;
+    padding: 0;
+}
+
+.ics-details dt {
+    font-weight: bold;
+    margin-bottom: 4px;
+    color: #495057;
+    padding: 5px 0;
+    border-top: 1px solid #e9ecef;
+}
+
+.ics-details dt:first-child {
+    border-top: none; 
+}
+
+.ics-details dd {
+    margin-left: 0;
+    margin-bottom: 8px;
+    padding-left: 15px;
+}
+
+/* Style for plain text fallback */
+.plain-text {
+    background-color: #f8f9fa;
+    padding: 10px;
+    font-size: 13px;
 } 

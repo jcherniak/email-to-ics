@@ -2,7 +2,13 @@
 // Debug logging to see where the script fails
 error_log('Script started at ' . date('Y-m-d H:i:s'));
 
+
+ignore_user_abort();
+ini_set('display_errors', 'On');
+ini_set('error_reporting', E_ALL & ~E_DEPRECATED);
+
 require 'vendor/autoload.php';
+require_once 'IcalGenerator.php'; // Include the new generator class
 error_log('Autoloader loaded');
 
 // Load environment variables early
@@ -16,16 +22,12 @@ use OpenAI\Exceptions\UnserializableResponse;
 use Spatie\PdfToText\Pdf;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizerConfig;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
-use ICal\ICal;
 use Opis\JsonSchema\Errors\ValidationError;
+use App\IcalGenerator; // Use the generator from its namespace
 
 // Define cache settings
 define('MODEL_CACHE_FILE', __DIR__ . '/.models_cache.json');
 define('MODEL_CACHE_DURATION', 7 * 24 * 60 * 60); // 7 days in seconds
-
-ignore_user_abort();
-ini_set('display_errors', 'On');
-ini_set('error_reporting', E_ALL & ~E_DEPRECATED);
 
 // Add new endpoint for model info
 if (isset($_GET['get_models'])) {
@@ -232,11 +234,14 @@ class EmailProcessor
      * @param string $display How to handle the output ('download', 'display', or 'email')
      * @param bool $tentative Whether to mark the event as tentative
      * @param string|null $instructions Additional instructions for the AI
-     * @param string|null $screenshot Base64-encoded screenshot (optional)
+     * @param string|null $screenshotViewport Base64-encoded viewport screenshot for vision models
+     * @param string|null $screenshotZoomed Base64-encoded zoomed screenshot for vision models
      * @param string|null $requestedModel Specific AI model to use (optional)
+     * @param bool $needsReview Whether the event needs review
+     * @param bool $fromExtension Whether the request is from an extension
      * @return void
      */
-	public function processUrl($url, $downloadedText, $display, $tentative = true, $instructions = null, $screenshot = null, $requestedModel = null)
+	public function processUrl($url, $downloadedText, $display, $tentative = true, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $needsReview = false, $fromExtension = false)
 	{
 		if (empty(trim($downloadedText))) {
 			if (!$this->is_valid_url($url)) {
@@ -272,12 +277,12 @@ class EmailProcessor
 
 		// Process screenshot if provided
 		$screenshotBase64 = null;
-		if ($screenshot) {
+		if ($screenshotViewport) {
 			// Remove the data URL prefix if present
-			if (strpos($screenshot, 'data:image/') === 0) {
-				$screenshotBase64 = substr($screenshot, strpos($screenshot, ',') + 1);
+			if (strpos($screenshotViewport, 'data:image/') === 0) {
+				$screenshotBase64 = substr($screenshotViewport, strpos($screenshotViewport, ',') + 1);
 			} else {
-				$screenshotBase64 = $screenshot;
+				$screenshotBase64 = $screenshotViewport;
 			}
 			errlog("Screenshot provided: " . substr($screenshotBase64, 0, 50) . "... (" . strlen($screenshotBase64) . " bytes)");
 		}
@@ -289,9 +294,50 @@ class EmailProcessor
 {$downloadedText}
 TEXT;
 
-		$calEvent = $this->generateIcalEvent($combinedText, $instructions, $screenshotBase64);
+		$calEvent = $this->generateIcalEvent($combinedText, $instructions, $screenshotViewport, $screenshotZoomed, $requestedModel);
 		$ics = $calEvent['ICS'];
-		$subject = $calEvent['EmailSubject'];
+		$subject = $calEvent['emailSubject'] ?? 'Calendar Event'; // Use a default subject
+
+		// Check if review is needed AND the request came from the extension
+		if ($needsReview && $fromExtension) {
+			// Determine recipient email based on tentative flag for review screen
+			$recipientEmail = $tentative ? $this->toTentativeEmail : $this->toConfirmedEmail;
+
+			// --- Generate and store confirmation token ---
+			$confirmationToken = bin2hex(random_bytes(16)); // Generate a unique token
+			$cacheDir = __DIR__ . '/confirm_cache';
+			if (!is_dir($cacheDir)) {
+				mkdir($cacheDir, 0770, true); // Create cache dir if it doesn't exist (adjust permissions if needed)
+			}
+			$cacheFile = $cacheDir . '/' . $confirmationToken . '.json';
+			$dataToStore = [
+				'ics' => $ics,
+				'recipient' => $recipientEmail,
+				'subject' => $subject,
+				'timestamp' => time()
+			];
+
+			if (file_put_contents($cacheFile, json_encode($dataToStore)) === false) {
+				 errlog("Error writing confirmation token cache file: {$cacheFile}");
+				 http_response_code(500);
+				 echo json_encode(['error' => 'Failed to store confirmation data.']);
+				 exit;
+			}
+			// --- End Token Handling ---
+
+			header('Content-Type: application/json');
+			echo json_encode([
+				'needsReview' => true,
+				'icsContent' => $ics,
+				'emailSubject' => $subject,
+				'recipientEmail' => $recipientEmail, // Send intended recipient to extension
+				'confirmationToken' => $confirmationToken // Include the token
+			]);
+			exit; // Stop processing, send JSON back to extension for review
+		}
+
+		// --- If not reviewing, proceed with requested action (download/display/email) ---
+
 		if ($display == 'download') {
 			$filename = 'event.ics';
 
@@ -328,11 +374,25 @@ BODY;
 
 		$this->sendEmail($ics, $recipientEmail, $subject, $htmlBody);
 
-		http_response_code(200);
-		echo "<h1>Email sent to {$recipientEmail} with ICS file:</h1><pre>";
-		echo htmlspecialchars($this->unescapeNewlines($ics));
-		echo '</pre>';
-		exit;
+		// --- Respond based on origin ---
+		if ($fromExtension) {
+			// Extension expects JSON
+			header('Content-Type: application/json');
+			echo json_encode([
+				'status' => 'success',
+				'message' => "Email sent successfully to {$recipientEmail}",
+				'recipientEmail' => $recipientEmail,
+				'emailSubject' => $subject,
+				'icsContent' => $ics // Include ICS for potential display/debug in extension
+			]);
+		} else {
+			// Original behavior for non-extension requests (web form, etc.)
+			http_response_code(200);
+			echo "<h1>Email sent to {$recipientEmail} with ICS file:</h1><pre>";
+			echo htmlspecialchars($this->unescapeNewlines($ics));
+			echo '</pre>';
+		}
+		exit; // exit moved outside the conditional
 	}
 
 	protected function extractMainContent(string $html) : string
@@ -362,18 +422,19 @@ HasBody:
 		$this->removeAttributes($body);
 		$this->removeEmptyElements($body);
 
-		$this->ensureUtf8($body);
+		// $this->ensureUtf8($body); // REMOVE THIS CALL
 
-		return $body->innerHTML;
-	}
+		$finalHtml = $body->innerHTML;
 
-	protected function ensureUtf8(\Dom\Element $body)
-	{
-		$body->textContent = mb_convert_encoding(
-			$body->textContent,
-			'UTF-8',
-			mb_detect_encoding($body->textContent)
-		);
+		// Apply UTF-8 conversion to the final HTML string
+		$encoding = mb_detect_encoding($finalHtml, mb_detect_order(), true); // Strict detection
+		if ($encoding && $encoding !== 'UTF-8') {
+			$finalHtml = mb_convert_encoding($finalHtml, 'UTF-8', $encoding);
+		}
+		// Ensure it IS UTF-8 even if detection failed or was already UTF-8 (handles potential invalid sequences)
+		$finalHtml = mb_convert_encoding($finalHtml, 'UTF-8', 'UTF-8'); 
+
+		return $finalHtml;
 	}
 
 	/**
@@ -448,7 +509,7 @@ HasBody:
 	protected function removeAttributes(\Dom\Element $body)
 	{
 		// Define allowed attributes
-		$allowedAttributes = ['class', 'id', 'for'];
+		$allowedAttributes = ['class', 'id', 'for', 'href']; // <-- Add 'href' here
 		
 		// Recursively process all child nodes
 		$elements = $body->getElementsByTagName('*');
@@ -500,7 +561,13 @@ HasBody:
 		$elements = $body->getElementsByTagName('*');
 		for ($i = $elements->length - 1; $i >= 0; $i--) {
 			$element = $elements->item($i);
-			if ($element->childNodes->length === 0 && $element->textContent === '') {
+
+            // *** Add check: Never remove <p> tags ***
+            if ($element && $element->tagName === 'p') {
+                continue; // Skip checking/removing paragraph tags
+            }
+
+			if ($element && $element->childNodes->length === 0 && trim($element->textContent) === '') { // Added trim()
 				if ($element->parentNode) {
 					// Remove the empty element from its parent
 					$element->parentNode->removeChild($element);
@@ -573,7 +640,7 @@ HasBody:
         $ret = $this->generateIcalEvent($combinedText, $instructions);
 
         $calendarEvent = $ret['ICS'];
-        $subject = $ret['EmailSubject'];
+        $subject = $ret['emailSubject'] ?? 'Calendar Event'; // Use a default subject
 		$recipientEmail = $this->toTentativeEmail;
 
 		if (strcasecmp($body['ToFull'][0]['Email'], $this->inboundConfirmedEmail) === 0) {
@@ -644,53 +711,54 @@ HasBody:
 
     /**
      * Generate an ICS calendar event from text content
-     * 
-     * Uses AI to extract event details from text and generate a structured calendar event
-     * 
-     * @param string $combinedText Text content to process
+     * Uses AI to extract event details and IcalGenerator to create the ICS.
+     *
+     * @param string|null $combinedText Text content to process
      * @param string|null $instructions Additional instructions for the AI
-     * @param string|null $screenshot Base64-encoded screenshot for vision models
+     * @param string|null $screenshotViewport Base64-encoded viewport screenshot for vision models
+     * @param string|null $screenshotZoomed Base64-encoded zoomed screenshot for vision models
+     * @param string|null $requestedModel Specific AI model to use (optional)
      * @return array Array containing ICS content and metadata
      */
-    private function generateIcalEvent($combinedText, $instructions = null, $screenshot = null)
-	{
-		// Define the NEW schema for structured event data
-		$eventSchema = [
-			'type' => 'object',
-			'properties' => [
-				'summary' => ['type' => 'string', 'description' => 'Concise title for the event.'],
-				'description' => ['type' => 'string', 'description' => 'Plain text description of the event (use \\n for newlines).'],
-				'htmlDescription' => ['type' => 'string', 'description' => 'HTML formatted version of the description. REQUIRED - convert plain text to HTML if needed.'],
-				'dtstart' => ['type' => 'string', 'description' => 'Start date/time in ISO 8601 format (e.g., 2024-10-28T06:30:00).'],
-				'dtend' => ['type' => 'string', 'description' => 'End date/time in ISO 8601 format (e.g., 2024-10-28T07:00:00). Optional, defaults based on event type if missing.'],
-				'timezone' => ['type' => 'string', 'description' => 'PHP Timezone identifier (e.g., America/Los_Angeles, America/New_York, UTC).'],
-				'location' => ['type' => 'string', 'description' => 'Physical location or address of the event.'],
-				'url' => ['type' => 'string', 'description' => 'URL related to the event (e.g., event page, ticket link).'],
-				'isAllDay' => ['type' => 'boolean', 'description' => 'True if this is an all-day event (dtstart/dtend should be date only: YYYY-MM-DD).'],
-				// Add other relevant fields like ORGANIZER, ATTENDEE, UID if needed, but keep it simple initially
-			],
-			'required' => ['summary', 'description', 'htmlDescription', 'dtstart', 'dtend', 'timezone', 'location', 'url', 'isAllDay'],
-			'additionalProperties' => false
-		];
+    private function generateIcalEvent($combinedText, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null)
+    {
+        // Define the NEW schema for structured event data
+        $eventSchema = [
+            'type' => 'object',
+            'properties' => [
+                'summary' => ['type' => 'string', 'description' => 'Concise title for the event.'],
+                'description' => ['type' => 'string', 'description' => 'Plain text description of the event (use \\n for newlines).'],
+                'htmlDescription' => ['type' => 'string', 'description' => 'HTML formatted version of the description. REQUIRED - convert plain text to HTML if needed.'],
+                'dtstart' => ['type' => 'string', 'description' => 'Start date/time in ISO 8601 format (e.g., 2024-10-28T06:30:00).'],
+                'dtend' => ['type' => 'string', 'description' => 'End date/time in ISO 8601 format (e.g., 2024-10-28T07:00:00). Optional, defaults based on event type if missing.'],
+                'timezone' => ['type' => 'string', 'description' => 'PHP Timezone identifier (e.g., America/Los_Angeles, America/New_York, UTC).'],
+                'location' => ['type' => 'string', 'description' => 'Physical location or address of the event.'],
+                'url' => ['type' => 'string', 'description' => 'URL related to the event (e.g., event page, ticket link).'],
+                'isAllDay' => ['type' => 'boolean', 'description' => 'True if this is an all-day event (dtstart/dtend should be date only: YYYY-MM-DD).'],
+                // Add other relevant fields like ORGANIZER, ATTENDEE, UID if needed, but keep it simple initially
+            ],
+            'required' => ['summary', 'description', 'htmlDescription', 'dtstart', 'dtend', 'timezone', 'location', 'url', 'isAllDay'],
+            'additionalProperties' => false
+        ];
 
-		$responseSchema = [
-			'type' => 'object',
-			'properties' => [
-				'success' => ['type' => 'boolean'],
-				'errorMessage' => ['type' => 'string'],
-				'eventData' => $eventSchema,
-				'emailSubject' => ['type' => 'string', 'description' => 'The generated summary, used for the email subject line.'],
-				'locationLookup' => ['type' => 'string', 'description' => 'Location string for Google Maps lookup.'],
-			],
-			'required' => ['success', 'errorMessage', 'eventData', 'emailSubject', 'locationLookup'],
-			'additionalProperties' => false,
-		];
+        $responseSchema = [
+            'type' => 'object',
+            'properties' => [
+                'success' => ['type' => 'boolean'],
+                'errorMessage' => ['type' => 'string'],
+                'eventData' => $eventSchema,
+                'emailSubject' => ['type' => 'string', 'description' => 'The generated summary, used for the email subject line.'],
+                'locationLookup' => ['type' => 'string', 'description' => 'Location string for Google Maps lookup.'],
+            ],
+            'required' => ['success', 'errorMessage', 'eventData', 'emailSubject', 'locationLookup'],
+            'additionalProperties' => false,
+        ];
 
-		$curYear = date('Y');
-		$curDate = date('m/d');
-		$nextYear = $curYear + 1;
+        $curYear = date('Y');
+        $curDate = date('m/d');
+        $nextYear = $curYear + 1;
 
-		$system = <<<PROMPT
+        $system = <<<PROMPT
 Create calendar event data from the following email text or downloaded HTML.
 
 # PRIMARY EVENT IDENTIFICATION - READ THIS FIRST
@@ -796,115 +864,151 @@ When parsing dates and timezones from the content:
 ***IF NO DATES ARE FOUND ANYWHERE IN THE EMAIL, RETURN success = false with an error message of "Email didn't contain dates or times". Ignore dates of the incoming email or forwarded messages. This overrides any directives above. ***
 
 # *** SPECIAL USER INSTRUCTIONS ***
-IF the next message block starts with "*** EXTREMELY IMPORTANT INSTRUCTIONS ***", treat those instructions as EXTREMELY HIGH PRIORITY. They should be given strong preference when they provide specific guidance about how to interpret or process the content. While the general rules above still apply, these instructions provide critical context or clarification for this specific request.
+IF the next message block starts with "*** EXTREMELY IMPORTANT INSTRUCTIONS ***", treat those instructions as EXTREMELY HIGH PRIORITY. They should be given strong preference when they provide specific guidance about how to interpret or process the content. 
+***If the user instructions appear to describe an event themselves (e.g., contain a date, time, location, description), treat THAT text as the primary source for the event, using the HTML content and screenshots mainly for context or missing details (like a precise address if the instructions only mention a venue name).*** Otherwise, follow the instructions as guidance for processing the HTML/screenshots.
+
+# *** SCREENSHOT GUIDANCE (IF PROVIDED) ***
+TWO screenshots might be provided: 'viewport' (what was visible initially) and 'zoomed' (attempting to show the whole page).
+- PRIORITIZE the 'viewport' screenshot for identifying the MAIN event. It's more likely to reflect the user's focus.
+- Use the 'zoomed' screenshot for broader context or if the viewport is missing key details found elsewhere on the page.
+- If only one screenshot is provided, use that.
+
 PROMPT;
 
-			$messages = [
-				[
-					'role' => 'system',
-					'content' => $system
-				],
-			];
+        $messages = [
+            [
+                'role' => 'system',
+                'content' => $system
+            ],
+        ];
 
-			if ($instructions) {
-				$messages[] = [
-					'role' => 'system',
-					'content' => "*** EXTREMELY IMPORTANT INSTRUCTIONS ***\n" . $instructions
-				];
-			}
+        if ($instructions) {
+            $messages[] = [
+                'role' => 'system',
+                'content' => "*** EXTREMELY IMPORTANT INSTRUCTIONS ***\n" . $instructions
+            ];
+        }
 
-			// Check if we have a screenshot and if the model supports vision
-			$hasScreenshot = !empty($screenshot);
-			$modelSupportsVision = $this->doesModelSupportVision();
-			
-			$userContent = [];
-			$userContent[] = [
-				'type' => 'text',
-				'text' => $combinedText
-			];
+        // Check if we have screenshots and if the model supports vision
+        $hasScreenshots = !empty($screenshotViewport) || !empty($screenshotZoomed);
+        $modelSupportsVision = $this->doesModelSupportVision();
+        
+        $userContent = [];
+        // Always add text first
+        $userContent[] = [
+            'type' => 'text',
+            'text' => $combinedText
+        ];
 
-			if ($hasScreenshot && $modelSupportsVision) {
-				errlog("Adding screenshot to request for vision model {$this->aiModel}");
-				$userContent[] = [
-					'type' => 'image_url',
-					'image_url' => [
-						'url' => 'data:image/jpeg;base64,' . $screenshot,
-					]
-				];
-			} elseif ($hasScreenshot && !$modelSupportsVision) {
-				errlog("Screenshot provided but model {$this->aiModel} does not support vision. Ignoring screenshot.");
-			}
+        if ($hasScreenshots && $modelSupportsVision) {
+            errlog("Adding screenshot(s) to request for vision model {$this->aiModel}");
+            // Add viewport screenshot if available
+            if (!empty($screenshotViewport)) {
+                $userContent[] = [
+                    'type' => 'image_url',
+                    'image_url' => [
+                        // Optional: Add a label/identifier if the API/model supports it in the future
+                        // 'label' => 'viewport_screenshot',
+                        'url' => 'data:image/jpeg;base64,' . $screenshotViewport,
+                    ]
+                ];
+            }
+            // Add zoomed screenshot if available
+            if (!empty($screenshotZoomed)) {
+                $userContent[] = [
+                    'type' => 'image_url',
+                    'image_url' => [
+                        // Optional: Add a label/identifier
+                        // 'label' => 'zoomed_screenshot',
+                        'url' => 'data:image/jpeg;base64,' . $screenshotZoomed,
+                    ]
+                ];
+            }
+        } elseif ($hasScreenshots && !$modelSupportsVision) {
+            errlog("Screenshot(s) provided but model {$this->aiModel} does not support vision. Ignoring screenshot(s).");
+        }
 
-			$messages[] = [
-				'role' => 'user',
-				'content' => $userContent
-			];
+        $messages[] = [
+            'role' => 'user',
+            'content' => $userContent
+        ];
 
-			$data = [
-				'model' => $this->aiModel,
-				'messages' => $messages,
-				'response_format' => [
-					'type' => 'json_schema',
-					'json_schema' =>  [
-						'name' => 'cal_response_structured',
-						'strict' => true,
-						'schema' => $responseSchema,
-					],
-				],
-				'reasoning' => [
-					'effort' => 'high'
-				],
-				'max_tokens' => $this->maxTokens,
-			];
+        $data = [
+            'model' => $this->aiModel,
+            'messages' => $messages,
+            'response_format' => [
+                'type' => 'json_schema',
+                'json_schema' =>  [
+                    'name' => 'cal_response_structured',
+                    'strict' => true,
+                    'schema' => $responseSchema,
+                ],
+            ],
+            'reasoning' => [
+                'effort' => 'high'
+            ],
+            'max_tokens' => $this->maxTokens,
+        ];
 
-			errlog('Sending OpenRouter request to model: ' . $this->aiModel);
-			try
-			{
-				$response = $this->openaiClient->chat()->create($data);
-			}
-			catch (UnserializableResponse $e)
-			{
-				errlog("OpenRouter UnserializableResponse: " . $e->getMessage());
-				http_response_code(500);
-				echo "<h1>Error communicating with AI Provider</h1><p>Could not decode the response.</p>";
-				echo '<pre>' . htmlspecialchars($e->getMessage()) . '</pre>';
-				die;
-			}
-			catch (\OpenAI\Exceptions\ErrorException $e) {
-				errlog("OpenRouter API Error: " . $e->getMessage());
-				http_response_code(500);
-				echo "<h1>Error communicating with AI Provider</h1>";
-				echo '<p>Details: ' . htmlspecialchars($e->getMessage()) . '</p>';
-				die;
-			}
-			catch (\Throwable $e) {
-				errlog("General Error during OpenRouter request: " . $e->getMessage());
-				throw $e;
-			}
+        errlog('Sending OpenRouter request to model: ' . $this->aiModel);
+        try
+        {
+            $response = $this->openaiClient->chat()->create($data);
+        }
+        catch (UnserializableResponse $e)
+        {
+            // Log the exception message, as accessing the raw body is problematic
+            errlog("OpenRouter UnserializableResponse: " . $e->getMessage());
+            
+            http_response_code(500);
+            echo "<h1>Error communicating with AI Provider</h1><p>Could not decode the response.</p>";
+            echo '<p>This usually means the API returned an unexpected format (e.g., an error object, rate limit info) instead of a valid chat completion.</p>';
+            echo '<pre>' . htmlspecialchars($e->getMessage()) . '</pre>';
+            // echo '<h4>Raw Response:</h4><pre>' . htmlspecialchars($rawResponseBody) . '</pre>'; // Cannot reliably get raw response here
+            die;
+        }
+        catch (\OpenAI\Exceptions\ErrorException $e) { // Catch API errors specifically
+            $errorDetails = $e->getMessage();
+            // Attempt to get more structured error details if possible
+            // This depends on how ErrorException is structured in the library version
+            if (method_exists($e, 'getErrorMessage')) { // Example check
+                $errorDetails .= " | Type: " . ($e->getErrorType() ?? 'N/A');
+                $errorDetails .= " | Code: " . ($e->getErrorCode() ?? 'N/A');
+            }
+            errlog("OpenRouter API ErrorException: " . $errorDetails);
+            http_response_code(500);
+            echo "<h1>Error communicating with AI Provider (API Error)</h1>";
+            echo '<p>Details: ' . htmlspecialchars($errorDetails) . '</p>';
+            die;
+        }
+        catch (\Throwable $e) {
+            errlog("General Error during OpenRouter request: " . $e->getMessage());
+            throw $e;
+        }
 
-			errlog('Received OpenRouter response.');
+        errlog('Received OpenRouter response.');
+        
+        $returnedData = $response['choices'][0]['message']['content'];
+        // $jsonData = trim($returnedData); // Old simple trim
 
-			$returnedData = $response['choices'][0]['message']['content'];
-			// $jsonData = trim($returnedData); // Old simple trim
+        // Use regex to extract JSON block, handling potential markdown fences and surrounding text
+        $jsonData = null;
+        if (preg_match('/```json\s*({.*?})\s*```/is', $returnedData, $matches)) {
+            $jsonData = $matches[1];
+            errlog("Extracted JSON using ```json fences.");
+        } elseif (preg_match('/({\s*"success":.*?})/is', $returnedData, $matches)) {
+            // Fallback: Try to find the JSON object directly if no fences are present
+            // This regex looks for the start of our expected structure {"success":...
+            $jsonData = $matches[1];
+            errlog("Extracted JSON using direct object match.");
+        } else {
+            // If no JSON block found, use the trimmed data as a last resort (might still fail)
+            errlog("Could not extract JSON block reliably, using trimmed response.");
+            $jsonData = trim($returnedData);
+        }
 
-			// Use regex to extract JSON block, handling potential markdown fences and surrounding text
-			$jsonData = null;
-			if (preg_match('/```json\s*({.*?})\s*```/is', $returnedData, $matches)) {
-				$jsonData = $matches[1];
-				errlog("Extracted JSON using ```json fences.");
-			} elseif (preg_match('/({\s*"success":.*?})/is', $returnedData, $matches)) {
-				// Fallback: Try to find the JSON object directly if no fences are present
-				// This regex looks for the start of our expected structure {"success":...
-				$jsonData = $matches[1];
-				errlog("Extracted JSON using direct object match.");
-			} else {
-				// If no JSON block found, use the trimmed data as a last resort (might still fail)
-				errlog("Could not extract JSON block reliably, using trimmed response.");
-				$jsonData = trim($returnedData);
-			}
-
-			// Basic JSON decoding, rely on response_format for structure
-			$ret = json_decode($jsonData, true, 512, JSON_INVALID_UTF8_IGNORE);
+        // Basic JSON decoding, rely on response_format for structure
+        $ret = json_decode($jsonData, true, 512, JSON_INVALID_UTF8_IGNORE);
 
 			if (json_last_error() != JSON_ERROR_NONE) {
 				$err = json_last_error_msg();
@@ -954,164 +1058,16 @@ PROMPT;
 				}
 			}
 
-			$icsString = $this->convertJsonToIcs($ret['eventData']);
-			
+			$generator = new IcalGenerator();
+			$icsString = $generator->convertJsonToIcs($ret['eventData'], $this->fromEmail);
+
 			$ret['ICS'] = $icsString;
-			unset($ret['eventData']);
+			unset($ret['eventData']); // Remove eventData after ICS generation
 
 			return $ret;
 	}
 
-    /**
-     * Converts structured event data (from AI JSON) into an RFC 5545 ICS string.
-     *
-     * @param array $eventData Associative array conforming to the eventSchema.
-     * @return string The generated ICS content.
-     * @throws Exception If required fields are missing or dates are invalid.
-     */
-    private function convertJsonToIcs(array $eventData): string
-    {
-        $uid = date('Ymd-His') . '@calendar.postmark.justin-c.com';
-        $dtstamp = gmdate('Ymd\THis\Z');
-
-        $tzid = $eventData['timezone'] ?? 'America/Los_Angeles';
-
-        if (empty($eventData['summary']) || empty($eventData['dtstart']) || empty($tzid)) {
-            throw new Exception('Missing required event data for ICS conversion (summary, dtstart, timezone).');
-        }
-
-        $isAllDay = $eventData['isAllDay'] ?? false;
-
-        // Format DTSTART
-        try {
-            $dtStartObj = new DateTime($eventData['dtstart'], $isAllDay ? null : new DateTimeZone($tzid));
-            if ($isAllDay) {
-                $dtstartFormatted = "DTSTART;VALUE=DATE:" . $dtStartObj->format('Ymd');
-            } else {
-                $dtstartFormatted = "DTSTART;TZID={$tzid}:" . $dtStartObj->format('Ymd\THis');
-            }
-        } catch (\Throwable $e) {
-            throw new Exception("Invalid dtstart format: {$eventData['dtstart']} - " . $e->getMessage());
-        }
-
-        // Format DTEND
-        $dtendFormatted = '';
-        if (!empty($eventData['dtend'])) {
-             try {
-                $dtEndObj = new DateTime($eventData['dtend'], $isAllDay ? null : new DateTimeZone($tzid));
-                 if ($isAllDay) {
-                    // For all-day events, DTEND is the day AFTER the last day
-                    $dtEndObj->modify('+1 day');
-                    $dtendFormatted = "DTEND;VALUE=DATE:" . $dtEndObj->format('Ymd');
-                } else {
-                    $dtendFormatted = "DTEND;TZID={$tzid}:" . $dtEndObj->format('Ymd\THis');
-                }
-            } catch (\Throwable $e) {
-                throw new Exception("Invalid dtend format: {$eventData['dtend']} - " . $e->getMessage());
-            }
-        } elseif (!$isAllDay) {
-             // Calculate default duration if DTEND is missing and not all-day
-            $dtEndObj = clone $dtStartObj;
-            // Basic duration logic (can be expanded based on summary keywords)
-            $durationHours = 2;
-            if (stripos($eventData['summary'], 'opera') !== false) $durationHours = 3;
-            elseif (stripos($eventData['summary'], 'doctor') !== false || stripos($eventData['summary'], 'appointment') !== false) $durationHours = 0.5;
-            $dtEndObj->modify('+' . ($durationHours * 3600) . ' seconds');
-            $dtendFormatted = "DTEND;TZID={$tzid}:" . $dtEndObj->format('Ymd\THis');
-        }
-
-
-        $icsLines = [
-            "BEGIN:VCALENDAR",
-            "VERSION:2.0",
-            "PRODID:-//Email-to-ICS via OpenRouter by Justin//NONSGML//EN",
-            "BEGIN:VEVENT",
-            "UID:{$uid}",
-            "DTSTAMP:{$dtstamp}",
-            $dtstartFormatted,
-        ];
-
-        if ($dtendFormatted) {
-            $icsLines[] = $dtendFormatted;
-        }
-
-        $icsLines[] = $this->foldLine("SUMMARY:" . $this->escapeIcsText($eventData['summary']));
-        $icsLines[] = $this->foldLine("DESCRIPTION:" . $this->escapeIcsText($eventData['description']));
-
-        if (!empty($eventData['htmlDescription'])) {
-             $icsLines[] = $this->foldLine("X-ALT-DESC;FMTTYPE=text/html:" . $this->escapeIcsText($eventData['htmlDescription']));
-        }
-        if (!empty($eventData['location'])) {
-            $icsLines[] = $this->foldLine("LOCATION:" . $this->escapeIcsText($eventData['location']));
-        }
-        if (!empty($eventData['url'])) {
-            $icsLines[] = $this->foldLine("URL:" . $this->escapeIcsText($eventData['url']));
-        }
-
-        $icsLines[] = $this->foldLine("ORGANIZER;CN=\"Email-to-ICS\":mailto:{$this->fromEmail}");
-
-        $icsLines[] = "END:VEVENT";
-        $icsLines[] = "END:VCALENDAR";
-
-        return implode("\r\n", $icsLines);
-    }
-
-    /**
-     * Escapes text according to RFC 5545 requirements.
-     * Replaces backslash, comma, semicolon, newline.
-     */
-    private function escapeIcsText(string $text): string
-    {
-        $text = str_replace("\\", "\\\\", $text); // Must be first
-        $text = str_replace(",", "\\,", $text);
-        $text = str_replace(";", "\\;", $text);
-        // Newlines are already expected as \n from the AI for the description
-        // $text = str_replace("\n", "\\n", $text); // Replace literal newlines if any
-        return $text;
-    }
-
-    /**
-     * Folds a long line according to RFC 5545 (75 octet limit).
-     */
-    private function foldLine(string $line): string
-    {
-        $limit = 75;
-        $folded = '';
-        while (mb_strlen($line, 'UTF-8') > 0) { // Use mb_strlen for UTF-8 safety
-            if (mb_strlen($line, 'UTF-8') <= $limit) {
-                $folded .= $line;
-                break;
-            }
-
-            // Find a safe place to fold (prefer before multi-byte chars)
-            // Work with byte length for folding limit, but use mb_substr for splitting
-            $byteLen = strlen($line);
-            $foldPosBytes = 0;
-            $charCount = 0;
-            $currentBytes = 0;
-            while ($currentBytes < $limit && $charCount < mb_strlen($line, 'UTF-8')) {
-                 $char = mb_substr($line, $charCount, 1, 'UTF-8');
-                 $charBytes = strlen($char);
-                 if ($currentBytes + $charBytes > $limit) {
-                     break; // Next char would exceed limit
-                 }
-                 $currentBytes += $charBytes;
-                 $foldPosBytes = $currentBytes; // Store byte position of last full char within limit
-                 $charCount++;
-            }
-
-            if ($foldPosBytes == 0) $foldPosBytes = $limit; // Force fold if first char is too long (unlikely)
-
-            // Extract the segment using byte length, then get the rest using mb_substr
-            $segment = substr($line, 0, $foldPosBytes);
-            $folded .= $segment . "\r\n "; // Add CRLF + space
-            $line = mb_substr($line, mb_strlen($segment, 'UTF-8'), null, 'UTF-8'); // Get remainder based on char count of segment
-            $limit = 74; // Subsequent lines start with a space
-        }
-        return $folded;
-    }
-
-    private function sendEmailWithAttachment($toEmail, $ics, $subject, $originalEmail, $pdfText = null, $downloadedText = null)
+	private function sendEmailWithAttachment($toEmail, $ics, $subject, $originalEmail, $pdfText = null, $downloadedText = null)
 	{
 		$attachments = [];
 		if (!empty($originalEmail['Attachments'])) {
@@ -1310,7 +1266,7 @@ BODY;
 	public function getDefaultModelId()
 	{
 		// Define preferred default model
-		$preferredDefault = 'anthropic/claude-3.7-sonnet';
+		$preferredDefault = 'anthropic/claude-3.7-sonnet:thinking';
 
 		if (isset($this->availableModels[$preferredDefault])) {
 			return $preferredDefault;
@@ -1439,28 +1395,90 @@ BODY;
 // Function to get available models for the extension
 function getAvailableModels()
 {
+    // $debugLogMessages = []; // REMOVED
 	// Instantiate EmailProcessor to access loaded models
 	try {
 		$processor = new EmailProcessor();
-		$modelsData = $processor->loadAvailableModels(); // Use the public loader method
-		$defaultModelId = $processor->getDefaultModelId(); // Get the determined default
+		$allModelsData = $processor->loadAvailableModels(); // Get ALL models first
+		$preferredDefaultModelId = $processor->getDefaultModelId(); // Get the ideal default
 	} catch (\Throwable $e) {
-		errlog("Error initializing EmailProcessor in getAvailableModels: " . $e->getMessage());
+		$errorMsg = "Error initializing EmailProcessor in getAvailableModels: " . $e->getMessage();
+        errlog($errorMsg); // Log to server log
+        // $debugLogMessages[] = $errorMsg; // REMOVED
 		// Return empty list or a hardcoded minimal list on error
 		return [
 			'models' => [],
-			'server_preference' => false // Indicate failure
+			'server_preference' => false, // Indicate failure
+            // 'debug_logs' => $debugLogMessages // REMOVED
 		];
 	}
 
+    // --- Filtering Logic ---
+    $allowedModelsCsv = $_ENV['ALLOWED_MODELS'] ?? '';
+    // $debugLogMessages[] = "ALLOWED_MODELS from ENV: '{$allowedModelsCsv}'"; // REMOVED
+    $filteredModelsData = [];
+
+    if (!empty($allowedModelsCsv)) {
+        $allowedModelIds = array_map('trim', explode(',', $allowedModelsCsv));
+        $allowedModelIds = array_filter($allowedModelIds); // Remove empty entries from explode
+        // Add step to trim potential quotes from each ID
+        $allowedModelIds = array_map(function($id) { return trim($id, ' \t\n\r\0\x0B"\''); }, $allowedModelIds);
+
+        // $debugLogMessages[] = "Parsed allowedModelIds array: [" . implode(', ', $allowedModelIds) . "]"; // REMOVED
+
+        if (!empty($allowedModelIds)) {
+             // Log ALL available model IDs BEFORE filtering
+             $allAvailableIds = array_keys($allModelsData);
+             // $debugLogMessages[] = "ALL available model IDs before filtering: [" . implode(', ', $allAvailableIds) . "]"; // REMOVED
+
+             // Filter the fetched models based on allowed IDs (keys)
+            $filteredModelsData = array_filter(
+                $allModelsData,
+                function($modelId) use ($allowedModelIds) { 
+                    $isAllowed = in_array($modelId, $allowedModelIds);
+                    return $isAllowed;
+                },
+                ARRAY_FILTER_USE_KEY // Important: filter by the keys (model IDs)
+            );
+            $filteredIds = array_keys($filteredModelsData);
+            // $debugLogMessages[] = "Filtering models based on ALLOWED_MODELS. Allowed IDs: [" . implode(', ', $allowedModelIds) . "]. Filtered Model IDs kept: [" . implode(', ', $filteredIds) . "]"; // REMOVED
+        } else {
+             // $debugLogMessages[] = "ALLOWED_MODELS environment variable is set but contains no valid IDs after processing. Allowing all models as fallback."; // REMOVED
+             errlog("ALLOWED_MODELS environment variable is set but contains no valid IDs after processing. Allowing all models as fallback."); // Keep server log
+             $filteredModelsData = $allModelsData; // Fallback to all if CSV is empty/invalid
+        }
+    } else {
+        // $debugLogMessages[] = "ALLOWED_MODELS environment variable not set or empty. Allowing all models."; // REMOVED
+        errlog("ALLOWED_MODELS environment variable not set or empty. Allowing all models."); // Keep server log
+        $filteredModelsData = $allModelsData; // Allow all if ENV variable is not set
+    }
+    // --- End Filtering Logic ---
+
+    // --- Proceed with formatting using the FILTERED list ---
 	$result = [];
-	foreach ($modelsData as $modelId => $modelInfo) {
+    // Determine the actual default model ID to use after filtering
+    $actualDefaultModelId = $preferredDefaultModelId;
+    if (!isset($filteredModelsData[$preferredDefaultModelId])) {
+         // If the preferred default was filtered out, pick the first available allowed model
+        if (!empty($filteredModelsData)) {
+            reset($filteredModelsData); // Point to the first element
+            $actualDefaultModelId = key($filteredModelsData);
+            // $debugLogMessages[] = "Preferred default model '{$preferredDefaultModelId}' was filtered out or not available. Using first available allowed model: '{$actualDefaultModelId}'."; // REMOVED
+            errlog("Preferred default model '{$preferredDefaultModelId}' was filtered out or not available. Using first available allowed model: '{$actualDefaultModelId}'."); // Keep server log
+        } else {
+             $actualDefaultModelId = null; // No models left after filtering
+             // $debugLogMessages[] = "Preferred default model '{$preferredDefaultModelId}' was filtered out, and no allowed models remain."; // REMOVED
+             errlog("Preferred default model '{$preferredDefaultModelId}' was filtered out, and no allowed models remain."); // Keep server log
+        }
+    }
+
+	foreach ($filteredModelsData as $modelId => $modelInfo) { // Iterate over the FILTERED data
 		$result[] = [
 			'id' => $modelId, // Use the full OpenRouter ID
 			'name' => $modelInfo['name'] ?? $modelId,
 			'description' => $modelInfo['description'] ?? 'No description',
 			'vision_capable' => $modelInfo['vision_capable'] ?? false,
-			'default' => ($modelId === $defaultModelId)
+			'default' => ($modelId === $actualDefaultModelId) // Compare against the potentially adjusted default
 		];
 	}
 
@@ -1472,9 +1490,11 @@ function getAvailableModels()
 		return strcmp($a['name'], $b['name']);
 	});
 
+    // $debugLogMessages[] = "Final model count being sent: " . count($result); // REMOVED
 	return [
-		'models' => $result,
-		'server_preference' => true // Indicates server successfully provided models and a preference
+		'models' => $result, // Return the filtered and sorted result
+		'server_preference' => true, // Indicates server successfully provided models and a preference
+        // 'debug_logs' => $debugLogMessages // REMOVED
 	];
 }
 
@@ -1610,16 +1630,19 @@ HTML;
 
     private function processFormSubmission()
     {
-		$processor = new EmailProcessor();
-		$processor->processUrl(
-			$_REQUEST['url'],
-			$_REQUEST['html'] ?? '',
-			$_REQUEST['display'] ?? 'email',
-			$_REQUEST['tentative'] ?? true,
-			$_REQUEST['instructions'] ?? null,
-			$_REQUEST['screenshot'] ?? null,
-			$_REQUEST['model'] ?? null
-		);
+			$processor = new EmailProcessor();
+			$processor->processUrl(
+				$_REQUEST['url'],
+				$_REQUEST['html'] ?? '',
+				$_REQUEST['display'] ?? 'email',
+				($_REQUEST['tentative'] ?? '1') === '1', // Convert '1'/'0' back to boolean
+				$_REQUEST['instructions'] ?? null,
+				$_REQUEST['screenshot_viewport'] ?? null, // Add viewport screenshot
+				$_REQUEST['screenshot_zoomed'] ?? null,    // Add zoomed screenshot
+				$_REQUEST['model'] ?? null,
+				($_REQUEST['review'] ?? '0') === '1',     // Convert '1'/'0' back to boolean
+				($_REQUEST['fromExtension'] ?? 'false') === 'true', // Convert string bool to boolean
+			);
     }
 
     private function isPostmarkInboundWebhook($json_data)
@@ -1705,3 +1728,55 @@ function errlog($msg)
 	global $requestId;
 	error_log("{$requestId} - {$msg}");
 }
+
+// --- NEW: Handle Confirmation Endpoint ---
+if (isset($_GET['confirm']) && $_GET['confirm'] === 'true' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json');
+    $token = $_POST['confirmationToken'] ?? null;
+    $cacheDir = __DIR__ . '/confirm_cache';
+    define('CONFIRMATION_TTL', 60 * 60); // Token valid for 1 hour
+
+    if (!$token || !preg_match('/^[a-f0-9]{32}$/', $token)) { // Basic token validation
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid or missing confirmation token.']);
+        exit;
+    }
+
+    $cacheFile = $cacheDir . '/' . basename($token) . '.json';
+
+    if (!file_exists($cacheFile)) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Confirmation token not found or expired.']);
+        exit;
+    }
+
+    $storedData = json_decode(file_get_contents($cacheFile), true);
+
+    if (!$storedData || !isset($storedData['timestamp']) || (time() - $storedData['timestamp'] > CONFIRMATION_TTL)) {
+        unlink($cacheFile); // Clean up invalid/expired token file
+        http_response_code(410); // Gone (expired)
+        echo json_encode(['error' => 'Confirmation token expired or data invalid.']);
+        exit;
+    }
+
+    try {
+        // Need EmailProcessor to send the email
+        $processor = new EmailProcessor(); 
+        $processor->sendEmail(
+            $storedData['ics'], 
+            $storedData['recipient'], 
+            $storedData['subject'], 
+            '<p>Confirmed event from extension review.</p>' // Simple body
+        );
+        unlink($cacheFile); // Successfully used, remove token
+        echo json_encode(['status' => 'success', 'message' => 'Email confirmed and sent successfully.']);
+    } catch (Throwable $e) {
+        errlog("Error sending confirmed email for token {$token}: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['error' => 'Failed to send confirmed email.']);
+    }
+    exit; // IMPORTANT: Stop script execution after handling confirmation
+}
+// --- End NEW Confirmation Handling ---
+
+// --- Continue with original script logic ---
