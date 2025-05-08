@@ -13,20 +13,20 @@
         <form id="icsForm" class="needs-validation" novalidate>
             <div class="mb-3">
                 <label for="url" class="form-label">URL:</label>
-                <input type="text" id="url" name="url" class="form-control" required>
-                <div class="invalid-feedback">
-                    Please enter a URL.
-                </div>
+                <input type="text" id="url" name="url" class="form-control">
+                <div class="form-text">Provide a URL, HTML content, or Instructions. At least one is required.</div>
             </div>
             <div class="mb-3">
                 <label for="instructions" class="form-label">Additional instructions:</label>
-                <textarea name="instructions" class="form-control"></textarea>
+                <textarea name="instructions" id="instructions" class="form-control"></textarea>
+                <div class="form-text">Provide Instructions, a URL, or HTML content. At least one is required.</div>
             </div>
 
 			<div class="mb-3">
 				<label for="html" class="form-label">HTML to use:</label>
-				<textarea name="html" class="form-control">
+				<textarea name="html" id="html" class="form-control">
 				</textarea>
+                <div class="form-text">Provide HTML content, a URL, or Instructions. At least one is required.</div>
 			</div>
             <div class="mb-3">
                 <div class="form-check">
@@ -89,6 +89,9 @@
             clearAlerts();
             
             const form = event.target;
+            const urlInput = document.getElementById('url');
+            const instructionsInput = document.getElementById('instructions');
+            const htmlInput = document.getElementById('html'); // Get the HTML input
             const submitButton = document.getElementById('submitBtn');
             const icsFormElement = document.getElementById('icsForm');
             const processingViewElement = document.getElementById('processingView');
@@ -96,11 +99,29 @@
             const statusMessageElement = document.getElementById('statusMessage');
             const responseDataElement = document.getElementById('responseData');
 
-            if (!form.checkValidity()) {
+            if (!form.checkValidity()) { // Basic browser validation (e.g. for input types if any)
                 event.stopPropagation();
                 showAlert('Please fill out the form correctly.', 'danger');
                 form.classList.add('was-validated');
                 return;
+            }
+
+            // Custom validation: Ensure either URL or Instructions or HTML is filled
+            const urlValue = urlInput.value.trim();
+            const instructionsValue = instructionsInput.value.trim();
+            const htmlValue = htmlInput.value.trim(); // Get HTML value
+
+            if (!urlValue && !instructionsValue && !htmlValue) { // Check all three
+                event.stopPropagation();
+                showAlert('Please provide a URL, HTML content, or Additional Instructions.', 'danger');
+                urlInput.classList.add('is-invalid');
+                instructionsInput.classList.add('is-invalid');
+                htmlInput.classList.add('is-invalid'); // Add invalid class to HTML input
+                return;
+            } else {
+                urlInput.classList.remove('is-invalid');
+                instructionsInput.classList.remove('is-invalid');
+                htmlInput.classList.remove('is-invalid'); // Remove invalid class from HTML input
             }
 
             const formData = new FormData(form);
@@ -163,6 +184,16 @@
             .finally(() => {
                 currentController = null;
                 submitButton.disabled = false; // Re-enable button
+                if (currentController) {
+                    currentController.abort();
+                    currentController = null;
+                }
+                const urlInput = document.getElementById('url');
+                const instructionsInput = document.getElementById('instructions');
+                const htmlInput = document.getElementById('html'); // Get HTML input again for clearing
+                if (urlInput) urlInput.classList.remove('is-invalid');
+                if (instructionsInput) instructionsInput.classList.remove('is-invalid');
+                if (htmlInput) htmlInput.classList.remove('is-invalid'); // Clear for HTML input
             });
         });
 

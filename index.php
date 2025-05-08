@@ -29,8 +29,16 @@ use App\IcalGenerator; // Use the generator from its namespace
 define('MODEL_CACHE_FILE', __DIR__ . '/.models_cache.json');
 define('MODEL_CACHE_DURATION', 7 * 24 * 60 * 60); // 7 days in seconds
 
+// --- Helper: Detect CLI ---
+function is_cli() {
+    return php_sapi_name() === 'cli';
+}
+
 // Add new endpoint for model info
+// This needs to be handled within the web request path or made CLI accessible if needed.
+// For now, it remains as is, implicitly web-only due to $_GET.
 if (isset($_GET['get_models'])) {
+    // Consider adding if (!is_cli()) around this block if it should be strictly web.
     header('Content-Type: application/json');
     header("Access-Control-Allow-Origin: *");
     header("Access-Control-Allow-Methods: GET, OPTIONS");
@@ -56,13 +64,14 @@ if (
 	set_error_handler('exception_error_handler');
 }
 
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: POST, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization");
-if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
-	header("HTTP/1.1 204 No Content");
-	exit;
-}
+// These headers are web-specific, move them into the web execution path.
+// header("Access-Control-Allow-Origin: *");
+// header("Access-Control-Allow-Methods: POST, OPTIONS");
+// header("Access-Control-Allow-Headers: Content-Type, Authorization");
+// if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
+// 	header("HTTP/1.1 204 No Content");
+// 	exit;
+// }
 
 class EmailProcessor
 {
@@ -175,6 +184,9 @@ class EmailProcessor
 			if ($response->getStatusCode() !== 200) {
 				$errorMsg = "Failed to fetch models from OpenRouter API. Status code: " . $response->getStatusCode();
 				errlog($errorMsg);
+				// In CLI mode, this should throw an exception that the CLI handler catches,
+				// rather than trying to output HTTP errors.
+				// if (defined('IS_CLI_RUN') && IS_CLI_RUN) { throw new \RuntimeException($errorMsg); }
 				throw new \RuntimeException($errorMsg);
 			}
 
@@ -183,6 +195,7 @@ class EmailProcessor
 			if (json_last_error() !== JSON_ERROR_NONE || !isset($apiData['data']) || !is_array($apiData['data'])) {
 				$errorMsg = "Invalid JSON response from OpenRouter models API.";
 				errlog($errorMsg);
+				// if (defined('IS_CLI_RUN') && IS_CLI_RUN) { throw new \RuntimeException($errorMsg); }
 				throw new \RuntimeException($errorMsg);
 			}
 
@@ -201,6 +214,13 @@ class EmailProcessor
 					'name' => $model['name'] ?? $model['id'],
 					'description' => $model['description'] ?? 'No description available.',
 					'vision_capable' => $supportsVision,
+					'pricing' => [
+						'prompt' => $model['pricing']['prompt'] ?? '0.0',
+						'completion' => $model['pricing']['completion'] ?? '0.0',
+						'request' => $model['pricing']['request'] ?? '0.0',
+						// Add image pricing if needed in the future and available
+						// 'image' => $model['pricing']['image'] ?? '0.0',
+					]
 					// 'default' will be determined later based on a preferred list or first model
 				];
 			}
@@ -222,6 +242,7 @@ class EmailProcessor
 		} catch (\Throwable $e) {
 			errlog("Error fetching or processing models from OpenRouter API: " . $e->getMessage());
 			// Re-throw the exception instead of returning a fallback
+			// if (defined('IS_CLI_RUN') && IS_CLI_RUN) { throw new \RuntimeException("Failed to load models from OpenRouter API: " . $e->getMessage(), 0, $e); }
 			throw new \RuntimeException("Failed to load models from OpenRouter API: " . $e->getMessage(), 0, $e);
 		}
 	}
@@ -239,19 +260,58 @@ class EmailProcessor
      * @param string|null $requestedModel Specific AI model to use (optional)
      * @param bool $needsReview Whether the event needs review
      * @param bool $fromExtension Whether the request is from an extension
+     * @param bool $outputJsonOnly If true and in CLI, output JSON instead of ICS. 
+     * @param bool $cliDebug If true and in CLI, output AI request/response to STDERR.
      * @return void
      */
-	public function processUrl($url, $downloadedText, $display, $tentative = true, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $needsReview = false, $fromExtension = false)
+	public function processUrl($url, $downloadedText, $display, $tentative = true, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $needsReview = false, $fromExtension = false, $outputJsonOnly = false, $cliDebug = false)
 	{
-		if (empty(trim($downloadedText))) {
+        // NOTE TO DEVELOPER: Throughout this method, check (defined('IS_CLI_RUN') && IS_CLI_RUN)
+        // before calling http_response_code(), header(), or outputting HTML error messages.
+        // For CLI, output plain text errors to STDERR or STDOUT and use exit codes.
+
+        // Ensure that at least one of: URL, downloadedText (HTML), or instructions are provided.
+        if (empty(trim($url)) && empty(trim($downloadedText)) && empty(trim((string)$instructions))) {
+            $errorMsg = 'Error: Please provide a URL, HTML content, or Instructions.';
+            errlog($errorMsg);
+            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                // echo $errorMsg . "\n"; // Replaced by exception
+                // $webPage = new WebPage(); // To access displayCliHelp - not ideal from here
+                // $webPage->displayCliHelp();
+                throw new \RuntimeException($errorMsg . " Use --help for usage details.");
+            } else {
+                http_response_code(400);
+                echo json_encode(['error' => $errorMsg]); // Send JSON error for web/extension
+                exit(1); // Exit for web/extension to prevent further processing
+            }
+            // No exit(1) here for CLI as exception is thrown
+        }
+
+		if (empty(trim($downloadedText)) && !empty(trim($url))) { // Only fetch if URL is given and no downloadedText
 			if (!$this->is_valid_url($url)) {
-				http_response_code(400);
-				errlog('BAD url: ' . $url);
-				echo 'Bad url!';
-				die;
+                errlog('BAD url: ' . $url);
+                if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                    // echo "Error: Invalid URL provided: {$url}\n"; // Replaced by exception
+                    throw new \InvalidArgumentException("Invalid URL provided: {$url}");
+                } else {
+				    http_response_code(400);
+				    echo 'Bad url!';
+                    die; 
+                }
 			}
 
 			$downloadedText = $this->fetch_url($url);
+            if ($downloadedText === false) {
+                errlog('Failed to fetch URL: ' . $url);
+                if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                    // echo "Error: Failed to fetch URL: {$url}\n"; // Replaced by exception
+                    throw new \RuntimeException("Failed to fetch URL: {$url}");
+                } else {
+                    http_response_code(500);
+                    echo 'Failed to fetch URL.';
+                    die; 
+                }
+            }
 		} elseif (substr($downloadedText, 0, 1) === '\'' &&
 			substr($downloadedText, -1, 1) === '\''
 		) {
@@ -269,7 +329,7 @@ class EmailProcessor
 			errlog("Using requested model: {$this->aiModel}");
 		} else {
 			// Ensure a valid default model is set if the requested one is invalid
-			$this->aiModel = $this->getDefaultModelId();
+			$this->aiModel = $this->getDefaultModelId(); // This can throw if no models available
 			errlog("Requested model '{$requestedModel}' invalid or not provided. Using default model: {$this->aiModel}");
 		}
 
@@ -294,9 +354,66 @@ class EmailProcessor
 {$downloadedText}
 TEXT;
 
-		$calEvent = $this->generateIcalEvent($combinedText, $instructions, $screenshotViewport, $screenshotZoomed, $requestedModel);
-		$ics = $calEvent['ICS'];
-		$subject = $calEvent['emailSubject'] ?? 'Calendar Event'; // Use a default subject
+		$eventDetails = $this->generateIcalEvent($combinedText, $instructions, $screenshotViewport, $screenshotZoomed, $requestedModel, $cliDebug);
+
+		// Handle --json flag for CLI output if requested - This takes precedence over other CLI outputs.
+		if ($outputJsonOnly && defined('IS_CLI_RUN') && IS_CLI_RUN) {
+			// $eventDetails here is the direct output from generateIcalEvent
+            // Get values first
+            $isSuccess = $eventDetails['success'] ?? false;
+            $eventDataValue = $eventDetails['eventData'] ?? null; // Get the value or null
+            $errorMessageValue = $eventDetails['errorMessage'] ?? '';
+
+            // --- Revised Check for Valid Event Data ---
+            $isEventDataValid = false; // Assume invalid initially
+            if (isset($eventDataValue) && is_array($eventDataValue) && !empty($eventDataValue['summary'])) {
+                 $isEventDataValid = true;
+            }
+            // Log the result of this simplified check
+            errlog("eventData validity check result: " . ($isEventDataValid ? 'VALID' : 'INVALID'));
+            // --- End Revised Check ---
+
+			$jsonToPrint = [
+				'success'        => $isSuccess,
+				'errorMessage'   => $errorMessageValue,
+				'eventData'      => $eventDataValue, // Use the fetched value
+				'emailSubject'   => $eventDetails['emailSubject'] ?? null,
+				'locationLookup' => $eventDetails['locationLookup'] ?? null,
+			];
+
+			// We're only concerned about a missing eventData when success is true
+			if ($isSuccess && !$isEventDataValid) {
+				// AI succeeded but eventData is missing or invalid
+				$jsonToPrint['success'] = false;
+				$jsonToPrint['errorMessage'] = $errorMessageValue ?: 'Internal error: AI indicated success but eventData structure is missing or invalid (e.g., missing summary).';
+				errlog("CRITICAL: eventData invalid/missing structure in --json output despite AI success=true.");
+				$jsonToPrint['eventData'] = null;
+			} elseif (!$isSuccess && empty($errorMessageValue)) {
+				$jsonToPrint['errorMessage'] = 'AI processing failed or did not explicitly succeed; no specific error message provided by AI.';
+			}
+
+			if (headers_sent()) {
+				errlog("Headers already sent before attempting to send JSON content-type for --json flag.");
+			} else {
+				header('Content-Type: application/json'); // For good measure / if output is piped
+			}
+			echo json_encode($jsonToPrint, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+			exit(0);
+		}
+
+		// If not outputting JSON directly, proceed with standard logic
+		// Generate ICS only if not outputting JSON and if eventData is present and AI was successful
+		$ics = null;
+		if (($eventDetails['success'] ?? false) && !empty($eventDetails['eventData'])) {
+			$generator = new IcalGenerator();
+			$ics = $generator->convertJsonToIcs($eventDetails['eventData'], $this->fromEmail);
+		} elseif (($eventDetails['success'] ?? false) === false) {
+			errlog("Skipping ICS generation because AI processing failed: " . ($eventDetails['errorMessage'] ?? 'Unknown AI error'));
+		} else { // Success was true, but eventData was empty/missing
+			errlog("Skipping ICS generation because eventData was missing/empty from AI despite success. Error: " . ($eventDetails['errorMessage'] ?? 'eventData missing'));
+		}
+
+		$subject = $eventDetails['emailSubject'] ?? 'Calendar Event'; // Use a default subject
 
 		// Check if review is needed AND the request came from the extension
 		if ($needsReview && $fromExtension) {
@@ -319,80 +436,122 @@ TEXT;
 
 			if (file_put_contents($cacheFile, json_encode($dataToStore)) === false) {
 				 errlog("Error writing confirmation token cache file: {$cacheFile}");
-				 http_response_code(500);
-				 echo json_encode(['error' => 'Failed to store confirmation data.']);
-				 exit;
+                 if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                    echo "Error: Failed to store confirmation data.\n";
+                 } else {
+				    http_response_code(500);
+				    echo json_encode(['error' => 'Failed to store confirmation data.']);
+                 }
+				 exit; // Or exit(1) for CLI
 			}
 			// --- End Token Handling ---
-
-			header('Content-Type: application/json');
-			echo json_encode([
+            $reviewOutput = [
 				'needsReview' => true,
 				'icsContent' => $ics,
 				'emailSubject' => $subject,
 				'recipientEmail' => $recipientEmail, // Send intended recipient to extension
 				'confirmationToken' => $confirmationToken // Include the token
-			]);
-			exit; // Stop processing, send JSON back to extension for review
+			];
+
+            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                echo json_encode($reviewOutput, JSON_PRETTY_PRINT) . "\n";
+            } else {
+			    header('Content-Type: application/json');
+			    echo json_encode($reviewOutput);
+            }
+			exit; // Stop processing, send JSON back for review
 		}
 
 		// --- If not reviewing, proceed with requested action (download/display/email) ---
 
-		if ($display == 'download') {
+		if ($display == 'download' || $display == 'display') {
 			$filename = 'event.ics';
-
-			// Set the appropriate headers to initiate download
-			header('Content-Type: text/calendar; charset=utf-8');
-			header('Content-Disposition: attachment; filename="' . $filename . '"');
-
-			echo $ics;
-			exit;
-		}
-
-		if ($display == 'display') {
-			header('Content-Type: text/plain; charset=utf-8');
-			header('Content-Disposition: inline');
-
-			echo $ics;
+            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                if ($ics === null) {
+                    throw new \RuntimeException("ICS data could not be generated. Cannot output to display/download.");
+                }
+                echo $ics;
+            } else {
+                if ($ics === null) {
+                    http_response_code(500);
+                    echo json_encode(['error' => 'ICS data could not be generated.']);
+                    exit;
+                }
+                if ($display == 'download') {
+                    header('Content-Type: text/calendar; charset=utf-8');
+                    header('Content-Disposition: attachment; filename="' . $filename . '"');
+                } else { // display
+                    header('Content-Type: text/plain; charset=utf-8');
+                    header('Content-Disposition: inline');
+                }
+			    echo $ics;
+            }
 			exit;
 		}
 
 		if ($display != 'email') {
-			http_response_code(400);
-			echo "Invalid display: {$display}";
-			errlog("Invalid display: {$display}");
+            errlog("Invalid display: {$display}");
+            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                // echo "Error: Invalid display mode '{$display}'. Must be 'email', 'download', or 'display'.\n";
+                throw new \InvalidArgumentException("Invalid display mode '{$display}'. Must be 'email', 'download', or 'display'. Use --help for options.");
+            } else {
+			    http_response_code(400);
+			    echo "Invalid display: {$display}";
+                exit; 
+            }
 		}
+
+        if ($ics === null) {
+            // This implies AI failed or eventData was missing, and it wasn't handled by --json output
+            $errorMessage = ($eventDetails['errorMessage'] ?? 'ICS data could not be generated due to an earlier processing error.');
+            errlog("Cannot send email because ICS data is null. Error: " . $errorMessage);
+            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                throw new \RuntimeException("Cannot send email: " . $errorMessage);
+            }
+            // For web, an error should have ideally been sent already if ICS is null. This is a fallback.
+            http_response_code(500);
+            echo json_encode(['error' => "Failed to generate event for email: " . $errorMessage]);
+            exit;
+        }
 
 		$recipientEmail = $tentative ? $this->toTentativeEmail : $this->toConfirmedEmail;
 		$htmlBody =  <<<BODY
 <p>Please find your iCal event attached.</p>
 
-<p>URL submitted via webform: {$url}</p>
+<p>URL submitted: {$url}</p>
 <p>---------- Downloaded HTML (cleaned): ----------</p>
 <div>{$downloadedText}</div>
 BODY;
 
-		$this->sendEmail($ics, $recipientEmail, $subject, $htmlBody);
+		$this->sendEmail($ics, $recipientEmail, $subject, $htmlBody); // This can throw
 
 		// --- Respond based on origin ---
 		if ($fromExtension) {
-			// Extension expects JSON
-			header('Content-Type: application/json');
-			echo json_encode([
+            $successOutput = [
 				'status' => 'success',
 				'message' => "Email sent successfully to {$recipientEmail}",
 				'recipientEmail' => $recipientEmail,
 				'emailSubject' => $subject,
-				'icsContent' => $ics // Include ICS for potential display/debug in extension
-			]);
+				'icsContent' => $ics
+			];
+            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                echo json_encode($successOutput, JSON_PRETTY_PRINT) . "\n";
+            } else {
+			    header('Content-Type: application/json');
+			    echo json_encode($successOutput);
+            }
 		} else {
-			// Original behavior for non-extension requests (web form, etc.)
-			http_response_code(200);
-			echo "<h1>Email sent to {$recipientEmail} with ICS file:</h1><pre>";
-			echo htmlspecialchars($this->unescapeNewlines($ics));
-			echo '</pre>';
+            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                echo "Email sent to {$recipientEmail} with ICS file: {$subject}\n";
+                // Optionally print ICS content or path if useful for CLI
+            } else {
+			    http_response_code(200);
+			    echo "<h1>Email sent to {$recipientEmail} with ICS file:</h1><pre>";
+			    echo htmlspecialchars($this->unescapeNewlines($ics));
+			    echo '</pre>';
+            }
 		}
-		exit; // exit moved outside the conditional
+		exit;
 	}
 
 	protected function extractMainContent(string $html) : string
@@ -421,8 +580,6 @@ HasBody:
 
 		$this->removeAttributes($body);
 		$this->removeEmptyElements($body);
-
-		// $this->ensureUtf8($body); // REMOVE THIS CALL
 
 		$finalHtml = $body->innerHTML;
 
@@ -588,7 +745,7 @@ HasBody:
 		);
 	}
 
-    public function processPostmarkRequest($body)
+    public function processPostmarkRequest($body, $outputJsonOnly = false, $cliDebug = false)
 	{
 		errlog("Received email with subject of " . $body['Subject']);
 
@@ -600,56 +757,131 @@ HasBody:
 			errlog('Skipping response email with subject ' . $body['Subject']);
 			return;
 		}
-        $emailText = $body['TextBody'];
+        
+        $htmlBodyForAI = $body['HtmlBody'] ?? '';
+        $textBodyForExtraction = $body['TextBody'] ?? '';
+
+        if (empty($htmlBodyForAI) && !empty($textBodyForExtraction)) {
+            errlog("Postmark email has no HtmlBody, falling back to TextBody for AI content.");
+            $htmlBodyForAI = nl2br(htmlspecialchars($textBodyForExtraction)); // Basic conversion if only text
+        }
+
 		$pdfText = $this->extractPdfText($body['Attachments'] ?? []);
 
-        // Extract URL and instructions from email body
-        $url = null;
-        $instructions = null;
-        $lines = explode("\n", $emailText);
-        $remainingLines = [];
+        // Extract URL and instructions from the TEXT version of the email body
+        $extractedUrl = null;
+        $extractedInstructions = null;
+        $lines = explode("\n", $textBodyForExtraction);
+        // $remainingTextBodyLines = []; // Not strictly needed if HtmlBody is primary
 
         foreach ($lines as $line) {
             if (preg_match('/^URL:\s*(.+)$/i', $line, $matches)) {
-                $url = trim($matches[1]);
+                $extractedUrl = trim($matches[1]);
             } elseif (preg_match('/^Instructions:\s*(.+)$/i', $line, $matches)) {
-                $instructions = trim($matches[1]);
-            } else {
-                $remainingLines[] = $line;
-            }
+                $extractedInstructions = trim($matches[1]);
+            } // else {
+              // $remainingTextBodyLines[] = $line; // Not combining with HTML directly anymore
+            // }
         }
         
-        // If no explicit URL found, check if the entire text is a URL
-        if (!$url && $this->is_valid_url(trim($emailText))) {
-            $url = trim($emailText);
+        // Fallback: If no explicit URL: in TextBody, check if the entire TextBody is a URL
+        // This is less likely to be useful if HtmlBody is the primary content but kept for safety.
+        if (!$extractedUrl && $this->is_valid_url(trim($textBodyForExtraction))) {
+            // Potentially, the entire text body was just a URL, and HtmlBody was minimal or a duplicate.
+            // We might want to log this case if it happens.
+            // For now, this path for $extractedUrl is less prioritized if HtmlBody is rich.
         }
 
-        $combinedText = implode("\n", $remainingLines);
+        // Start building the combined text for the AI with the email's HTML content first
+        $combinedText = "--- Email HTML Content ---\n```html\n" . $htmlBodyForAI . "\n```";
+
         if ($pdfText) {
-            $combinedText .= "\n\n--- Extracted from PDF Attachment ---\n\n" . $pdfText;
+            $combinedText .= "\n\n--- Extracted from PDF Attachment ---\n```text\n" . $pdfText . "\n```";
 		}
 
-		$downloadedText = null;
-		if ($url) {
-			$downloadedText = $this->fetch_url($url);
-
-			$combinedText .= "\n\n--- HTML fetched from URL above ---\n\n";
-			$combinedText .= $downloadedText;
+		$downloadedUrlContent = null;
+		if ($extractedUrl) {
+            errlog("URL found in TextBody: {$extractedUrl}. Fetching...");
+			$fetchedContent = $this->fetch_url($extractedUrl); // Returns raw HTML/content
+            if ($fetchedContent) {
+                $downloadedUrlContent = $this->extractMainContent($fetchedContent); // Cleaned content
+    			$combinedText .= "\n\n--- HTML content fetched from URL found in email TextBody ---\n```html\n" . $downloadedUrlContent . "\n```";
+            } else {
+                errlog("Failed to fetch content from URL found in TextBody: {$extractedUrl}");
+            }
 		}
 
-        $ret = $this->generateIcalEvent($combinedText, $instructions);
+        // Pass $extractedInstructions from TextBody as specific instructions to AI
+        $eventDetails = $this->generateIcalEvent($combinedText, $extractedInstructions, null, null, null, $cliDebug);
 
-        $calendarEvent = $ret['ICS'];
-        $subject = $ret['emailSubject'] ?? 'Calendar Event'; // Use a default subject
+        // Handle --json flag for CLI output if requested and in CLI context
+        // This check is more for future-proofing if this method is called from a CLI context that sets outputJsonOnly
+        if ($outputJsonOnly && defined('IS_CLI_RUN') && IS_CLI_RUN) {
+            // $eventDetails here is the direct output from generateIcalEvent
+            // Get values first
+            $isSuccess = $eventDetails['success'] ?? false;
+            $eventDataValue = $eventDetails['eventData'] ?? null; // Get the value or null
+            $errorMessageValue = $eventDetails['errorMessage'] ?? '';
+
+            // --- Revised Check for Valid Event Data ---
+            $isEventDataValid = false; // Assume invalid initially
+            if (isset($eventDataValue) && is_array($eventDataValue) && !empty($eventDataValue['summary'])) {
+                 $isEventDataValid = true;
+            }
+            // Log the result of this simplified check
+            errlog("eventData validity check result (Postmark): " . ($isEventDataValid ? 'VALID' : 'INVALID'));
+            // --- End Revised Check ---
+
+            $jsonToPrint = [
+                'success'        => $isSuccess,
+                'errorMessage'   => $errorMessageValue,
+                'eventData'      => $eventDataValue, // Use the fetched value
+                'emailSubject'   => $eventDetails['emailSubject'] ?? null,
+                'locationLookup' => $eventDetails['locationLookup'] ?? null,
+            ];
+
+            // We're only concerned about a missing eventData when success is true
+            if ($isSuccess && !$isEventDataValid) {
+                // AI succeeded but eventData is missing or invalid
+                 $jsonToPrint['success'] = false;
+                 $jsonToPrint['errorMessage'] = $errorMessageValue ?: 'Internal error: AI indicated success but eventData structure is missing or invalid (e.g., missing summary).';
+                 errlog("CRITICAL: eventData invalid/missing structure in Postmark --json output despite AI success=true.");
+                 $jsonToPrint['eventData'] = null;
+            } elseif (!$isSuccess && empty($errorMessageValue)) {
+                 $jsonToPrint['errorMessage'] = 'AI processing failed or did not explicitly succeed; no specific error message provided by AI.';
+            }
+            
+            if (headers_sent()) {
+                 errlog("Headers already sent before attempting to send JSON content-type for Postmark --json flag.");
+            } else {
+                 header('Content-Type: application/json');
+            }
+            echo json_encode($jsonToPrint, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            exit(0);
+        }
+
+        // If not outputting JSON directly, proceed with standard logic
+        // Generate ICS only if not outputting JSON and if eventData is present and AI was successful
+        $calendarEvent = null;
+        if (($eventDetails['success'] ?? false) && !empty($eventDetails['eventData'])) {
+            $generator = new IcalGenerator();
+            $calendarEvent = $generator->convertJsonToIcs($eventDetails['eventData'], $this->fromEmail);
+        } elseif (($eventDetails['success'] ?? false) === false) {
+            errlog("Skipping ICS generation for Postmark email because AI processing failed: " . ($eventDetails['errorMessage'] ?? 'Unknown AI error'));
+        } else { // Success was true, but eventData was empty/missing
+            errlog("Skipping ICS generation for Postmark email because eventData was missing/empty from AI despite success. Error: " . ($eventDetails['errorMessage'] ?? 'eventData missing'));
+        }
+
+        $subject = $eventDetails['emailSubject'] ?? 'Calendar Event'; // Use a default subject
 		$recipientEmail = $this->toTentativeEmail;
 
 		if (strcasecmp($body['ToFull'][0]['Email'], $this->inboundConfirmedEmail) === 0) {
 			$recipientEmail = $this->toConfirmedEmail;
 		}
 
-        $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body, $pdfText, $downloadedText);
+        $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body, $pdfText, $downloadedUrlContent);
 
-        echo json_encode(['status' => 'success', 'message' => 'Email processed successfully', 'ics' => $calendarEvent]);
+        echo json_encode(['status' => 'success', 'message' => 'Email processed successfully']); // Original success message for Postmark webhook
 	}
 
 	private function is_valid_url($text) : bool
@@ -718,9 +950,10 @@ HasBody:
      * @param string|null $screenshotViewport Base64-encoded viewport screenshot for vision models
      * @param string|null $screenshotZoomed Base64-encoded zoomed screenshot for vision models
      * @param string|null $requestedModel Specific AI model to use (optional)
+     * @param bool $cliDebug If true and in CLI, output AI request/response to STDERR.
      * @return array Array containing ICS content and metadata
      */
-    private function generateIcalEvent($combinedText, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null)
+    private function generateIcalEvent($combinedText, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $cliDebug = false)
     {
         // Define the NEW schema for structured event data
         $eventSchema = [
@@ -825,7 +1058,7 @@ The JSON object MUST conform EXACTLY to the following schema:
 # FIELD SPECIFIC INSTRUCTIONS
 - **summary:** Generate a relevant title (e.g., "Dr. White Appointment", "SF Symphony Concert - Beethoven").
 - **description:** Create a concise plain-text summary. Use `\\n` for newlines. Keep under 1000 chars. DO NOT include raw HTML. For flights, include Flight #, Confirmation #, Departure/Arrival details. Include Eventbrite ticket links prominently if found.
-- **htmlDescription:** (Optional) Include relevant original HTML snippets here (under 1500 chars).
+- **htmlDescription:** Provide a concise HTML version of the description, ideally under 1500 characters. Use basic HTML tags only (e.g., `<p>`, `<a>`, `<b>`, `<i>`, `<ul>`, `<ol>`, `<li>`, `<br>`). DO NOT include `<style>` tags or inline `style` attributes. Minimize complex formatting.
 - **dtstart / dtend:** Use ISO 8601 format. Calculate end time if missing (2h default, 3h opera, 30m doctor). Use YYYY-MM-DD format ONLY if `isAllDay` is true.
 - **timezone:** Provide a valid PHP Timezone identifier (e.g., `America/Los_Angeles`, `America/New_York`, `UTC`). Infer from location if possible, default to `America/Los_Angeles` if unknown/virtual.
 - **location:** The venue name or address.
@@ -948,7 +1181,14 @@ PROMPT;
                 'effort' => 'high'
             ],
             'max_tokens' => $this->maxTokens,
+						'provider' 
         ];
+
+        if ($cliDebug && defined('IS_CLI_RUN') && IS_CLI_RUN) {
+            fwrite(STDERR, "\n--- AI REQUEST DATA (DEBUG) ---\n");
+            fwrite(STDERR, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+            fwrite(STDERR, "--- END AI REQUEST DATA ---\n\n");
+        }
 
         errlog('Sending OpenRouter request to model: ' . $this->aiModel);
         try
@@ -959,13 +1199,15 @@ PROMPT;
         {
             // Log the exception message, as accessing the raw body is problematic
             errlog("OpenRouter UnserializableResponse: " . $e->getMessage());
-            
-            http_response_code(500);
-            echo "<h1>Error communicating with AI Provider</h1><p>Could not decode the response.</p>";
-            echo '<p>This usually means the API returned an unexpected format (e.g., an error object, rate limit info) instead of a valid chat completion.</p>';
-            echo '<pre>' . htmlspecialchars($e->getMessage()) . '</pre>';
-            // echo '<h4>Raw Response:</h4><pre>' . htmlspecialchars($rawResponseBody) . '</pre>'; // Cannot reliably get raw response here
-            die;
+            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                echo "Error: AI Provider UnserializableResponse - " . $e->getMessage() . "\n";
+            } else {
+                http_response_code(500);
+                echo "<h1>Error communicating with AI Provider</h1><p>Could not decode the response.</p>";
+                echo '<p>This usually means the API returned an unexpected format (e.g., an error object, rate limit info) instead of a valid chat completion.</p>';
+                echo '<pre>' . htmlspecialchars($e->getMessage()) . '</pre>';
+            }
+            die; // Or exit(1) for CLI
         }
         catch (\OpenAI\Exceptions\ErrorException $e) { // Catch API errors specifically
             $errorDetails = $e->getMessage();
@@ -976,14 +1218,22 @@ PROMPT;
                 $errorDetails .= " | Code: " . ($e->getErrorCode() ?? 'N/A');
             }
             errlog("OpenRouter API ErrorException: " . $errorDetails);
-            http_response_code(500);
-            echo "<h1>Error communicating with AI Provider (API Error)</h1>";
-            echo '<p>Details: ' . htmlspecialchars($errorDetails) . '</p>';
-            die;
+            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                echo "Error: AI Provider API Error - " . $errorDetails . "\n";
+            } else {
+                http_response_code(500);
+                echo "<h1>Error communicating with AI Provider (API Error)</h1>";
+                echo '<p>Details: ' . htmlspecialchars($errorDetails) . '</p>';
+                die; 
+            }
         }
         catch (\Throwable $e) {
             errlog("General Error during OpenRouter request: " . $e->getMessage());
-            throw $e;
+            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                 echo "Error: General error during AI request - " . $e->getMessage() . "\n";
+                 throw $e; // Re-throw for web handler to catch and format, or main CLI handler
+            }
+            throw $e; // Re-throw for web handler to catch and format
         }
 
         errlog('Received OpenRouter response.');
@@ -991,58 +1241,157 @@ PROMPT;
         $returnedData = $response['choices'][0]['message']['content'];
         // $jsonData = trim($returnedData); // Old simple trim
 
-        // Use regex to extract JSON block, handling potential markdown fences and surrounding text
-        $jsonData = null;
-        if (preg_match('/```json\s*({.*?})\s*```/is', $returnedData, $matches)) {
-            $jsonData = $matches[1];
-            errlog("Extracted JSON using ```json fences.");
-        } elseif (preg_match('/({\s*"success":.*?})/is', $returnedData, $matches)) {
-            // Fallback: Try to find the JSON object directly if no fences are present
-            // This regex looks for the start of our expected structure {"success":...
-            $jsonData = $matches[1];
-            errlog("Extracted JSON using direct object match.");
-        } else {
-            // If no JSON block found, use the trimmed data as a last resort (might still fail)
-            errlog("Could not extract JSON block reliably, using trimmed response.");
-            $jsonData = trim($returnedData);
+        if ($cliDebug && defined('IS_CLI_RUN') && IS_CLI_RUN) {
+            fwrite(STDERR, "\n--- AI RAW RESPONSE CONTENT (DEBUG) ---\n");
+            fwrite(STDERR, $returnedData . "\n"); // Show raw string before JSON extraction attempts
+            fwrite(STDERR, "--- END AI RAW RESPONSE CONTENT ---\n\n");
         }
 
-        // Basic JSON decoding, rely on response_format for structure
-        $ret = json_decode($jsonData, true, 512, JSON_INVALID_UTF8_IGNORE);
+        // Debug: Output token usage and cost if $cliDebug is true
+        if ($cliDebug && defined('IS_CLI_RUN') && IS_CLI_RUN) {
+            $promptTokens = 0;
+            $completionTokens = 0;
 
-			if (json_last_error() != JSON_ERROR_NONE) {
-				$err = json_last_error_msg();
-				errlog("AI returned invalid JSON despite requesting JSON format:\nError: {$err}\nRaw Response: {$jsonData}");
-				http_response_code(500);
-				echo "<h1>AI did not return valid JSON</h1>";
-				echo '<p>Error: ' . htmlspecialchars($err) . '</p>';
-				echo '<pre>' . htmlspecialchars($this->unescapeNewlines($jsonData)) . '</pre>';
-				die;
-			}
+            // Access usage data - structure might vary slightly based on exact client library version for OpenRouter
+            // Common structures: $response->usage->promptTokens or $response['usage']['prompt_tokens']
+            if (isset($response['usage'])) { // Array access
+                $promptTokens = $response['usage']['prompt_tokens'] ?? 0;
+                $completionTokens = $response['usage']['completion_tokens'] ?? 0;
+            } elseif (isset($response->usage) && is_object($response->usage)) { // Object access
+                $promptTokens = $response->usage->promptTokens ?? ($response->usage->prompt_tokens ?? 0);
+                $completionTokens = $response->usage->completionTokens ?? ($response->usage->completion_tokens ?? 0);
+            }
+            $totalTokens = $promptTokens + $completionTokens;
+
+            $modelInfo = $this->availableModels[$this->aiModel] ?? null;
+            $costString = "N/A (pricing info unavailable for model: {$this->aiModel})";
+
+            if ($modelInfo && isset($modelInfo['pricing'])) {
+                $pricePromptPer1k = (float)($modelInfo['pricing']['prompt'] ?? 0);
+                $priceCompletionPer1k = (float)($modelInfo['pricing']['completion'] ?? 0);
+                $priceRequest = (float)($modelInfo['pricing']['request'] ?? 0);
+
+                $promptCost = ($promptTokens / 1000) * $pricePromptPer1k;
+                $completionCost = ($completionTokens / 1000) * $priceCompletionPer1k;
+                $totalCalculatedCost = $promptCost + $completionCost + $priceRequest;
+                
+                $costString = '$' . number_format($totalCalculatedCost, 6);
+            } else if (!$modelInfo) {
+                errlog("Debug Cost Calc: Model info not found for ID: {$this->aiModel}");
+            } else if (!isset($modelInfo['pricing'])){
+                errlog("Debug Cost Calc: Pricing info missing for model ID: {$this->aiModel}. Model Data: " . json_encode($modelInfo));
+            }
+
+            fwrite(STDERR, "\n--- AI TOKEN USAGE & ESTIMATED COST (DEBUG) ---\n");
+            fwrite(STDERR, "Model Used:         " . $this->aiModel . "\n");
+            fwrite(STDERR, "Prompt Tokens:      " . $promptTokens . "\n");
+            fwrite(STDERR, "Completion Tokens:  " . $completionTokens . "\n");
+            fwrite(STDERR, "Total Tokens:       " . $totalTokens . "\n");
+            fwrite(STDERR, "Estimated Cost:     " . $costString . "\n");
+            fwrite(STDERR, "--- END AI TOKEN USAGE & ESTIMATED COST ---\n\n");
+        }
+
+        // --- Improved JSON Extraction Logic ---
+        $jsonData = null;
+        $decodedJson = null;
+        $trimmedData = trim($returnedData);
+
+        // 1. Try direct decoding first (ideal case)
+        $decodedJson = json_decode($trimmedData, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decodedJson)) {
+            $jsonData = $trimmedData; // Use the directly decoded data
+            errlog("Successfully decoded JSON directly from trimmed AI response.");
+        } else {
+            errlog("Direct JSON decode failed (Error: " . json_last_error_msg() . "). Trying regex fallbacks...");
+            // 2. Fallback: Try extracting from ```json fences
+            if (preg_match('/```json\s*({.*?})\s*```/is', $returnedData, $matches)) {
+                $jsonData = $matches[1];
+                $decodedJson = json_decode($jsonData, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decodedJson)) {
+                    errlog("Extracted and decoded JSON using ```json fences.");
+                } else {
+                    errlog("Found ```json fences, but decoding failed (Error: " . json_last_error_msg() . "). Content: " . $jsonData);
+                    $jsonData = null; // Reset if decode failed
+                    $decodedJson = null;
+                }
+            }
+
+            // 3. Fallback: Try heuristic regex if still no valid JSON
+            if ($jsonData === null && preg_match('/({.*})/s', $trimmedData, $matches)) {
+                $jsonData = $matches[1];
+                $decodedJson = json_decode($jsonData, true);
+                 if (json_last_error() === JSON_ERROR_NONE && is_array($decodedJson)) {
+                    errlog("Extracted and decoded JSON using broad heuristic regex {.*}.");
+                } else {
+                    errlog("Used broad heuristic regex {.*}, but decoding failed (Error: " . json_last_error_msg() . "). Content: " . $jsonData);
+                    $jsonData = null; // Reset if decode failed
+                    $decodedJson = null;
+                }
+            }
+        }
+        // --- End Improved JSON Extraction Logic ---
+
+        // Check if we successfully got valid JSON data
+        if ($decodedJson === null) {
+            $errorMsg = "Failed to extract or decode valid JSON from AI response.";
+            errlog($errorMsg . " Raw Response Snippet: " . substr($returnedData, 0, 500));
+            // In CLI mode, throw exception. In web mode, maybe return a structured error?
+            // For now, consistent exception for easier debugging.
+            throw new \RuntimeException($errorMsg . " Raw Response Snippet: " . substr($returnedData, 0, 500));
+            /* Previous approach for potential web error handling:
+            return [
+                'success' => false,
+                'errorMessage' => $errorMsg,
+                'eventData' => null,
+                'emailSubject' => 'Error: Invalid AI Response',
+                'locationLookup' => null
+            ];
+            */
+        }
+
+        // Use the successfully decoded JSON array
+        $ret = $decodedJson;
+
+
+			// NOTE: Validation logic using Opis/JsonSchema was removed in a previous step.
+            // Consider re-adding if strict schema validation against $ret is needed here.
+            /*
+            $validator = new \Opis\JsonSchema\Validator();
+            $validationResult = $validator->validate($ret, json_encode($responseSchema));
+
+            if (!$validationResult->isValid()) {
+                $validationError = $validationResult->error();
+                $this->handleValidationError($validationError, $ret, $responseSchema);
+                // Decide how to handle validation failure - e.g., throw, return error structure
+                 $errorMsg = "AI response failed schema validation.";
+                 errlog($errorMsg . " Validation Errors: " . json_encode($this->formatValidationErrors($validationError)));
+                 throw new \RuntimeException($errorMsg);
+            }
+            */
 
 			if (isset($ret['success']) && $ret['success'] === false) {
 				$errorMessage = $ret['errorMessage'] ?? 'AI indicated failure with no specific message.';
 				errlog("AI returned success = false: {$errorMessage}\nJSON: {$jsonData}");
-				http_response_code(500);
-				echo "<h1>AI Processing Error</h1>";
-				echo '<p>' . htmlspecialchars($errorMessage) . '</p>';
-				echo '<pre>' . htmlspecialchars($this->unescapeNewlines($jsonData)) . '</pre>';
-				die;
+                // Keep throwing exception for consistency in CLI
+                throw new \RuntimeException("AI processing error: {$errorMessage}. JSON: {$jsonData}");
+                /* Web mode alternative:
+                return [
+                    'success' => false,
+                    'errorMessage' => $errorMessage,
+                    'eventData' => $ret['eventData'] ?? null, // Return partial data if available?
+                    'emailSubject' => $ret['emailSubject'] ?? 'AI Processing Error',
+                    'locationLookup' => $ret['locationLookup'] ?? null
+                ];
+                */
 			}
 
 			if (empty($ret['eventData']['summary'] ?? null)) {
 				errlog("AI response missing required 'eventData.summary'. JSON: {$jsonData}");
-				http_response_code(500);
-				echo "<h1>AI response missing required event summary.</h1>";
-				echo '<pre>' . htmlspecialchars($jsonData) . '</pre>';
-				die;
+                throw new \RuntimeException("AI response missing required 'eventData.summary'. JSON: {$jsonData}");
 			}
 			if (empty($ret['emailSubject'] ?? null)) {
 				errlog("AI response missing required 'emailSubject'. JSON: {$jsonData}");
-				http_response_code(500);
-				echo "<h1>AI response missing required email subject.</h1>";
-				echo '<pre>' . htmlspecialchars($jsonData) . '</pre>';
-				die;
+                throw new \RuntimeException("AI response missing required 'emailSubject'. JSON: {$jsonData}");
 			}
 
 			if (!empty($ret['locationLookup'])) {
@@ -1062,9 +1411,8 @@ PROMPT;
 			$icsString = $generator->convertJsonToIcs($ret['eventData'], $this->fromEmail);
 
 			$ret['ICS'] = $icsString;
-			unset($ret['eventData']); // Remove eventData after ICS generation
 
-			return $ret;
+			return $ret; // Return the full structured data including eventData, success, etc.
 	}
 
 	private function sendEmailWithAttachment($toEmail, $ics, $subject, $originalEmail, $pdfText = null, $downloadedText = null)
@@ -1265,24 +1613,40 @@ BODY;
      */
 	public function getDefaultModelId()
 	{
-		// Define preferred default model
-		$preferredDefault = 'anthropic/claude-3.7-sonnet:thinking';
+        // 1. Check for DEFAULT_MODEL environment variable
+        if (isset($_ENV['DEFAULT_MODEL']) && !empty(trim($_ENV['DEFAULT_MODEL']))) {
+            $envDefaultModelId = trim($_ENV['DEFAULT_MODEL']);
+            if (isset($this->availableModels[$envDefaultModelId])) {
+                errlog("Using DEFAULT_MODEL from environment: {$envDefaultModelId}");
+                return $envDefaultModelId;
+            } else {
+                errlog("Warning: DEFAULT_MODEL '{$envDefaultModelId}' from environment is not in the list of available/allowed models. Falling back.");
+            }
+        }
 
-		if (isset($this->availableModels[$preferredDefault])) {
-			return $preferredDefault;
-		}
+        // 2. Define and check hardcoded preferred default model (application's preference)
+        $preferredDefault = 'anthropic/claude-3.7-sonnet:thinking';
 
-		// Fallback to the first model in the list if preferred is not available
-		if (!empty($this->availableModels)) {
-			reset($this->availableModels); // Ensure pointer is at the beginning
-			return key($this->availableModels);
-		}
+        if (isset($this->availableModels[$preferredDefault])) {
+            errlog("Using hardcoded preferred default model: {$preferredDefault}");
+            return $preferredDefault;
+        }
+        errlog("Warning: Hardcoded preferred default model '{$preferredDefault}' is not in the list of available/allowed models. Falling back further.");
 
-		// Absolute fallback if even the static list failed (should not happen)
-		errlog("CRITICAL: No models available, cannot determine default.");
-		// This case should ideally not be reachable if loadAvailableModels throws an exception
-		throw new \RuntimeException("Cannot determine default model as no models were loaded.");
-	}
+        // 3. Fallback to the first model in the availableModels list
+        if (!empty($this->availableModels)) {
+            reset($this->availableModels); // Ensure pointer is at the beginning
+            $firstAvailableModel = key($this->availableModels);
+            errlog("Using first available model as default: {$firstAvailableModel}");
+            return $firstAvailableModel;
+        }
+
+        // 4. Absolute fallback if no models are available (should ideally not be reached)
+        errlog("CRITICAL: No models available, cannot determine default model.");
+        // This case should ideally not be reachable if loadAvailableModels throws an exception
+        // or if ALLOWED_MODELS is configured such that at least one model is always present.
+        throw new \RuntimeException("Cannot determine default model as no models were loaded or allowed.");
+    }
 
     /**
      * Check if a model ID is valid (exists in our list)
@@ -1406,6 +1770,8 @@ function getAvailableModels()
         errlog($errorMsg); // Log to server log
         // $debugLogMessages[] = $errorMsg; // REMOVED
 		// Return empty list or a hardcoded minimal list on error
+        // For CLI, this function might be called, if it errors, it should inform CLI appropriately.
+        // However, the main CLI path instantiates EmailProcessor directly.
 		return [
 			'models' => [],
 			'server_preference' => false, // Indicate failure
@@ -1502,6 +1868,11 @@ class WebPage
 {
     public function handleRequest()
     {
+        if (is_cli()) {
+            $this->handleCli();
+            return;
+        }
+
         $authorized = $this->checkSessionAuth() || $this->checkBasicAuth();
 
         if (!$authorized) {
@@ -1642,6 +2013,8 @@ HTML;
 				$_REQUEST['model'] ?? null,
 				($_REQUEST['review'] ?? '0') === '1',     // Convert '1'/'0' back to boolean
 				($_REQUEST['fromExtension'] ?? 'false') === 'true', // Convert string bool to boolean
+				false, // $outputJsonOnly - defaults to false for form submissions
+				false  // $cliDebug - defaults to false for form submissions
 			);
     }
 
@@ -1656,6 +2029,167 @@ HTML;
 		$processor = new EmailProcessor();
 		$processor->processPostmarkRequest($json_data);
 	}
+
+    private function handleCli()
+    {
+        // Define IS_CLI_RUN as true for the context of this execution path.
+        // This is important for methods like processUrl which check this constant.
+        if (!defined('IS_CLI_RUN')) {
+            define('IS_CLI_RUN', true);
+        }
+
+        $short_opts = "u:d:t:i:m:r:"; // Added h later for html to avoid conflict with help
+        $long_opts = [
+            "url:",             // Required: URL to process
+            "html::",           // Optional: Pre-downloaded HTML content (used as downloadedText)
+            "display::",        // Optional: How to handle output. Default: 'display' (ICS to stdout for CLI)
+            "tentative::",      // Optional: Mark as tentative (1 or 0). Default: 1
+            "instructions::",   // Optional: Additional instructions for AI
+            "model::",          // Optional: Specific AI model to use
+            "review::",         // Optional: Needs review (1 or 0). Default: 0
+            "screenshot_viewport::", // Optional: Base64 viewport screenshot
+            "screenshot_zoomed::",   // Optional: Base64 zoomed screenshot
+            "json",                  // Optional: Output raw JSON response instead of ICS (CLI only)
+            "postmark-json-file:", // Optional: Process a local JSON file as a Postmark inbound email
+            "debug",                 // Optional: Output AI request/response to STDERR (CLI only)
+            "help"              // Optional: Show help message
+        ];
+
+        // Add 'h:' for html after initial definition to keep help as primary for -h if user types that
+        // getopt processes short options case-sensitively.
+        // If we want -h for help, it should be defined before -h for html, or html should use a different short opt.
+        // For clarity, let's make html content not have a short opt here to avoid conflict with a potential -h for help.
+        // The long --html is clear.
+
+        $options = getopt($short_opts, $long_opts);
+
+        if (isset($options['help'])) {
+            $this->displayCliHelp();
+            exit(0);
+        }
+
+        $processor = new EmailProcessor();
+
+        // Check for Postmark JSON file processing first
+        if (isset($options['postmark-json-file'])) {
+            $filePath = $options['postmark-json-file'];
+            if (!file_exists($filePath) || !is_readable($filePath)) {
+                // echo "Error: Postmark JSON file not found or not readable: {$filePath}\n"; // Replaced by exception
+                throw new \RuntimeException("Postmark JSON file not found or not readable: {$filePath}");
+            }
+            $fileContent = file_get_contents($filePath);
+            if ($fileContent === false) {
+                // echo "Error: Could not read Postmark JSON file: {$filePath}\n"; // Replaced by exception
+                throw new \RuntimeException("Could not read Postmark JSON file: {$filePath}");
+            }
+            $jsonData = json_decode($fileContent, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                // echo "Error: Invalid JSON in file {$filePath}. " . json_last_error_msg() . "\n"; // Replaced by exception
+                throw new \RuntimeException("Invalid JSON in file {$filePath}. " . json_last_error_msg());
+            }
+
+            try {
+                errlog("Processing Postmark JSON file: {$filePath}");
+                $processor->processPostmarkRequest($jsonData, isset($options['json']), isset($options['debug']));
+                exit(0); // Success
+            } catch (Throwable $e) {
+                errlog("Error processing Postmark JSON file {$filePath}: " . $e->getMessage());
+                // The main try-catch block in index.php will also catch this and format for CLI.
+                // For now, we can output a simpler message and re-throw or let the main handler do it.
+                // echo "Error during Postmark JSON file processing: " . $e->getMessage() . "\n"; // Replaced
+                // exit(1); // Exit with error, main handler might not be reached if we exit here.
+                       // It's better to throw and let the main handler manage uniform error output.
+                throw $e; // Re-throw to be caught by the main script's error handler
+            }
+        }
+
+        // If not processing a Postmark JSON file, proceed with URL/HTML/Instructions logic
+        if ((!isset($options['url']) || empty($options['url'])) && 
+            (!isset($options['html']) || empty($options['html'])) && 
+            (!isset($options['instructions']) || empty($options['instructions']))) {
+            // echo "Error: You must provide at least one of --url, --html, or --instructions.\n\n"; // Replaced
+            // $this->displayCliHelp(); // Help is good, but exception first
+            throw new \InvalidArgumentException("You must provide at least one of --url, --html, or --instructions. Use --help for usage.");
+        }
+
+        $url = $options['url'] ?? ''; // Default to empty if not set
+        $downloadedText = $options['html'] ?? '';
+        $display = $options['display'] ?? 'display';
+        $tentative = isset($options['tentative']) ? ($options['tentative'] === '1' || strtolower($options['tentative']) === 'true') : true;
+        $instructions = $options['instructions'] ?? null;
+        $screenshotViewport = $options['screenshot_viewport'] ?? null;
+        $screenshotZoomed = $options['screenshot_zoomed'] ?? null;
+        $requestedModel = $options['model'] ?? null;
+        $needsReview = isset($options['review']) ? ($options['review'] === '1' || strtolower($options['review']) === 'true') : false;
+        $fromExtension = false; // This is a direct CLI call
+        $outputAsJson = isset($options['json']); // Check for the --json flag
+        $cliDebugEnabled = isset($options['debug']); // Check for --debug flag
+
+        try {
+            $processor = new EmailProcessor();
+            $processor->processUrl(
+                $url,
+                $downloadedText,
+                $display,
+                $tentative,
+                $instructions,
+                $screenshotViewport,
+                $screenshotZoomed,
+                $requestedModel,
+                $needsReview,
+                $fromExtension,
+                $outputAsJson, // Pass the flag here
+                $cliDebugEnabled
+            );
+            exit(0); // Successful CLI execution
+        } catch (Throwable $e) {
+            // The main try-catch block in index.php will handle this exception
+            // and format the error appropriately for CLI output.
+            // We log it here too for completeness before re-throwing.
+            errlog("Error during CLI processing in handleCli for URL {$url}: " . $e->getMessage());
+            throw $e; // Re-throw to be caught by the main script's error handler
+        }
+    }
+
+    private function displayCliHelp()
+    {
+        echo "Usage: php " . basename(__FILE__) . " [options]\n";
+        echo "\n";
+        echo "Processes a URL, HTML content, or provided instructions to extract event information and generate an iCalendar (ICS) file or other output.\n";
+        echo "This command directly invokes the processing logic.\n";
+        echo "\n";
+        echo "Required (at least one of the following must be provided):\n";
+        echo "  --url <url>                      URL of the event page to process. Will be fetched if --html is not provided.\n";
+        echo "  --html <string>                  Pre-downloaded HTML content. If --url is also given, this HTML will be used instead of fetching the URL.\n";
+        echo "  -i, --instructions <string>      Direct instructions for the AI to create an event. Can be used alone or to supplement --url/--html.\n";
+        echo "\n";
+        echo "Alternative mode (takes precedence over URL/HTML/Instructions if used):\n";
+        echo "  --postmark-json-file <filepath>  Process a local JSON file as if it were an inbound Postmark email. All other processing flags are ignored.\n";
+        echo "\n";
+        echo "Optional arguments (for URL/HTML/Instructions mode):\n";
+        echo "  -d, --display <mode>             Output mode. Options:\n";
+        echo "                                     'display': Outputs ICS to STDOUT (default for CLI).\n";
+        echo "                                     'download': Outputs ICS to STDOUT (intended for HTTP downloads, shows raw ICS in CLI).\n";
+        echo "                                     'email': Sends the ICS file via Postmark to the configured recipient.\n";
+        echo "  -t, --tentative <1|0>            Mark event as tentative (1 for true, 0 for false). Default: 1 (true).\n";
+        echo "  -m, --model <model_id>           Specify the AI model ID to use (e.g., 'anthropic/claude-3-haiku').\n";
+        echo "  -r, --review <1|0>               Flag if the event needs review (1 for true, 0 for false). Default: 0 (false).\n";
+        echo "                                     If true, outputs JSON for review to STDOUT instead of ICS/email.\n";
+        echo "  --screenshot_viewport <base64>   Base64 encoded viewport screenshot for vision-capable AI models.\n";
+        echo "  --screenshot_zoomed <base64>     Base64 encoded zoomed-out/full-page screenshot for vision-capable AI models.\n";
+        echo "  --json                           Output the processed event data as JSON instead of ICS (CLI mode only).\n";
+        echo "  --debug                          Output detailed AI request and raw response data to STDERR (CLI mode only).\n";
+        echo "  --help                           Display this help message and exit.\n";
+        echo "\n";
+        echo "Examples:\n";
+        echo "  php " . basename(__FILE__) . " --url https://www.example.com/event\n";
+        echo "  php " . basename(__FILE__) . " --postmark-json-file /path/to/email.json\n";
+        echo "  php " . basename(__FILE__) . " --html \"<html><body>Event at 2pm</body></html>\"\n";
+        echo "  php " . basename(__FILE__) . " --instructions \"Lunch with Bob tomorrow at 1pm at The Cafe\"\n";
+        echo "  php " . basename(__FILE__) . " --url https://www.example.com/event --instructions \"Focus on the main speaker schedule.\"\n";
+        echo "  php " . basename(__FILE__) . " --url https://www.example.com/event --display email --model anthropic/claude-3-sonnet\n";
+        echo "  php " . basename(__FILE__) . " --url https://www.example.com/event --review 1\n";
+    }
 }
 
 $dotenv = Dotenv::createImmutable(__DIR__);
@@ -1677,11 +2211,11 @@ try {
 	errlog($t);
 
 	// Check if the request likely came from the extension
-	if (isset($_REQUEST['fromExtension'])) {
+	if (!is_cli() && isset($_REQUEST['fromExtension']) && ($_REQUEST['fromExtension'] === 'true' || $_REQUEST['fromExtension'] === true)) {
 		http_response_code(500);
 		header('Content-type: application/json');
 		echo json_encode(['error' => 'Internal Server Error']);
-	} else {
+	} elseif (!is_cli()) {
 		// Respond with detailed HTML error for direct access/other sources
 		http_response_code(500); // Still an error
 		header('Content-type: text/html');
@@ -1691,7 +2225,15 @@ try {
         echo '<hr><p><b>Debug Info (Direct Access):</b></p>';
         echo '<p>Error: ' . htmlspecialchars($t->getMessage()) . '</p>';
         echo '<pre>' . htmlspecialchars(substr($t->getTraceAsString(), 0, 1000)) . '...</pre>'; // Limit trace output
-	}
+	} else {
+        // CLI error output
+        global $requestId;
+        fwrite(STDERR, "INTERNAL SERVER ERROR (CLI MODE)\n");
+        fwrite(STDERR, "Request ID: {$requestId}\n");
+        fwrite(STDERR, "Error: " . $t->getMessage() . "\n");
+        fwrite(STDERR, "Trace (first 1000 chars):\n" . substr($t->getTraceAsString(), 0, 1000) . "...\n");
+        fwrite(STDERR, "Full details logged to server error log.\n");
+    }
 
     $err = '<h1>ERROR PROCESSING CALENDAR EVENT</h1>' .
 		'<p>Error: <b>' . htmlspecialchars($t->getMessage()) . '</b></p>' .
@@ -1699,12 +2241,16 @@ try {
 		'<p>Original POST/REQUEST:</p>' .
 		'<pre>' . htmlspecialchars(json_encode($_REQUEST)) . '</pre>';
 
-	try {
-	    $processor = new EmailProcessor;
-	    $processor->sendEmail(null, $_ENV['ERROR_EMAIL'], 'ERROR PROCESSING CALENDAR EVENT', $err);
-	} catch (Throwable $emailError) {
-	    errlog("Failed to send error email: " . $emailError->getMessage());
-	}
+    if (!is_cli()) {
+	    try {
+	        $processor = new EmailProcessor;
+	        $processor->sendEmail(null, $_ENV['ERROR_EMAIL'], 'ERROR PROCESSING CALENDAR EVENT', $err);
+	    } catch (Throwable $emailError) {
+	        errlog("Failed to send error email: " . $emailError->getMessage());
+	    }
+    } else {
+        errlog("CLI run encountered an error; error email not sent. Error details: " . $t->getMessage());
+    }
 }
 
 $out = ob_get_flush();
@@ -1780,3 +2326,4 @@ if (isset($_GET['confirm']) && $_GET['confirm'] === 'true' && $_SERVER['REQUEST_
 // --- End NEW Confirmation Handling ---
 
 // --- Continue with original script logic ---
+
