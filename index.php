@@ -26,7 +26,7 @@ use Opis\JsonSchema\Errors\ValidationError;
 use App\IcalGenerator; // Use the generator from its namespace
 
 // Define cache settings
-define('MODEL_CACHE_FILE', __DIR__ . '/.models_cache.json');
+define('MODEL_CACHE_FILE', sys_get_temp_dir() . '/.models_cache.json');
 define('MODEL_CACHE_DURATION', 7 * 24 * 60 * 60); // 7 days in seconds
 
 // --- Helper: Detect CLI ---
@@ -422,7 +422,7 @@ TEXT;
 
 			// --- Generate and store confirmation token ---
 			$confirmationToken = bin2hex(random_bytes(16)); // Generate a unique token
-			$cacheDir = __DIR__ . '/confirm_cache';
+			$cacheDir = sys_get_temp_dir() . '/confirm_cache';
 			if (!is_dir($cacheDir)) {
 				mkdir($cacheDir, 0770, true); // Create cache dir if it doesn't exist (adjust permissions if needed)
 			}
@@ -1868,6 +1868,16 @@ class WebPage
 {
     public function handleRequest()
     {
+        // Set CORS headers for all responses
+        header("Access-Control-Allow-Origin: *");
+        header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
+        header("Access-Control-Allow-Headers: Content-Type, Authorization");
+
+        // Handle OPTIONS preflight requests
+        if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
+            header("HTTP/1.1 204 No Content");
+            exit;
+        }
         if (is_cli()) {
             $this->handleCli();
             return;
@@ -2279,7 +2289,7 @@ function errlog($msg)
 if (isset($_GET['confirm']) && $_GET['confirm'] === 'true' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
     $token = $_POST['confirmationToken'] ?? null;
-    $cacheDir = __DIR__ . '/confirm_cache';
+    $cacheDir = sys_get_temp_dir() . '/confirm_cache';
     define('CONFIRMATION_TTL', 60 * 60); // Token valid for 1 hour
 
     if (!$token || !preg_match('/^[a-f0-9]{32}$/', $token)) { // Basic token validation
