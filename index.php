@@ -2025,6 +2025,10 @@ HTML;
 
     private function processFormSubmission()
     {
+			// Detect iOS Shortcuts requests
+			$isFromShortcut = isset($_REQUEST['fromShortcut']) || 
+							  stripos($_SERVER['HTTP_USER_AGENT'] ?? '', 'Shortcuts') !== false;
+			
 			$processor = new EmailProcessor();
 			$processor->processUrl(
 				$_REQUEST['url'],
