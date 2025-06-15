@@ -9,9 +9,6 @@
 <body>
     <div class="container mt-4">
         <h1 class="mb-4">Create ICS from URL</h1>
-        <div class="alert alert-info">
-            📱 <strong>iOS Users:</strong> <a href="ios-shortcut-setup.md">Set up iOS Shortcut</a> for quick access from Safari
-        </div>
         <div id="alertContainer" class="mb-4"></div>
         <form id="icsForm" class="needs-validation" novalidate>
             <div class="mb-3">
@@ -95,6 +92,23 @@
         </div>
 
         <div id="resultContainer" class="mt-4"></div>
+        
+        <!-- iOS Shortcut Builder -->
+        <div class="mt-5 mb-4 p-4 bg-light rounded">
+            <h3>📱 iOS Shortcut</h3>
+            <p>Create a shortcut to quickly process any webpage on your iPhone:</p>
+            <button type="button" class="btn btn-primary" id="createShortcutBtn">Create iOS Shortcut</button>
+            <div id="shortcutInstructions" class="mt-3" style="display: none;">
+                <div class="alert alert-info">
+                    <strong>Instructions:</strong>
+                    <ol>
+                        <li>The Shortcuts app will open</li>
+                        <li>Tap "Add Shortcut" to save it</li>
+                        <li>Use it from Safari's share sheet on any webpage</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -165,7 +179,9 @@
             // No need for separate showAlert for processing anymore
             // showAlert('Processing your request...', 'info', true); 
 
-            fetch('index.php', {
+            // Use clean URL without basic auth
+            const cleanUrl = window.location.protocol + '//' + window.location.host + window.location.pathname.replace('form.html', 'index.php');
+            fetch(cleanUrl, {
                 method: 'POST',
                 body: formData,
                 signal: currentController.signal
@@ -274,8 +290,16 @@
 
         // Load models on page load
         document.addEventListener('DOMContentLoaded', async () => {
+            // Check for URL parameter (from iOS shortcut)
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlFromParam = urlParams.get('url');
+            if (urlFromParam) {
+                document.getElementById('url').value = urlFromParam;
+            }
             try {
-                const response = await fetch('?get_models=1', {
+                // Strip any basic auth from current URL
+                const cleanUrl = window.location.protocol + '//' + window.location.host + window.location.pathname;
+                const response = await fetch(cleanUrl + '?get_models=1', {
                     credentials: 'include'
                 });
                 const data = await response.json();
@@ -297,6 +321,48 @@
                 const modelSelect = document.getElementById('model');
                 modelSelect.innerHTML = '<option value="">Error loading models</option>';
             }
+        });
+
+        // iOS Shortcut creation
+        document.getElementById('createShortcutBtn').addEventListener('click', function() {
+            // Get the current server URL
+            const serverUrl = window.location.protocol + '//' + window.location.host + window.location.pathname.replace('form.html', '');
+            
+            // Create the shortcut URL
+            // This will open the form with the shared URL pre-filled
+            const shortcutUrl = `shortcuts://run-shortcut?name=Email-to-ICS&input=clipboard&x-success=${encodeURIComponent(serverUrl + 'form.html')}`;
+            
+            // For a simpler approach, just open the web form with the URL parameter
+            const simpleShortcutUrl = `shortcuts://x-callback-url/run-shortcut?name=Open%20Email-to-ICS&x-success=${encodeURIComponent(serverUrl + 'form.html?url=')}`;
+            
+            // Create a shortcut that gets the current Safari page URL
+            const createShortcutUrl = 'shortcuts://create-shortcut';
+            
+            // Show instructions
+            document.getElementById('shortcutInstructions').style.display = 'block';
+            
+            // Open Shortcuts app
+            window.location.href = createShortcutUrl;
+            
+            // After a delay, provide a fallback link
+            setTimeout(() => {
+                const instructionsDiv = document.getElementById('shortcutInstructions');
+                if (instructionsDiv) {
+                    instructionsDiv.innerHTML += `
+                        <div class="mt-3">
+                            <p><strong>Manual Setup:</strong></p>
+                            <ol>
+                                <li>In Shortcuts app, tap + to create new shortcut</li>
+                                <li>Add action: "Get Current URL" (from Safari)</li>
+                                <li>Add action: "Open URLs" and set to:<br>
+                                    <code>${serverUrl}form.html?url=</code> + Current URL</li>
+                                <li>Name it "Email to ICS"</li>
+                                <li>Add to Share Sheet in shortcut settings</li>
+                            </ol>
+                        </div>
+                    `;
+                }
+            }, 3000);
         });
     </script>
 </body>
