@@ -264,7 +264,7 @@ class EmailProcessor
      * @param bool $cliDebug If true and in CLI, output AI request/response to STDERR.
      * @return void
      */
-	public function processUrl($url, $downloadedText, $display, $tentative = true, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $needsReview = false, $fromExtension = false, $outputJsonOnly = false, $cliDebug = false)
+	public function processUrl($url, $downloadedText, $display, $tentative = true, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $needsReview = false, $fromExtension = false, $outputJsonOnly = false, $cliDebug = false, $allowMultiDay = false)
 	{
         // NOTE TO DEVELOPER: Throughout this method, check (defined('IS_CLI_RUN') && IS_CLI_RUN)
         // before calling http_response_code(), header(), or outputting HTML error messages.
@@ -354,7 +354,7 @@ class EmailProcessor
 {$downloadedText}
 TEXT;
 
-		$eventDetails = $this->generateIcalEvent($combinedText, $instructions, $screenshotViewport, $screenshotZoomed, $requestedModel, $cliDebug);
+		$eventDetails = $this->generateIcalEvent($combinedText, $instructions, $screenshotViewport, $screenshotZoomed, $requestedModel, $cliDebug, $allowMultiDay);
 
 		// Handle --json flag for CLI output if requested - This takes precedence over other CLI outputs.
 		if ($outputJsonOnly && defined('IS_CLI_RUN') && IS_CLI_RUN) {
@@ -812,7 +812,7 @@ HasBody:
 		}
 
         // Pass $extractedInstructions from TextBody as specific instructions to AI
-        $eventDetails = $this->generateIcalEvent($combinedText, $extractedInstructions, null, null, null, $cliDebug);
+        $eventDetails = $this->generateIcalEvent($combinedText, $extractedInstructions, null, null, null, $cliDebug, false);
 
         // Handle --json flag for CLI output if requested and in CLI context
         // This check is more for future-proofing if this method is called from a CLI context that sets outputJsonOnly
@@ -953,7 +953,7 @@ HasBody:
      * @param bool $cliDebug If true and in CLI, output AI request/response to STDERR.
      * @return array Array containing ICS content and metadata
      */
-    private function generateIcalEvent($combinedText, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $cliDebug = false)
+    private function generateIcalEvent($combinedText, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $cliDebug = false, $allowMultiDay = false)
     {
         // Define the NEW schema for structured event data
         $eventSchema = [
@@ -991,6 +991,11 @@ HasBody:
         $curDate = date('m/d');
         $nextYear = $curYear + 1;
 
+        // Determine multi-day handling instructions
+        $multiDayInstructions = $allowMultiDay ? 
+            "MULTI-DAY MODE ENABLED: If you find multiple related events (like conference sessions, multi-day trips, festival schedules), extract ALL events as separate entries. Each event should have its own summary, dates, and details." :
+            "SINGLE EVENT MODE: Focus on extracting ONLY the main/primary event. Ignore secondary or related events.";
+
         $system = <<<PROMPT
 Create calendar event data from the following email text or downloaded HTML.
 
@@ -1014,7 +1019,8 @@ EXTREMELY IMPORTANT: IF you find multiple events and are unsure which is primary
 2. The earliest upcoming date
 3. The most prominence in the content
 
-ONLY create multiple VEVENT blocks if the content is explicitly a schedule or calendar listing with NO single primary event (e.g., a multi-day conference schedule or festival lineup).
+MULTI-DAY EVENT HANDLING:
+{$multiDayInstructions}
 
 # TIMEZONE AND LOCATION EMPHASIS
 If a location is specified (e.g., New York City, Madison, San Francisco), infer the appropriate timezone immediately.
@@ -2032,7 +2038,8 @@ HTML;
 				($_REQUEST['review'] ?? '0') === '1',     // Convert '1'/'0' back to boolean
 				($_REQUEST['fromExtension'] ?? 'false') === 'true', // Convert string bool to boolean
 				false, // $outputJsonOnly - defaults to false for form submissions
-				false  // $cliDebug - defaults to false for form submissions
+				false, // $cliDebug - defaults to false for form submissions
+				($_REQUEST['multiday'] ?? '0') === '1'    // Convert '1'/'0' back to boolean
 			);
     }
 

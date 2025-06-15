@@ -466,6 +466,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const formSection = document.getElementById('form-section');
     const openServerPageButton = document.getElementById('open-server-page');
     const tentativeToggle = document.getElementById('tentative-toggle');
+    const multidayToggle = document.getElementById('multiday-toggle');
     const reviewRadioGroup = document.querySelectorAll('input[name="review-option"]');
     const reviewSection = document.getElementById('review-section');
     const reviewContent = document.getElementById('review-content');
@@ -873,6 +874,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const instructionsValue = instructionsInput.value.trim();
         const selectedModelValue = modelSelect.value;
         const isTentativeValue = tentativeToggle.checked;
+        const isMultidayValue = multidayToggle.checked;
         const reviewOptionValue = document.querySelector('input[name=\"review-option\"]:checked')?.value || 'direct';
 
         // Prepare request details text
@@ -880,6 +882,7 @@ document.addEventListener('DOMContentLoaded', function() {
         requestDetailsText += `Instructions: ${instructionsValue || '(None)'}\n`;
         requestDetailsText += `Model: ${selectedModelValue || '(Default)'}\n`;
         requestDetailsText += `Tentative: ${isTentativeValue}\n`;
+        requestDetailsText += `Multi-day: ${isMultidayValue}\n`;
         requestDetailsText += `Review Option: ${reviewOptionValue}\n`;
         requestData.textContent = requestDetailsText;
 
@@ -936,6 +939,7 @@ document.addEventListener('DOMContentLoaded', function() {
             formData.append('instructions', instructionsValue);
             formData.append('model', selectedModelValue);
             formData.append('tentative', isTentativeValue ? '1' : '0');
+            formData.append('multiday', isMultidayValue ? '1' : '0');
             formData.append('review', reviewOptionValue === 'review' ? '1' : '0');
             formData.append('fromExtension', 'true');
             formData.append('display', 'email');
