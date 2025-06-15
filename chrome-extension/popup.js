@@ -75,9 +75,13 @@ async function fetchAvailableModels() {
         }
         */
         const credentials = await getStoredCredentials(); // Still need credentials for the header
+        if (!credentials) {
+            console.error("No credentials available for fetching models");
+            return [];
+        }
         
         const headers = {
-            'Authorization': 'Basic ' + credentials
+            'Authorization': 'Basic ' + credentials.encoded
         };
 
         // Add the flag to the models endpoint URL
