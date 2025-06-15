@@ -29,6 +29,13 @@
                 <div class="form-text">Provide HTML content, a URL, or Instructions. At least one is required.</div>
 			</div>
             <div class="mb-3">
+                <label for="model" class="form-label">AI Model:</label>
+                <select class="form-control" id="model" name="model">
+                    <option value="">Loading models...</option>
+                </select>
+                <div class="form-text">Select AI model for event extraction</div>
+            </div>
+            <div class="mb-3">
                 <div class="form-check">
                     <input type="radio" id="tentative" name="tentative" value="1" class="form-check-input" checked>
                     <label class="form-check-label" for="tentative">Tentative</label>
@@ -253,6 +260,33 @@
             alertContainer.innerHTML = '';
             resultContainer.innerHTML = '';
         }
+
+        // Load models on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const response = await fetch('?get_models=1', {
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                
+                const modelSelect = document.getElementById('model');
+                modelSelect.innerHTML = '<option value="">Default Model</option>';
+                
+                if (data.models && Array.isArray(data.models)) {
+                    data.models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.id;
+                        option.textContent = model.name + (model.vision_capable ? ' (Vision)' : '');
+                        if (model.default) option.selected = true;
+                        modelSelect.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to load models:', error);
+                const modelSelect = document.getElementById('model');
+                modelSelect.innerHTML = '<option value="">Error loading models</option>';
+            }
+        });
     </script>
 </body>
 </html>
