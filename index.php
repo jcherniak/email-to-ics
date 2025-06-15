@@ -872,7 +872,7 @@ HasBody:
 			$recipientEmail = $this->toConfirmedEmail;
 		}
 
-        $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body, $pdfText, $downloadedUrlContent);
+        $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body, $eventDetails, $pdfText, $downloadedUrlContent);
 
         echo json_encode(['status' => 'success', 'message' => 'Email processed successfully']); // Original success message for Postmark webhook
 	}
@@ -1422,11 +1422,71 @@ PROMPT;
 			return $ret; // Return the full structured data including eventData, success, etc.
 	}
 
-	private function sendEmailWithAttachment($toEmail, $ics, $subject, $originalEmail, $pdfText = null, $downloadedText = null)
+	private function saveAttachmentWithEventName($attachment, $eventDetails) {
+		// Ensure uploads directory exists
+		$uploadsDir = __DIR__ . '/uploads';
+		if (!is_dir($uploadsDir)) {
+			mkdir($uploadsDir, 0755, true);
+		}
+		
+		// Extract event information for filename
+		$eventDate = 'unknown-date';
+		$eventSummary = 'unknown-event';
+		
+		if ($eventDetails && isset($eventDetails['eventData'])) {
+			$eventData = $eventDetails['eventData'];
+			
+			// Extract date from dtstart (e.g., "2024-10-28T06:30:00" -> "2024-10-28")
+			if (!empty($eventData['dtstart'])) {
+				$eventDate = substr($eventData['dtstart'], 0, 10);
+			}
+			
+			// Clean the summary for use in filename
+			if (!empty($eventData['summary'])) {
+				$eventSummary = $eventData['summary'];
+				// Remove special characters and replace spaces with hyphens
+				$eventSummary = preg_replace('/[^a-zA-Z0-9\-_\s]/', '', $eventSummary);
+				$eventSummary = preg_replace('/\s+/', '-', trim($eventSummary));
+				$eventSummary = trim($eventSummary, '-');
+			}
+		}
+		
+		// Get original filename
+		$originalName = $attachment['Name'] ?? 'attachment';
+		
+		// Create new filename: EVENTDATE-ONESENTENCEEVENTSUMMARY-ORIGFILENAME
+		$newFilename = $eventDate . '-' . $eventSummary . '-' . $originalName;
+		$filePath = $uploadsDir . '/' . $newFilename;
+		
+		// Decode and save the attachment
+		if (!empty($attachment['Content'])) {
+			$content = base64_decode($attachment['Content']);
+			if (file_put_contents($filePath, $content) !== false) {
+				return $filePath;
+			}
+		}
+		
+		return false;
+	}
+
+	private function sendEmailWithAttachment($toEmail, $ics, $subject, $originalEmail, $eventDetails = null, $pdfText = null, $downloadedText = null)
 	{
 		$attachments = [];
+		$attachmentLinks = ''; // Track attachment links for event description
+		
 		if (!empty($originalEmail['Attachments'])) {
-			$attachments = array_merge($attachments, $originalEmail['Attachments']);
+			foreach ($originalEmail['Attachments'] as $attachment) {
+				// Save attachment with event-based filename
+				$savedPath = $this->saveAttachmentWithEventName($attachment, $eventDetails);
+				if ($savedPath) {
+					// Add link to event description
+					$attachmentLinks .= "\n\nAttachment: " . basename($savedPath);
+					
+					// Update attachment with new name for email forwarding
+					$attachment['Name'] = basename($savedPath);
+				}
+				$attachments[] = $attachment;
+			}
 		}
 
 		$origBody = $originalEmail['HtmlBody'] ?? nl2br($originalEmail['TextBody']);
@@ -1466,7 +1526,44 @@ BODY;
 BODY;
 		}
 
-		$this->sendEmail($ics, $toEmail, $subject, $htmlBody, $attachments);
+		// Add attachment links to ICS description if any attachments were processed
+		$updatedIcs = $ics;
+		if (!empty($attachmentLinks)) {
+			$updatedIcs = $this->addAttachmentLinksToIcs($ics, $attachmentLinks);
+		}
+		
+		$this->sendEmail($updatedIcs, $toEmail, $subject, $htmlBody, $attachments);
+	}
+
+	private function addAttachmentLinksToIcs($ics, $attachmentLinks) {
+		// Find the DESCRIPTION field in the ICS and append attachment links
+		if (preg_match('/DESCRIPTION:(.*?)(?=\r?\n[A-Z]+:|$)/s', $ics, $matches)) {
+			$originalDescription = $matches[1];
+			$newDescription = $originalDescription . $attachmentLinks;
+			
+			// Replace the description in the ICS
+			$updatedIcs = str_replace(
+				'DESCRIPTION:' . $originalDescription,
+				'DESCRIPTION:' . $newDescription,
+				$ics
+			);
+			
+			return $updatedIcs;
+		}
+		
+		// If no DESCRIPTION found, add one with just the attachment links
+		// Insert before END:VEVENT
+		if (strpos($ics, 'END:VEVENT') !== false) {
+			$updatedIcs = str_replace(
+				'END:VEVENT',
+				'DESCRIPTION:' . ltrim($attachmentLinks, "\n") . "\nEND:VEVENT",
+				$ics
+			);
+			return $updatedIcs;
+		}
+		
+		// Fallback: return original ICS if we can't parse it
+		return $ics;
 	}
 
 	public function sendEmail($ics, $toEmail, $subject, $htmlBody, array $otherAttachments = []) {
