@@ -493,6 +493,112 @@ document.addEventListener('DOMContentLoaded', function() {
     let isAuthenticated = false;
     let localAvailableModels = []; // Use a name different from global scope if needed
     let serverDefaultModelId = null;
+    let currentTabId = null;
+
+    // Tab State Manager
+    class TabStateManager {
+        constructor() {
+            this.tabId = null;
+            this.stateKey = null;
+        }
+        
+        async initialize() {
+            try {
+                const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+                this.tabId = tab.id;
+                this.stateKey = `tab_${this.tabId}_state`;
+                currentTabId = this.tabId;
+                
+                // Restore state for current tab
+                await this.restoreState();
+                
+                // Save state when popup closes
+                window.addEventListener('beforeunload', () => this.saveState());
+            } catch (error) {
+                console.error('Error initializing tab state manager:', error);
+            }
+        }
+        
+        async saveState() {
+            if (!this.tabId) return;
+            
+            const state = {
+                formData: {
+                    url: urlInput?.value || '',
+                    instructions: instructionsInput?.value || '',
+                    model: modelSelect?.value || '',
+                    tentative: tentativeToggle?.checked || false,
+                    multiday: multidayToggle?.checked || false,
+                    reviewOption: document.querySelector('input[name="review-option"]:checked')?.value || 'direct'
+                },
+                processingState: {
+                    isProcessing: processingView?.style.display === 'block',
+                    hasResults: responseData?.textContent || ''
+                },
+                timestamp: Date.now()
+            };
+            
+            try {
+                await chrome.storage.local.set({[this.stateKey]: state});
+                console.log('Saved state for tab', this.tabId);
+            } catch (error) {
+                console.error('Error saving tab state:', error);
+            }
+        }
+        
+        async restoreState() {
+            if (!this.tabId) return;
+            
+            try {
+                const result = await chrome.storage.local.get([this.stateKey]);
+                const state = result[this.stateKey];
+                
+                if (state && (Date.now() - state.timestamp) < 3600000) { // 1 hour
+                    const form = state.formData;
+                    if (form.url && urlInput) urlInput.value = form.url;
+                    if (form.instructions && instructionsInput) instructionsInput.value = form.instructions;
+                    if (form.model && modelSelect) modelSelect.value = form.model;
+                    if (tentativeToggle) tentativeToggle.checked = form.tentative;
+                    if (multidayToggle) multidayToggle.checked = form.multiday;
+                    if (form.reviewOption) {
+                        const radio = document.querySelector(`input[name="review-option"][value="${form.reviewOption}"]`);
+                        if (radio) radio.checked = true;
+                    }
+                    
+                    console.log('Restored state for tab', this.tabId);
+                }
+            } catch (error) {
+                console.error('Error restoring tab state:', error);
+            }
+        }
+        
+        async cleanup() {
+            try {
+                const allItems = await chrome.storage.local.get(null);
+                const now = Date.now();
+                const keysToRemove = [];
+                
+                for (const key in allItems) {
+                    if (key.startsWith('tab_') && key.endsWith('_state')) {
+                        const state = allItems[key];
+                        if (state && now - state.timestamp > 86400000) { // 24 hours
+                            keysToRemove.push(key);
+                        }
+                    }
+                }
+                
+                if (keysToRemove.length > 0) {
+                    await chrome.storage.local.remove(keysToRemove);
+                    console.log('Cleaned up', keysToRemove.length, 'old tab states');
+                }
+            } catch (error) {
+                console.error('Error cleaning up tab states:', error);
+            }
+        }
+    }
+    
+    // Initialize tab state manager
+    const tabStateManager = new TabStateManager();
 
     // --- Utility Functions defined within this scope ---
     // Screenshot helpers
@@ -1105,6 +1211,16 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     sendButton?.addEventListener('click', sendReviewedICS);
     rejectButton?.addEventListener('click', hideReviewSection);
+    
+    // Add state saving listeners for form changes
+    urlInput?.addEventListener('input', () => tabStateManager.saveState());
+    instructionsInput?.addEventListener('input', () => tabStateManager.saveState());
+    modelSelect?.addEventListener('change', () => tabStateManager.saveState());
+    tentativeToggle?.addEventListener('change', () => tabStateManager.saveState());
+    multidayToggle?.addEventListener('change', () => tabStateManager.saveState());
+    reviewRadioGroup?.forEach(radio => {
+        radio.addEventListener('change', () => tabStateManager.saveState());
+    });
 
     // --- NEW Back Button Listener ---
     backToFormButton?.addEventListener('click', () => {
@@ -1131,9 +1247,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // -----------------------------------
 
     // --- Initialization ---
-    checkAuthenticationAndFetchConfig().then(() => {
+    Promise.all([
+        checkAuthenticationAndFetchConfig(),
+        tabStateManager.initialize()
+    ]).then(() => {
         // After auth check and basic UI setup, check for context menu instructions
         applyContextMenuInstructions();
+        
+        // Start periodic cleanup
+        setInterval(() => tabStateManager.cleanup(), 3600000); // Every hour
     });
 
     function hideReviewSection() {
