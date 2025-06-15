@@ -1056,8 +1056,16 @@ The JSON object MUST conform EXACTLY to the following schema:
 ```
 
 # FIELD SPECIFIC INSTRUCTIONS
-- **summary:** Generate a relevant title (e.g., "Dr. White Appointment", "SF Symphony Concert - Beethoven").
-- **description:** Create a concise plain-text summary. Use `\\n` for newlines. Keep under 1000 chars. DO NOT include raw HTML. For flights, include Flight #, Confirmation #, Departure/Arrival details. Include Eventbrite ticket links prominently if found.
+- **summary:** Generate a relevant title following these formats:
+  * For artistic/cultural events: "Venue - Artist/Show" (e.g., "SF Opera - La Boheme", "Stern Grove - The Honeydrops", "Davies Hall - SF Symphony")
+  * For concerts with programs: "Venue - Artist - Program" (e.g., "SF Symphony - Sibelius and Mahler", "Taylor Swift Concert")
+  * For general events: Keep concise and descriptive (e.g., "Dr. White Appointment")
+- **description:** Create a concise plain-text summary with rich details:
+  * For artistic events: Highlight featured artists, performers, and full program/repertoire
+  * For concerts/opera: Include composer names, piece titles, featured soloists
+  * For conferences: Include key speakers and session topics
+  * For all events: Include ticket/registration info, preparation requirements, accessibility details
+  * Use `\\n` for newlines. Keep under 1000 chars. DO NOT include raw HTML. For flights, include Flight #, Confirmation #, Departure/Arrival details. Include Eventbrite ticket links prominently if found.
 - **htmlDescription:** Provide a concise HTML version of the description, ideally under 1500 characters. Use basic HTML tags only (e.g., `<p>`, `<a>`, `<b>`, `<i>`, `<ul>`, `<ol>`, `<li>`, `<br>`). DO NOT include `<style>` tags or inline `style` attributes. Minimize complex formatting.
 - **dtstart / dtend:** Use ISO 8601 format. Calculate end time if missing (2h default, 3h opera, 30m doctor). Use YYYY-MM-DD format ONLY if `isAllDay` is true.
 - **timezone:** Provide a valid PHP Timezone identifier (e.g., `America/Los_Angeles`, `America/New_York`, `UTC`). Infer from location if possible, default to `America/Los_Angeles` if unknown/virtual.
