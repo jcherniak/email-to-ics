@@ -116,7 +116,6 @@
 
 ### Performance
 - [ ] Optimize AI prompt tokens
-- [ ] Cache processed events
 - [ ] Lazy load Chrome extension
 - [ ] Compress screenshots
 - [ ] Minimize API calls

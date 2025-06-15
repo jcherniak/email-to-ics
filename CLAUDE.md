@@ -131,3 +131,6 @@ The server returns different response formats:
 - Server requires HTTPS for production (CORS/cookie policies)
 - CLI mode bypasses auth and web-specific features
 - Model caching can be cleared by deleting `/tmp/.models_cache.json`
+
+### Workflow Guidance
+- For each logical todo part (so for example, all multiday tasks as one), create a git commit
