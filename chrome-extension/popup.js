@@ -886,12 +886,12 @@ document.addEventListener('DOMContentLoaded', function() {
         requestDetailsText += `Review Option: ${reviewOptionValue}\n`;
         requestData.textContent = requestDetailsText;
 
-        // Switch view
+        // Switch view - keep form visible during processing
         hideStatus(); // Hide main status div if it was shown
         hideReviewStatus();
-        formSection.style.display = 'none';
         reviewSection.style.display = 'none';
         processingView.style.display = 'block';
+        // Keep formSection visible below the processing view
         statusMessage.textContent = 'Processing...';
         statusMessage.className = 'status-loading';
         responseData.textContent = '';
