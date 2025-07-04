@@ -874,7 +874,8 @@ HasBody:
 
         $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body, $eventDetails, $pdfText, $downloadedUrlContent);
 
-        echo json_encode(['status' => 'success', 'message' => 'Email processed successfully']); // Original success message for Postmark webhook
+        // Note: Response already sent by processPostmarkInbound method to prevent timeouts
+        // No additional response needed here since we're in background processing mode
 	}
 
 	private function is_valid_url($text) : bool
@@ -2145,6 +2146,18 @@ HTML;
 
     private function processPostmarkInbound($json_data)
     {
+		// Return 200 immediately to prevent timeouts
+		http_response_code(200);
+		header('Content-Type: application/json');
+		echo json_encode(['status' => 'received', 'message' => 'Email received and processing started']);
+		
+		// Close connection to client while continuing processing
+		header('Connection: close');
+		header('Content-Length: ' . ob_get_length());
+		ob_end_flush();
+		flush();
+		
+		// Continue processing in background after client disconnects
 		$processor = new EmailProcessor();
 		$processor->processPostmarkRequest($json_data);
 	}
