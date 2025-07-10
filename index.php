@@ -1403,6 +1403,18 @@ PROMPT;
 			if (isset($ret['success']) && $ret['success'] === false) {
 				$errorMessage = $ret['errorMessage'] ?? 'AI indicated failure with no specific message.';
 				errlog("AI returned success = false: {$errorMessage}\nJSON: {$jsonData}");
+				
+				// Check if we should retry with alternate model
+				if (stripos($errorMessage, "didn't contain dates or times") !== false || 
+				    stripos($errorMessage, "didn't contain dates/times") !== false) {
+					$alternateModel = $_ENV['ALTERNATE_MODEL'] ?? null;
+					if ($alternateModel && $this->aiModel !== $alternateModel && $requestedModel === null) {
+						errlog("No dates found, retrying with ALTERNATE_MODEL: {$alternateModel}");
+						// Retry with alternate model
+						return $this->generateIcalEvent($combinedText, $instructions, $screenshotViewport, $screenshotZoomed, $alternateModel, $cliDebug, $allowMultiDay);
+					}
+				}
+				
                 // Keep throwing exception for consistency in CLI
                 throw new \RuntimeException("AI processing error: {$errorMessage}. JSON: {$jsonData}");
                 /* Web mode alternative:
@@ -1920,6 +1932,12 @@ BODY;
 			
 			// Restore original model
 			$this->aiModel = $originalModel;
+			
+			// Strip markdown code blocks if present
+			$content = trim($content);
+			if (preg_match('/^```(?:json)?\s*\n?(.*?)\n?```$/s', $content, $matches)) {
+				$content = $matches[1];
+			}
 			
 			$result = json_decode($content, true);
 			
