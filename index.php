@@ -1,6 +1,7 @@
 <?php
 // Debug logging to see where the script fails
-error_log('Script started at ' . date('Y-m-d H:i:s'));
+$request_start_time = microtime(true);
+error_log('Script started at ' . date('Y-m-d H:i:s') . ' - Request ID: ' . uniqid());
 
 
 ignore_user_abort();
@@ -33,6 +34,16 @@ define('MODEL_CACHE_DURATION', 7 * 24 * 60 * 60); // 7 days in seconds
 function is_cli() {
     return php_sapi_name() === 'cli';
 }
+
+// --- Helper: Log request end time ---
+function log_request_end() {
+    global $request_start_time;
+    $duration = microtime(true) - $request_start_time;
+    error_log('Request completed in ' . number_format($duration, 4) . ' seconds');
+}
+
+// Register shutdown handler to log request end
+register_shutdown_function('log_request_end');
 
 // Add new endpoint for model info
 // This needs to be handled within the web request path or made CLI accessible if needed.
@@ -780,9 +791,12 @@ HasBody:
         // Fallback: If no explicit URL: in TextBody, check if the entire TextBody is a URL
         // This is less likely to be useful if HtmlBody is the primary content but kept for safety.
         if (!$extractedUrl && $this->is_valid_url(trim($textBodyForExtraction))) {
-            // Potentially, the entire text body was just a URL, and HtmlBody was minimal or a duplicate.
-            // We might want to log this case if it happens.
-            // For now, this path for $extractedUrl is less prioritized if HtmlBody is rich.
+            $extractedUrl = trim($textBodyForExtraction);
+        }
+        
+        // AI-powered URL detection for simple link emails
+        if (!$extractedUrl && !empty($textBodyForExtraction)) {
+            $extractedUrl = $this->detectUrlInEmailBody($textBodyForExtraction);
         }
 
         // Start building the combined text for the AI with the email's HTML content first
@@ -898,12 +912,22 @@ HasBody:
 		// Use Guzzle to get the HTML content, adding appropriate headers to make
 		// it look like the request is coming from a browser
 		$client = new Client();
-		$response = $client->get($url, [
+		$requestOptions = [
 			'headers' => [
 				'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
 			],
-		]);
+		];
 
+		// Add proxy configuration if available
+		if (!empty($_ENV['OXYLABS_PROXY']) && !empty($_ENV['OXYLABS_USERNAME']) && !empty($_ENV['OXYLABS_PASSWORD'])) {
+			$requestOptions['proxy'] = [
+				'http' => 'http://' . $_ENV['OXYLABS_USERNAME'] . ':' . $_ENV['OXYLABS_PASSWORD'] . '@' . $_ENV['OXYLABS_PROXY'],
+				'https' => 'http://' . $_ENV['OXYLABS_USERNAME'] . ':' . $_ENV['OXYLABS_PASSWORD'] . '@' . $_ENV['OXYLABS_PROXY'],
+			];
+			errlog("Using proxy for URL fetch: " . $_ENV['OXYLABS_PROXY']);
+		}
+
+		$response = $client->get($url, $requestOptions);
 		$htmlContent = $response->getBody()->getContents();
 
 		// Check if the fetching was successful
@@ -1857,6 +1881,57 @@ BODY;
 			'schema' => $responseSchema
 		];
 		errlog(json_encode($errorLogDetails, JSON_PRETTY_PRINT));
+	}
+
+	private function detectUrlInEmailBody($textBody) {
+		// Use gemini-2.5-flash to detect if email body contains just a URL
+		try {
+			// Set the model temporarily
+			$originalModel = $this->aiModel;
+			$this->aiModel = 'google/gemini-2.5-flash';
+			
+			$messages = [
+				[
+					'role' => 'system',
+					'content' => 'You are a helpful assistant that detects URLs in email bodies. Respond only with valid JSON.'
+				],
+				[
+					'role' => 'user',
+					'content' => "Analyze this email body text and determine if it contains just a URL (possibly with minimal text like 'Sent from iPhone/iPad' or similar signatures). If so, extract the URL. If not, return null.\n\nEmail body:\n{$textBody}\n\nRespond with JSON in this format:\n{\"containsUrl\": true/false, \"url\": \"extracted_url_or_null\"}"
+				]
+			];
+			
+			$data = [
+				'model' => $this->aiModel,
+				'messages' => $messages,
+				'temperature' => 0.1,
+				'max_tokens' => 500
+			];
+			
+			$response = $this->openaiClient->chat()->create($data);
+			$content = $response->choices[0]->message->content;
+			
+			// Restore original model
+			$this->aiModel = $originalModel;
+			
+			$result = json_decode($content, true);
+			
+			if ($result && isset($result['containsUrl']) && $result['containsUrl'] && !empty($result['url'])) {
+				$url = trim($result['url']);
+				if ($this->is_valid_url($url)) {
+					errlog("AI detected URL in email body: {$url}");
+					return $url;
+				}
+			}
+		} catch (Exception $e) {
+			errlog("Error in URL detection: " . $e->getMessage());
+			// Restore original model on error
+			if (isset($originalModel)) {
+				$this->aiModel = $originalModel;
+			}
+		}
+		
+		return null;
 	}
 }
 
