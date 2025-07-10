@@ -1885,10 +1885,15 @@ BODY;
 
 	private function detectUrlInEmailBody($textBody) {
 		// Use gemini-2.5-flash to detect if email body contains just a URL
+		errlog("detectUrlInEmailBody called with text body: " . substr($textBody, 0, 200) . "...");
+		
 		try {
 			// Set the model temporarily
 			$originalModel = $this->aiModel;
-			$this->aiModel = 'google/gemini-2.5-flash';
+			$urlDetectionModel = $_ENV['URL_DETECTION_MODEL'] ?? 'google/gemini-2.5-flash';
+			$this->aiModel = $urlDetectionModel;
+			
+			errlog("Using model {$this->aiModel} for URL detection");
 			
 			$messages = [
 				[
@@ -1908,8 +1913,10 @@ BODY;
 				'max_tokens' => 500
 			];
 			
+			errlog("Sending URL detection request to OpenRouter");
 			$response = $this->openaiClient->chat()->create($data);
 			$content = $response->choices[0]->message->content;
+			errlog("AI response for URL detection: " . $content);
 			
 			// Restore original model
 			$this->aiModel = $originalModel;
@@ -1918,10 +1925,15 @@ BODY;
 			
 			if ($result && isset($result['containsUrl']) && $result['containsUrl'] && !empty($result['url'])) {
 				$url = trim($result['url']);
+				errlog("AI found URL: {$url}, validating...");
 				if ($this->is_valid_url($url)) {
-					errlog("AI detected URL in email body: {$url}");
+					errlog("AI detected valid URL in email body: {$url}");
 					return $url;
+				} else {
+					errlog("AI found URL but it failed validation: {$url}");
 				}
+			} else {
+				errlog("AI did not detect a URL in the email body");
 			}
 		} catch (Exception $e) {
 			errlog("Error in URL detection: " . $e->getMessage());
