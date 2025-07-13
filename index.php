@@ -10,7 +10,10 @@ $log_entry = [
     'POST' => $_POST,
     'SERVER' => $_SERVER
 ];
-file_put_contents('/tmp/cal_requests.jsonl', json_encode($log_entry) . "\n", FILE_APPEND | LOCK_EX);
+$log_result = @file_put_contents('/tmp/cal_requests.jsonl', json_encode($log_entry) . "\n", FILE_APPEND | LOCK_EX);
+if ($log_result === false) {
+    error_log("Failed to write to /tmp/cal_requests.jsonl - " . error_get_last()['message'] ?? 'unknown error');
+}
 
 // Now start debug logging
 error_log('Script started at ' . date('Y-m-d H:i:s') . ' - Request ID: ' . $request_id);
