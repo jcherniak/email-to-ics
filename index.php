@@ -2,6 +2,13 @@
 // VERY FIRST THING: Log all requests to JSONL file before ANY processing
 $request_start_time = microtime(true);
 $request_id = uniqid();
+
+// First test if we can write anything at all
+$test_write = @file_put_contents('/tmp/cal_requests.jsonl', "TEST " . date('c') . "\n", FILE_APPEND | LOCK_EX);
+if ($test_write === false) {
+    error_log("CRITICAL: Cannot write to /tmp/cal_requests.jsonl at all");
+}
+
 $log_entry = [
     'date' => date('c'),
     'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
@@ -10,9 +17,29 @@ $log_entry = [
     'POST' => $_POST,
     'SERVER' => $_SERVER
 ];
-$log_result = @file_put_contents('/tmp/cal_requests.jsonl', json_encode($log_entry) . "\n", FILE_APPEND | LOCK_EX);
-if ($log_result === false) {
-    error_log("Failed to write to /tmp/cal_requests.jsonl - " . error_get_last()['message'] ?? 'unknown error');
+
+// Try encoding to JSON
+$json_data = json_encode($log_entry);
+if ($json_data === false) {
+    error_log("JSON encoding failed: " . json_last_error_msg());
+    // Try with minimal data
+    $minimal_entry = [
+        'date' => date('c'),
+        'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+        'request_id' => $request_id,
+        'error' => 'json_encode_failed',
+        'json_error' => json_last_error_msg()
+    ];
+    $json_data = json_encode($minimal_entry);
+}
+
+if ($json_data !== false) {
+    $log_result = @file_put_contents('/tmp/cal_requests.jsonl', $json_data . "\n", FILE_APPEND | LOCK_EX);
+    if ($log_result === false) {
+        error_log("Failed to write JSON to /tmp/cal_requests.jsonl");
+    } else {
+        error_log("Successfully wrote " . $log_result . " bytes to /tmp/cal_requests.jsonl");
+    }
 }
 
 // Now start debug logging
