@@ -1,7 +1,19 @@
 <?php
 // Debug logging to see where the script fails
 $request_start_time = microtime(true);
-error_log('Script started at ' . date('Y-m-d H:i:s') . ' - Request ID: ' . uniqid());
+$request_id = uniqid();
+error_log('Script started at ' . date('Y-m-d H:i:s') . ' - Request ID: ' . $request_id);
+
+// Log all requests to JSONL file
+$log_entry = [
+    'date' => date('c'),
+    'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+    'request_id' => $request_id,
+    'GET' => $_GET,
+    'POST' => $_POST,
+    'SERVER' => $_SERVER
+];
+file_put_contents('/tmp/cal_requests.jsonl', json_encode($log_entry) . "\n", FILE_APPEND | LOCK_EX);
 
 
 ignore_user_abort();
