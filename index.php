@@ -2159,27 +2159,35 @@ class WebPage
         // Check POST credentials first for iOS shortcut support
         $authorized = false;
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['username'], $_POST['password'])) {
+            error_log("Checking POST auth: " . $_POST['username']);
             if ($_POST['username'] === $_ENV['HTTP_AUTH_USERNAME'] && 
                 $_POST['password'] === $_ENV['HTTP_AUTH_PASSWORD']) {
                 $authorized = true;
                 $this->setCookie(); // Set cookie for future requests
+                error_log("POST auth successful");
             }
         }
         
         // If not authorized via POST, check session and basic auth
         if (!$authorized) {
-            $authorized = $this->checkSessionAuth() || $this->checkBasicAuth();
+            $sessionAuth = $this->checkSessionAuth();
+            $basicAuth = $this->checkBasicAuth();
+            error_log("Auth check - Session: " . ($sessionAuth ? 'true' : 'false') . ", Basic: " . ($basicAuth ? 'true' : 'false'));
+            $authorized = $sessionAuth || $basicAuth;
         }
 
         if (!$authorized) {
-            // For API requests, send basic auth challenge
+            error_log("Authorization failed - sending challenge/form");
+            // Always send WWW-Authenticate header for basic auth
+            header('WWW-Authenticate: Basic realm="Email to ICS"');
+            http_response_code(401);
+            
+            // For API requests or when explicitly requesting basic auth, return JSON
             if (isset($_SERVER['HTTP_ACCEPT']) && strpos($_SERVER['HTTP_ACCEPT'], 'application/json') !== false) {
-                header('WWW-Authenticate: Basic realm="Email to ICS"');
-                http_response_code(401);
                 echo json_encode(['error' => 'Authentication required']);
                 return;
             }
-            // Otherwise show login form
+            // For browsers that don't handle basic auth prompt, show login form
             $this->handleLogin();
             return;
         }
@@ -2208,6 +2216,10 @@ class WebPage
 
     private function checkBasicAuth()
 	{
+		error_log("checkBasicAuth - PHP_AUTH_USER: " . ($_SERVER['PHP_AUTH_USER'] ?? 'not set'));
+		error_log("checkBasicAuth - REMOTE_USER: " . ($_SERVER['REMOTE_USER'] ?? 'not set'));
+		error_log("checkBasicAuth - HTTP_AUTHORIZATION: " . ($_SERVER['HTTP_AUTHORIZATION'] ?? 'not set'));
+		
 		// Check both standard and CGI/FastCGI auth methods
 		$username = $_SERVER['PHP_AUTH_USER'] ?? $_SERVER['REMOTE_USER'] ?? null;
 		$password = $_SERVER['PHP_AUTH_PW'] ?? null;
@@ -2215,9 +2227,13 @@ class WebPage
 		// For CGI/FastCGI, parse Authorization header
 		if (!$username && isset($_SERVER['HTTP_AUTHORIZATION'])) {
 			if (preg_match('/^Basic\s+(.*)$/i', $_SERVER['HTTP_AUTHORIZATION'], $matches)) {
-				list($username, $password) = explode(':', base64_decode($matches[1]), 2);
+				$decoded = base64_decode($matches[1]);
+				error_log("Decoded auth: " . $decoded);
+				list($username, $password) = explode(':', $decoded, 2);
 			}
 		}
+		
+		error_log("Auth check - username: " . ($username ?? 'null') . " vs expected: " . $_ENV['HTTP_AUTH_USERNAME']);
 		
 		if ($username === $_ENV['HTTP_AUTH_USERNAME'] && 
 		    $password === $_ENV['HTTP_AUTH_PASSWORD']) {
