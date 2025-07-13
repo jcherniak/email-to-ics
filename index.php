@@ -58,6 +58,18 @@ if (isset($_GET['get_models'])) {
     exit;
 }
 
+// Test endpoint for auth verification
+if (isset($_GET['test_auth'])) {
+    header('Content-Type: application/json');
+    echo json_encode([
+        'authenticated' => true,
+        'method' => $_SERVER['REQUEST_METHOD'],
+        'auth_type' => isset($_SERVER['PHP_AUTH_USER']) ? 'basic' : 
+                     (isset($_POST['username']) ? 'post' : 'session')
+    ]);
+    exit;
+}
+
 /** @disregard */
 if (
 	!function_exists('xdebug_is_debugger_active') ||
@@ -2092,10 +2104,42 @@ class WebPage
             return;
         }
 
-        $authorized = $this->checkSessionAuth() || $this->checkBasicAuth();
+        // Check if this is a Postmark webhook (bypasses auth)
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $post_data = file_get_contents("php://input");
+            $json_data = json_decode($post_data, true);
+            
+            if ($this->isPostmarkInboundWebhook($json_data)) {
+                $this->processPostmarkInbound($json_data);
+                return;
+            }
+        }
+
+        // Check POST credentials first for iOS shortcut support
+        $authorized = false;
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['username'], $_POST['password'])) {
+            if ($_POST['username'] === $_ENV['HTTP_AUTH_USERNAME'] && 
+                $_POST['password'] === $_ENV['HTTP_AUTH_PASSWORD']) {
+                $authorized = true;
+                $this->setCookie(); // Set cookie for future requests
+            }
+        }
+        
+        // If not authorized via POST, check session and basic auth
+        if (!$authorized) {
+            $authorized = $this->checkSessionAuth() || $this->checkBasicAuth();
+        }
 
         if (!$authorized) {
-            $this->handleLogin(); // Display a login form instead of requesting basic auth
+            // For API requests, send basic auth challenge
+            if (isset($_SERVER['HTTP_ACCEPT']) && strpos($_SERVER['HTTP_ACCEPT'], 'application/json') !== false) {
+                header('WWW-Authenticate: Basic realm="Email to ICS"');
+                http_response_code(401);
+                echo json_encode(['error' => 'Authentication required']);
+                return;
+            }
+            // Otherwise show login form
+            $this->handleLogin();
             return;
         }
 
@@ -2105,12 +2149,7 @@ class WebPage
                 break;
 			case 'POST':
 				file_put_contents(sys_get_temp_dir() . '/post.' . date('Ymd.His'), file_get_contents('php://input'));
-
-                if (isset($_POST['username'], $_POST['password'])) {
-                    $this->handleLogin();
-                } else {
-                    $this->handlePostRequest();
-                }
+                $this->handlePostRequest();
                 break;
             default:
                 echo 'Unsupported request method.';
@@ -2128,11 +2167,19 @@ class WebPage
 
     private function checkBasicAuth()
 	{
-		if (
-			isset($_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW']) &&
-            $_SERVER['PHP_AUTH_USER'] === $_ENV['HTTP_AUTH_USERNAME'] &&
-			$_SERVER['PHP_AUTH_PW'] === $_ENV['HTTP_AUTH_PASSWORD']
-		) {
+		// Check both standard and CGI/FastCGI auth methods
+		$username = $_SERVER['PHP_AUTH_USER'] ?? $_SERVER['REMOTE_USER'] ?? null;
+		$password = $_SERVER['PHP_AUTH_PW'] ?? null;
+		
+		// For CGI/FastCGI, parse Authorization header
+		if (!$username && isset($_SERVER['HTTP_AUTHORIZATION'])) {
+			if (preg_match('/^Basic\s+(.*)$/i', $_SERVER['HTTP_AUTHORIZATION'], $matches)) {
+				list($username, $password) = explode(':', base64_decode($matches[1]), 2);
+			}
+		}
+		
+		if ($username === $_ENV['HTTP_AUTH_USERNAME'] && 
+		    $password === $_ENV['HTTP_AUTH_PASSWORD']) {
 			$this->setCookie();
             return true;
 		}
@@ -2198,23 +2245,15 @@ HTML;
 	{
 		if (isset($_POST['logout'])) {
 			$this->clearCookie();
+			echo "<h1>Logged out successfully</h1>";
+			$this->displayLoginForm();
 		} elseif (isset($_POST['url'])) {
 			$this->processFormSubmission();
 		} else {
-			$post_data = file_get_contents("php://input");
-			$json_data = json_decode($post_data, true);
-
-			if ($this->isPostmarkInboundWebhook($json_data)) {
-				$this->processPostmarkInbound($json_data);
-			} else {
-				http_response_code(400);
-				echo "Invalid POST request.";
-				errlog('Invalid post request');
-				errlog('JSON: ' . $post_data);
-				errlog('decoded: ' . var_export($json_data, true));
-
-				die;
-			}
+			// This shouldn't happen as Postmark webhooks are handled earlier
+			http_response_code(400);
+			echo json_encode(['error' => 'Invalid POST request']);
+			errlog('Invalid post request to authenticated endpoint');
 		}
     }
 
