@@ -1,14 +1,14 @@
 /* popup.css */
 body {
     font-family: sans-serif;
-    width: 350px; /* Adjust width as needed */
+    width: 100%; /* Full width in iframe */
     min-height: 150px;
     padding: 10px;
     font-size: 14px;
     transition: min-height 0.2s ease-in-out; /* Add transition for smoother size change */
-    margin: 10px;
-    min-width: 400px;
+    margin: 0; /* Remove margin for iframe */
     background-color: #f4f4f4;
+    overflow-x: hidden; /* Prevent horizontal scroll in iframe */
 }
 
 /* Make popup taller when error is shown */

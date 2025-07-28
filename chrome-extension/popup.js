@@ -440,6 +440,22 @@ async function logout() {
 // Remove the old code above this point or comment it out entirely.
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Check if we're running in an iframe
+    const isInIframe = window.self !== window.top;
+    
+    // Listen for messages from the parent window (if in iframe)
+    if (isInIframe) {
+        window.addEventListener('message', (event) => {
+            if (event.data.type === 'INIT_FROM_CONTENT') {
+                // Pre-fill URL from parent page
+                const urlInput = document.getElementById('url');
+                if (urlInput && event.data.data.url) {
+                    urlInput.value = event.data.data.url;
+                }
+            }
+        });
+    }
+    
     // Add a manual handler for the collapse functionality
     document.querySelector('[data-bs-toggle="collapse"]').addEventListener('click', function() {
         // Toggle the collapse

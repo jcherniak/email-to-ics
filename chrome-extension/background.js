@@ -349,4 +349,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true; // Keep the channel open for sendResponse
   }
+});
+
+// --- Handle extension icon click ---
+chrome.action.onClicked.addListener(async (tab) => {
+  try {
+    await chrome.tabs.sendMessage(tab.id, { action: 'toggle-iframe' });
+  } catch (error) {
+    console.error('Error sending message to content script:', error);
+    // If content script is not loaded, inject it first
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content.js']
+      });
+      // Try sending the message again
+      await chrome.tabs.sendMessage(tab.id, { action: 'toggle-iframe' });
+    } catch (injectError) {
+      console.error('Failed to inject content script:', injectError);
+    }
+  }
 }); 
