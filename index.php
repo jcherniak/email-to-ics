@@ -787,26 +787,38 @@ HasBody:
 		$start_time = microtime(true);
 		errlog("removeEmptyElements started");
 		
-		// Process in batches to avoid deep recursion
-		$nodesToRemove = [];
-		$xpath = new \DOMXPath($body->ownerDocument);
-		
-		// Find all empty elements that are not <p> tags in one query
-		$emptyElements = $xpath->query('.//*[not(self::p) and normalize-space(.) = "" and not(./*)]', $body);
-		
-		foreach ($emptyElements as $element) {
-			$nodesToRemove[] = $element;
-		}
-		
-		// Remove the empty elements
-		foreach ($nodesToRemove as $element) {
-			if ($element->parentNode) {
-				$element->parentNode->removeChild($element);
+		try {
+			// Convert to DOMDocument for XPath compatibility
+			$domDoc = new \DOMDocument();
+			$domDoc->loadHTML($body->outerHTML, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+			
+			// Process in batches to avoid deep recursion
+			$nodesToRemove = [];
+			$xpath = new \DOMXPath($domDoc);
+			
+			// Find all empty elements that are not <p> tags in one query
+			$emptyElements = $xpath->query('//*[not(self::p) and normalize-space(.) = "" and not(./*)]');
+			
+			foreach ($emptyElements as $element) {
+				$nodesToRemove[] = $element;
 			}
+			
+			// Remove the empty elements
+			foreach ($nodesToRemove as $element) {
+				if ($element->parentNode) {
+					$element->parentNode->removeChild($element);
+				}
+			}
+			
+			// Update the original body with cleaned content
+			$body->innerHTML = $domDoc->saveHTML($domDoc->documentElement);
+			
+			$duration = microtime(true) - $start_time;
+			errlog("removeEmptyElements completed in " . number_format($duration, 4) . " seconds, removed " . count($nodesToRemove) . " elements");
+		} catch (\Exception $e) {
+			errlog("Error in removeEmptyElements: " . $e->getMessage());
+			// Continue without removing empty elements rather than fail
 		}
-		
-		$duration = microtime(true) - $start_time;
-		errlog("removeEmptyElements completed in " . number_format($duration, 4) . " seconds, removed " . count($nodesToRemove) . " elements");
 	}
 
 	protected function unescapeNewlines($str)
