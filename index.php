@@ -788,33 +788,33 @@ HasBody:
 		errlog("removeEmptyElements started");
 		
 		try {
-			// Convert to DOMDocument for XPath compatibility
-			$domDoc = new \DOMDocument();
-			$domDoc->loadHTML($body->outerHTML, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+			// Collect elements to remove
+			$elementsToRemove = [];
 			
-			// Process in batches to avoid deep recursion
-			$nodesToRemove = [];
-			$xpath = new \DOMXPath($domDoc);
+			// Use getElementsByTagName to get all elements
+			$allElements = $body->getElementsByTagName('*');
 			
-			// Find all empty elements that are not <p> tags in one query
-			$emptyElements = $xpath->query('//*[not(self::p) and normalize-space(.) = "" and not(./*)]');
-			
-			foreach ($emptyElements as $element) {
-				$nodesToRemove[] = $element;
+			foreach ($allElements as $element) {
+				// Skip <p> tags
+				if ($element->tagName === 'p') {
+					continue;
+				}
+				
+				// Check if element is empty (no children and no text content)
+				if ($element->childNodes->length === 0 && trim($element->textContent) === '') {
+					$elementsToRemove[] = $element;
+				}
 			}
 			
-			// Remove the empty elements
-			foreach ($nodesToRemove as $element) {
+			// Remove the collected empty elements
+			foreach ($elementsToRemove as $element) {
 				if ($element->parentNode) {
 					$element->parentNode->removeChild($element);
 				}
 			}
 			
-			// Update the original body with cleaned content
-			$body->innerHTML = $domDoc->saveHTML($domDoc->documentElement);
-			
 			$duration = microtime(true) - $start_time;
-			errlog("removeEmptyElements completed in " . number_format($duration, 4) . " seconds, removed " . count($nodesToRemove) . " elements");
+			errlog("removeEmptyElements completed in " . number_format($duration, 4) . " seconds, removed " . count($elementsToRemove) . " elements");
 		} catch (\Exception $e) {
 			errlog("Error in removeEmptyElements: " . $e->getMessage());
 			// Continue without removing empty elements rather than fail
