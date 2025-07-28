@@ -173,6 +173,18 @@
       window.scrollTo(x, y);
     }
     async function captureVisibleTabScreenshot() {
+      if (window.self !== window.top) {
+        return new Promise((resolve) => {
+          chrome.runtime.sendMessage({ action: "captureScreenshot" }, (response) => {
+            if (response && response.screenshot) {
+              resolve("data:image/jpeg;base64," + response.screenshot);
+            } else {
+              console.error("Screenshot request failed:", response?.error);
+              resolve(null);
+            }
+          });
+        });
+      }
       let originalState = {};
       const tab = await getActiveTab();
       let dataUrl = null;

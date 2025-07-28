@@ -119,6 +119,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             createIframe();
         }
         sendResponse({ success: true });
+    } else if (request.action === 'hide-iframe') {
+        if (emailToIcsFrame) {
+            emailToIcsFrame.style.visibility = 'hidden';
+        }
+        sendResponse({ success: true });
+    } else if (request.action === 'show-iframe') {
+        if (emailToIcsFrame) {
+            emailToIcsFrame.style.visibility = 'visible';
+        }
+        sendResponse({ success: true });
     }
 });
 

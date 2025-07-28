@@ -139,6 +139,16 @@ async function captureVisibleTabScreenshot(tabId) {
         const tab = await chrome.tabs.get(tabId);
         if (!tab) throw new Error(`Tab with id ${tabId} not found.`);
 
+        // Hide the iframe first
+        try {
+            await chrome.tabs.sendMessage(tabId, { action: 'hide-iframe' });
+            // Wait a bit for the hide to take effect
+            await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (e) {
+            // Iframe might not be present, continue anyway
+            console.log("Could not hide iframe, continuing with screenshot");
+        }
+
         // 1. Get dimensions and original state
         const [initialResult] = await chrome.scripting.executeScript({
             target: { tabId: tabId },
@@ -211,6 +221,14 @@ async function captureVisibleTabScreenshot(tabId) {
             } catch (cleanupError) {
                 console.error("Error cleaning up zoom/scroll style (background):", cleanupError);
             }
+        }
+
+        // Show the iframe again
+        try {
+            await chrome.tabs.sendMessage(tabId, { action: 'show-iframe' });
+        } catch (e) {
+            // Iframe might not be present, ignore
+            console.log("Could not show iframe, it might not be present");
         }
     }
 }
@@ -348,6 +366,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ success: true });
     });
     return true; // Keep the channel open for sendResponse
+  } else if (message.action === 'captureScreenshot') {
+    // Handle screenshot request from popup iframe
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      if (tabs[0]) {
+        const screenshot = await captureVisibleTabScreenshot(tabs[0].id);
+        sendResponse({ screenshot: screenshot });
+      } else {
+        sendResponse({ error: 'No active tab found' });
+      }
+    });
+    return true; // Keep channel open for async response
   }
 });
 

@@ -141,6 +141,23 @@ function scrollToPosition(x, y) {
 
 // Updated screenshot logic using zoom and scroll
 async function captureVisibleTabScreenshot() {
+    // Check if we're in an iframe
+    if (window.self !== window.top) {
+        // We're in an iframe, request screenshot from background
+        return new Promise((resolve) => {
+            chrome.runtime.sendMessage({ action: 'captureScreenshot' }, (response) => {
+                if (response && response.screenshot) {
+                    // Background returns base64 without data URL prefix
+                    resolve('data:image/jpeg;base64,' + response.screenshot);
+                } else {
+                    console.error('Screenshot request failed:', response?.error);
+                    resolve(null);
+                }
+            });
+        });
+    }
+    
+    // Original popup logic for when not in iframe
     let originalState = {}; // Store original state (zoom, scroll)
     const tab = await getActiveTab();
     let dataUrl = null;
@@ -644,6 +661,23 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     // Main screenshot function
     async function captureVisibleTabScreenshot() {
+        // Check if we're in an iframe
+        if (window.self !== window.top) {
+            // We're in an iframe, request screenshot from background
+            return new Promise((resolve) => {
+                chrome.runtime.sendMessage({ action: 'captureScreenshot' }, (response) => {
+                    if (response && response.screenshot) {
+                        // Background returns base64 without data URL prefix
+                        resolve('data:image/jpeg;base64,' + response.screenshot);
+                    } else {
+                        console.error('Screenshot request failed:', response?.error);
+                        resolve(null);
+                    }
+                });
+            });
+        }
+        
+        // Original popup logic for when not in iframe
         let originalState = {}; 
         const tab = await getActiveTab(); // Needs getActiveTab defined in scope too
         let dataUrl = null;
