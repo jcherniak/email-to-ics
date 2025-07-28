@@ -323,6 +323,9 @@ class EmailProcessor
      */
 	public function processUrl($url, $downloadedText, $display, $tentative = true, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $needsReview = false, $fromExtension = false, $outputJsonOnly = false, $cliDebug = false, $allowMultiDay = false)
 	{
+		errlog("processUrl started - URL: " . ($url ?? 'none') . ", Model: " . ($requestedModel ?? 'default'));
+		$process_start_time = microtime(true);
+		
         // NOTE TO DEVELOPER: Throughout this method, check (defined('IS_CLI_RUN') && IS_CLI_RUN)
         // before calling http_response_code(), header(), or outputting HTML error messages.
         // For CLI, output plain text errors to STDERR or STDOUT and use exit codes.
@@ -613,6 +616,9 @@ BODY;
 
 	protected function extractMainContent(string $html) : string
 	{
+		$extract_start = microtime(true);
+		errlog("extractMainContent started, HTML length: " . strlen($html));
+		
 		// If the html contains a <main> element, extract and return it.
 		$doc = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
 
@@ -621,6 +627,7 @@ BODY;
 		foreach ($elems as $elem) {
 			$elements = $doc->getElementsByTagName($elem);
 			if ($elements->length > 0) {
+				errlog("Found $elem element");
 				$body = $this->removeNonTextTags($elements->item(0));
 				goto HasBody;
 			}
@@ -628,10 +635,12 @@ BODY;
 
 		$bodies = $doc->getElementsByTagName('body');
 		if ($bodies->length > 0) {
+			errlog("Using body element");
 			$body = $this->removeNonTextTags($bodies->item(0));
 			goto HasBody;
 		}
 
+		errlog("Using document element");
 		$body = $this->removeNonTextTags($doc->documentElement);
 HasBody:
 
@@ -648,6 +657,9 @@ HasBody:
 		// Ensure it IS UTF-8 even if detection failed or was already UTF-8 (handles potential invalid sequences)
 		$finalHtml = mb_convert_encoding($finalHtml, 'UTF-8', 'UTF-8'); 
 
+		$duration = microtime(true) - $extract_start;
+		errlog("extractMainContent completed in " . number_format($duration, 4) . " seconds, final HTML length: " . strlen($finalHtml));
+		
 		return $finalHtml;
 	}
 
@@ -772,25 +784,29 @@ HasBody:
 
 	protected function removeEmptyElements(\Dom\Element $body)
 	{
-		$elements = $body->getElementsByTagName('*');
-		for ($i = $elements->length - 1; $i >= 0; $i--) {
-			$element = $elements->item($i);
-
-            // *** Add check: Never remove <p> tags ***
-            if ($element && $element->tagName === 'p') {
-                continue; // Skip checking/removing paragraph tags
-            }
-
-			if ($element && $element->childNodes->length === 0 && trim($element->textContent) === '') { // Added trim()
-				if ($element->parentNode) {
-					// Remove the empty element from its parent
-					$element->parentNode->removeChild($element);
-				}
-			} else {
-				// Recursively remove empty elements from child nodes
-				$this->removeEmptyElements($element);
+		$start_time = microtime(true);
+		errlog("removeEmptyElements started");
+		
+		// Process in batches to avoid deep recursion
+		$nodesToRemove = [];
+		$xpath = new \DOMXPath($body->ownerDocument);
+		
+		// Find all empty elements that are not <p> tags in one query
+		$emptyElements = $xpath->query('.//*[not(self::p) and normalize-space(.) = "" and not(./*)]', $body);
+		
+		foreach ($emptyElements as $element) {
+			$nodesToRemove[] = $element;
+		}
+		
+		// Remove the empty elements
+		foreach ($nodesToRemove as $element) {
+			if ($element->parentNode) {
+				$element->parentNode->removeChild($element);
 			}
 		}
+		
+		$duration = microtime(true) - $start_time;
+		errlog("removeEmptyElements completed in " . number_format($duration, 4) . " seconds, removed " . count($nodesToRemove) . " elements");
 	}
 
 	protected function unescapeNewlines($str)
@@ -1275,9 +1291,13 @@ PROMPT;
         }
 
         errlog('Sending OpenRouter request to model: ' . $this->aiModel);
+        $api_start_time = microtime(true);
+        
         try
         {
             $response = $this->openaiClient->chat()->create($data);
+            $api_duration = microtime(true) - $api_start_time;
+            errlog('Received OpenRouter response in ' . number_format($api_duration, 4) . ' seconds');
         }
         catch (UnserializableResponse $e)
         {
