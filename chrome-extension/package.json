@@ -8,9 +8,9 @@
     "watch": "esbuild popup.js --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --watch"
   },
   "devDependencies": {
-    "esbuild": "^0.20.0" 
+    "esbuild": "^0.20.0"
   },
   "dependencies": {
-    "ical.js": "^2.0.0" 
+    "ical.js": "^2.2.0"
   }
-} 
+}

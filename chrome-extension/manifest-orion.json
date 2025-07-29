@@ -1,0 +1,49 @@
+{
+  "manifest_version": 2,
+  "name": "Email to ICS Converter (Orion)",
+  "version": "2.0",
+  "description": "Convert emails and web content to ICS calendar files using AI - Orion Browser Compatible",
+  
+  "permissions": [
+    "storage",
+    "activeTab",
+    "contextMenus",
+    "https://openrouter.ai/*",
+    "https://api.postmarkapp.com/*"
+  ],
+  
+  "background": {
+    "scripts": ["background-orion.js"],
+    "persistent": false
+  },
+  
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_title": "Email to ICS Converter",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  
+  "web_accessible_resources": [
+    "popup.html",
+    "popup.css",
+    "settings.html"
+  ],
+  
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

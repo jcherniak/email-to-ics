@@ -1,4 +1,10 @@
 // popup.js
+// Import ical.js for ICS parsing
+import ICAL from 'ical.js';
+
+// Make ICAL globally available for the functions that use it
+window.ICAL = ICAL;
+
 // DOM elements - Move these inside DOMContentLoaded
 // const contentDiv = document.getElementById('content'); 
 // const statusDiv = document.getElementById('status');
@@ -66,41 +72,105 @@ async function init() { // Keep function definition for now, might be removed la
 // --- Model Management Functions ---
 async function fetchAvailableModels() {
     try {
-        // Remove the redundant credential check - this function is now only called when logged in
-        /*
-        const credentials = await getStoredCredentials(); // Check credentials first
-        if (!credentials) {
-            console.warn("Cannot fetch models: Credentials not found during fetch.");
-            return []; // Return empty array immediately if no credentials
-        }
-        */
-        const credentials = await getStoredCredentials(); // Still need credentials for the header
-        if (!credentials) {
-            console.error("No credentials available for fetching models");
-            return [];
+        // Get OpenRouter API key from storage
+        const settings = await new Promise((resolve) => {
+            chrome.storage.sync.get(['openRouterKey'], resolve);
+        });
+        
+        if (!settings.openRouterKey) {
+            console.warn('No OpenRouter API key found, using offline models');
+            return getOfflineAllowedModels();
         }
         
-        const headers = {
-            'Authorization': 'Basic ' + credentials.encoded
-        };
-
-        // Add the flag to the models endpoint URL
-        const urlWithFlag = `${modelsEndpointUrl}&fromExtension=1`;
-
-        // Use dynamic modelsEndpointUrl and add auth header
-        const response = await fetch(urlWithFlag, { headers });
+        // Fetch models directly from OpenRouter API
+        const response = await fetch('https://openrouter.ai/api/v1/models', {
+            headers: {
+                'Authorization': `Bearer ${settings.openRouterKey}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
         if (!response.ok) {
-            const errorText = await response.text(); // Log detailed error
-            console.error(`Fetch models response error (${response.status}):`, errorText);
-            throw new Error(`Failed to fetch models: ${response.status}`);
+            throw new Error(`HTTP ${response.status}`);
         }
+        
         const data = await response.json();
-        console.log("Available models:", data);
-        return data.models || [];
+        const allModels = data.data || [];
+        
+        // Filter to allowed models only
+        const filteredModels = filterAllowedModels(allModels);
+        console.log("Available models:", filteredModels);
+        return filteredModels;
+        
     } catch (error) {
         console.error("Error fetching models:", error);
-        return [];
+        return getOfflineAllowedModels();
     }
+}
+
+function getOfflineAllowedModels() {
+    // Return allowed models even when offline
+    return [
+        { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+        { id: 'anthropic/claude-opus-4', name: 'Claude Opus 4' },
+        { id: 'anthropic/claude-3.7-sonnet:thinking', name: 'Claude 3.7 Sonnet (Thinking)' },
+        { id: 'google/gemini-2.5-flash:thinking', name: 'Gemini 2.5 Flash (Thinking)' },
+        { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+        { id: 'openai/o4-mini-high', name: 'GPT-4 Mini High' },
+        { id: 'openai/o3', name: 'GPT-O3' },
+        { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
+        { id: 'openai/o3-pro', name: 'GPT-O3 Pro' }
+    ];
+}
+
+function filterAllowedModels(allModels) {
+    // Define allowed models
+    const allowedModelIds = [
+        'anthropic/claude-3.7-sonnet:thinking',
+        'google/gemini-2.5-flash:thinking',
+        'google/gemini-2.5-flash',
+        'openai/o4-mini-high',
+        'openai/o3',
+        'openai/gpt-4.1',
+        'google/gemini-2.5-pro',
+        'anthropic/claude-opus-4',
+        'openai/o3-pro'
+    ];
+
+    // Filter models to only include allowed ones
+    const filteredModels = allModels.filter(model => 
+        allowedModelIds.includes(model.id)
+    );
+
+    // Add any missing models with fallback names
+    const foundIds = filteredModels.map(m => m.id);
+    const missingIds = allowedModelIds.filter(id => !foundIds.includes(id));
+    
+    missingIds.forEach(id => {
+        const fallbackModel = getOfflineAllowedModels().find(m => m.id === id);
+        if (fallbackModel) {
+            filteredModels.push(fallbackModel);
+        }
+    });
+
+    // Sort models with preferred order
+    const preferredOrder = [
+        'google/gemini-2.5-pro',
+        'anthropic/claude-opus-4',
+        'anthropic/claude-3.7-sonnet:thinking',
+        'google/gemini-2.5-flash:thinking',
+        'google/gemini-2.5-flash',
+        'openai/o4-mini-high',
+        'openai/o3',
+        'openai/gpt-4.1',
+        'openai/o3-pro'
+    ];
+
+    return filteredModels.sort((a, b) => {
+        const aIndex = preferredOrder.indexOf(a.id);
+        const bIndex = preferredOrder.indexOf(b.id);
+        return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+    });
 }
 
 // --- Screenshot Capture ---
@@ -460,6 +530,35 @@ document.addEventListener('DOMContentLoaded', function() {
     // Check if we're running in an iframe
     const isInIframe = window.self !== window.top;
     
+    // Hide cancel button by default
+    const cancelRequestButton = document.getElementById('cancelRequestButton');
+    if (cancelRequestButton) {
+        cancelRequestButton.style.display = 'none';
+    }
+    
+    // Listen for settings updates
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.action === 'settingsUpdated') {
+            console.log('Settings updated, reloading popup...');
+            // Reload the popup to refresh with new settings
+            window.location.reload();
+        }
+    });
+    
+    // Handle close button click
+    const closePopupButton = document.getElementById('close-popup');
+    if (closePopupButton) {
+        closePopupButton.addEventListener('click', () => {
+            if (isInIframe) {
+                // We're in an iframe, send close message to parent
+                window.parent.postMessage({ type: 'CLOSE_IFRAME' }, '*');
+            } else {
+                // Not in iframe, just close the window
+                window.close();
+            }
+        });
+    }
+    
     // Listen for messages from the parent window (if in iframe)
     if (isInIframe) {
         window.addEventListener('message', (event) => {
@@ -666,11 +765,17 @@ document.addEventListener('DOMContentLoaded', function() {
             // We're in an iframe, request screenshot from background
             return new Promise((resolve) => {
                 chrome.runtime.sendMessage({ action: 'captureScreenshot' }, (response) => {
-                    if (response && response.screenshot) {
+                    if (chrome.runtime.lastError) {
+                        console.error('Screenshot message error:', chrome.runtime.lastError.message);
+                        resolve(null);
+                        return;
+                    }
+                    
+                    if (response && response.success && response.screenshot) {
                         // Background returns base64 without data URL prefix
                         resolve('data:image/jpeg;base64,' + response.screenshot);
                     } else {
-                        console.error('Screenshot request failed:', response?.error);
+                        console.error('Screenshot request failed:', response?.error || 'Unknown error');
                         resolve(null);
                     }
                 });
@@ -832,40 +937,27 @@ document.addEventListener('DOMContentLoaded', function() {
         if(refreshModelsButton) refreshModelsButton.disabled = true;
 
         try {
-            const response = await fetch(`${serverUrl}?get_models=true`, {
-                method: 'GET',
-                headers: { 'Accept': 'application/json' },
-                 credentials: 'include' // Send cookies
+            // Use the same fetchAvailableModels function we fixed above
+            const models = await fetchAvailableModels();
+            console.log("loadModels: Received models:", models);
+
+            // Get saved model preference from settings
+            const settings = await new Promise((resolve) => {
+                chrome.storage.sync.get(['aiModel'], resolve);
             });
+            const savedModel = settings.aiModel || 'google/gemini-2.5-pro';
+            
+            // Convert models to expected format if needed
+            localAvailableModels = models.map(model => ({
+                id: model.id,
+                name: model.name || model.id,
+                vision_capable: model.vision_capable || false,
+                default: model.id === savedModel // Set default from settings
+            }));
 
-             console.log("loadModels: Fetch response status:", response.status);
-
-            if (!response.ok) {
-                 if (response.status === 401) {
-                     console.log("loadModels: Status 401 - Unauthorized during refresh");
-                     isAuthenticated = false;
-                     if (authSection) authSection.style.display = 'block';
-                     if (formSection) formSection.style.display = 'none';
-                     hideStatus();
-                     return;
-                 }
-                 const errorText = await response.text();
-                 console.error("loadModels: Fetch failed:", errorText);
-                 throw new Error(`Failed to fetch models: ${response.statusText}`);
-             }
-
-            const data = await response.json();
-             console.log("loadModels: Received data:", data);
-
-            if (!data || !Array.isArray(data.models)) {
-                console.error("loadModels: Invalid model data received:", data);
-                throw new Error('Invalid model data received from server.');
-            }
-
-            localAvailableModels = data.models; // Store in local scope variable
-            // Find the default model ID from the response
+            // Find the default model ID
             serverDefaultModelId = localAvailableModels.find(m => m.default)?.id || (localAvailableModels.length > 0 ? localAvailableModels[0].id : null);
-            console.log("loadModels: Server default model ID:", serverDefaultModelId);
+            console.log("loadModels: Default model ID:", serverDefaultModelId);
 
             populateModelDropdown(); // Use local populate
             hideStatus(); // Use local hideStatus
@@ -907,84 +999,120 @@ document.addEventListener('DOMContentLoaded', function() {
          console.log("populateModelDropdown: Finished.");
     }
 
+    async function testBackgroundConnection() {
+        return new Promise((resolve) => {
+            console.log('Testing background script connectivity...');
+            
+            // Add timeout for the ping
+            const timeout = setTimeout(() => {
+                console.error('Background ping timeout');
+                resolve(false);
+            }, 5000);
+            
+            chrome.runtime.sendMessage({ action: 'ping' }, (response) => {
+                clearTimeout(timeout);
+                
+                if (chrome.runtime.lastError) {
+                    console.error('Background connectivity test failed:', chrome.runtime.lastError.message);
+                    resolve(false);
+                } else if (response && response.success) {
+                    console.log('Background script is responsive');
+                    resolve(true);
+                } else {
+                    console.warn('Background script returned unexpected response:', response);
+                    resolve(false);
+                }
+            });
+        });
+    }
+
+    async function wakeUpServiceWorker() {
+        console.log('Attempting to wake up service worker...');
+        
+        // Try multiple wake-up attempts
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            console.log(`Wake-up attempt ${attempt}/3`);
+            
+            const isAwake = await testBackgroundConnection();
+            if (isAwake) {
+                console.log('Service worker is awake and responsive');
+                return true;
+            }
+            
+            // Wait before next attempt
+            if (attempt < 3) {
+                console.log('Waiting before next attempt...');
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+        
+        console.error('Failed to wake up service worker after 3 attempts');
+        return false;
+    }
+
     async function checkAuthenticationAndFetchConfig() {
         console.log("checkAuthenticationAndFetchConfig: Starting"); 
         try {
-            // 1. Get Base URL from storage
-            console.log("checkAuthenticationAndFetchConfig: Getting baseUrl from storage");
-            const data = await new Promise((resolve) => {
-                chrome.storage.sync.get(['baseUrl'], resolve);
+            // Wake up service worker and test connectivity
+            const bgConnected = await wakeUpServiceWorker();
+            if (!bgConnected) {
+                console.warn('Background script not responding - some features may not work');
+                // Show warning to user
+                if (statusDiv) {
+                    statusDiv.innerHTML = `
+                        <div style="background: #fff3cd; color: #856404; padding: 8px; border-radius: 4px; margin-bottom: 10px; font-size: 12px;">
+                            ⚠️ Background service worker not responding. Some features may not work properly.
+                        </div>
+                    `;
+                }
+            }
+            
+            // Check if we have the required API keys configured
+            const settings = await new Promise((resolve) => {
+                chrome.storage.sync.get(['openRouterKey', 'postmarkApiKey', 'fromEmail'], resolve);
             });
-            serverUrl = data.baseUrl;
-
-            // Fetch config to get server URL - REMOVED
-            /* 
-            console.log("checkAuthenticationAndFetchConfig: Fetching config.json");
-            const configResponse = await fetch(chrome.runtime.getURL('config.json'));
-            if (!configResponse.ok) throw new Error('Failed to load config.json');
-            const config = await configResponse.json();
-            serverUrl = config.serverUrl;
-            */
-           
-            console.log("checkAuthenticationAndFetchConfig: Got serverUrl from storage:", serverUrl);
-
-            if (!serverUrl) {
-                // If no URL stored, treat as unauthorized/needs configuration
-                console.log("checkAuthenticationAndFetchConfig: No serverUrl in storage - showing auth section.");
+            
+            if (!settings.openRouterKey || !settings.postmarkApiKey || !settings.fromEmail) {
+                // Not configured - show auth section with link to settings
+                console.log("checkAuthenticationAndFetchConfig: Missing API keys - showing auth section.");
                 isAuthenticated = false;
-                if (authSection) authSection.style.display = 'block';
+                if (authSection) {
+                    authSection.style.display = 'block';
+                    authSection.innerHTML = `
+                        <div style="text-align: center; padding: 20px;">
+                            <h3>Setup Required</h3>
+                            <p>Please configure your API keys and email settings.</p>
+                            <button id="openSettingsBtn" class="btn btn-primary">Open Settings</button>
+                        </div>
+                    `;
+                    
+                    // Add click handler for settings button
+                    document.getElementById('openSettingsBtn').addEventListener('click', () => {
+                        chrome.tabs.create({ url: chrome.runtime.getURL('settings.html') });
+                    });
+                }
                 if (formSection) formSection.style.display = 'none';
                 hideStatus(); 
-                return; // Stop further execution
+                return;
             }
-
-            // Ensure trailing slash for consistency
-            if (!serverUrl.endsWith('/')) {
-                serverUrl += '/';
-            }
-
-            // 2. Check auth by trying to fetch models
-            showStatus('Checking authentication...'); 
-            console.log("checkAuthenticationAndFetchConfig: Fetching models for auth check:", `${serverUrl}?get_models=true`);
-            const modelsResponse = await fetch(`${serverUrl}?get_models=true`, {
-                method: 'GET',
-            headers: {
-                    'Accept': 'application/json'
-                },
-                credentials: 'include'
+            
+            // Configuration found - proceed with normal flow
+            console.log("checkAuthenticationAndFetchConfig: API keys found - authorized");
+            isAuthenticated = true;
+            if (authSection) authSection.style.display = 'none';
+            if (formSection) formSection.style.display = 'block';
+            hideStatus(); 
+            
+            console.log("checkAuthenticationAndFetchConfig: Loading models...");
+            await loadModels(); 
+            
+            // Populate URL field with the current tab's URL
+            chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+                if (tabs[0] && tabs[0].url && (tabs[0].url.startsWith('http:') || tabs[0].url.startsWith('https:'))) {
+                    if (urlInput) urlInput.value = tabs[0].url;
+                    console.log("checkAuthenticationAndFetchConfig: Populated URL field.");
+                }
             });
-
-            console.log("checkAuthenticationAndFetchConfig: Auth check response status:", modelsResponse.status);
-
-            if (modelsResponse.status === 401) {
-                // Unauthorized
-                console.log("checkAuthenticationAndFetchConfig: Status 401 - Unauthorized");
-                isAuthenticated = false;
-                if (authSection) authSection.style.display = 'block';
-                if (formSection) formSection.style.display = 'none';
-                hideStatus(); 
-                console.log("checkAuthenticationAndFetchConfig: Showing auth section.");
-            } else if (!modelsResponse.ok) {
-                // Other server error
-                console.error("checkAuthenticationAndFetchConfig: Auth check fetch failed (not OK)");
-                throw new Error(`Server error checking auth: ${modelsResponse.statusText}`);
-            } else {
-                // Authorized
-                 console.log("checkAuthenticationAndFetchConfig: Status OK - Authorized");
-                isAuthenticated = true;
-                if (authSection) authSection.style.display = 'none';
-                if (formSection) formSection.style.display = 'block';
-                hideStatus(); 
-                console.log("checkAuthenticationAndFetchConfig: Showing form section, loading models...");
-                await loadModels(); 
-                // Populate URL field with the current tab's URL
-                chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
-                    if (tabs[0] && tabs[0].url && (tabs[0].url.startsWith('http:') || tabs[0].url.startsWith('https:'))) {
-                        if (urlInput) urlInput.value = tabs[0].url;
-                         console.log("checkAuthenticationAndFetchConfig: Populated URL field.");
-                    }
-                });
-            }
 
         } catch (error) {
             console.error('checkAuthenticationAndFetchConfig: Error:', error);
@@ -1046,165 +1174,200 @@ document.addEventListener('DOMContentLoaded', function() {
         requestDetailsText += `Review Option: ${reviewOptionValue}\n`;
         requestData.textContent = requestDetailsText;
 
-        // Switch view - keep form visible during processing
+        // Switch view - hide form during processing but keep back button enabled
         hideStatus(); // Hide main status div if it was shown
         hideReviewStatus();
         reviewSection.style.display = 'none';
+        formSection.style.display = 'none'; // Hide the form during processing
         processingView.style.display = 'block';
-        // Keep formSection visible below the processing view
         statusMessage.textContent = 'Processing...';
-        statusMessage.className = 'status-loading';
-        responseData.textContent = '';
-        disableForm(); // Disable original form fields
-        backToFormButton.disabled = true; // Disable back button during processing
+        statusMessage.className = 'alert alert-info mb-0';
+        
+        // Hide the response accordion during processing
+        const responseAccordion = document.getElementById('responseAccordion');
+        if (responseAccordion) {
+            responseAccordion.classList.add('d-none');
+        }
+        // Hide the Close button and show Cancel button during processing
+        const closeButton = document.getElementById('closeButton');
+        const cancelButton = document.getElementById('cancelRequestButton');
+        if (closeButton) {
+            closeButton.style.display = 'none';
+        }
+        if (cancelButton) {
+            cancelButton.style.display = 'block';
+        }
+        // Don't disable the back button - user should be able to cancel
 
-        let htmlContent = '';
-        let screenshotViewportData = null;
-        let screenshotZoomedData = null;
-
+        // Prepare data for background script - let background handle all Chrome API calls
+        statusMessage.textContent = 'Preparing request...';
+        
+        const params = {
+            url: urlValue, // Background script will get current tab URL if not provided
+            html: '', // Background script will get HTML content from current tab
+            instructions: instructionsValue,
+            takeScreenshot: true, // Background script will handle screenshot capture
+            tentative: isTentativeValue,
+            multiday: isMultidayValue,
+            reviewMode: reviewOptionValue,
+            aiModel: selectedModelValue
+        };
+        
         try {
-            // 1. Get current page HTML (unchanged)
-            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-            if (!tabs || tabs.length === 0) throw new Error("Could not get active tab.");
-            const tabId = tabs[0].id;
-            const currentTabUrl = tabs[0].url;
-            const results = await chrome.scripting.executeScript({
-                target: { tabId: tabId },
-                func: () => document.documentElement.outerHTML
-            });
-            if (results && results[0] && results[0].result) htmlContent = results[0].result;
-            else console.warn("Could not get HTML content.");
-
-            // 2. Capture screenshots (unchanged, update status message)
-            statusMessage.textContent = 'Capturing screenshots...';
-            try {
-                screenshotViewportData = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 80 });
-                if (screenshotViewportData && screenshotViewportData.startsWith('data:image/jpeg;base64,')) {
-                    screenshotViewportData = screenshotViewportData.substring('data:image/jpeg;base64,'.length);
-                } else screenshotViewportData = null;
-            } catch (vpError) { console.error('Viewport screenshot failed:', vpError); screenshotViewportData = null; }
-
-            try {
-                const zoomedDataUrl = await captureVisibleTabScreenshot();
-                if (zoomedDataUrl && zoomedDataUrl.startsWith('data:image/jpeg;base64,')) {
-                    screenshotZoomedData = zoomedDataUrl.substring('data:image/jpeg;base64,'.length);
-                } else screenshotZoomedData = null;
-            } catch (zoomError) { console.error('Zoomed screenshot failed:', zoomError); screenshotZoomedData = null; }
-
-            // 3. Prepare data for server
-            statusMessage.textContent = 'Sending to server...';
-            const formData = new URLSearchParams();
-            formData.append('url', urlValue || currentTabUrl); 
-            formData.append('html', htmlContent);
-            formData.append('instructions', instructionsValue);
-            formData.append('model', selectedModelValue);
-            formData.append('tentative', isTentativeValue ? '1' : '0');
-            formData.append('multiday', isMultidayValue ? '1' : '0');
-            formData.append('review', reviewOptionValue === 'review' ? '1' : '0');
-            formData.append('fromExtension', 'true');
-            formData.append('display', 'email');
-            if (screenshotViewportData) formData.append('screenshot_viewport', screenshotViewportData);
-            if (screenshotZoomedData) formData.append('screenshot_zoomed', screenshotZoomedData);
-
-            // 4. Send data to server (modified response handling)
-            let resultJson = null;
-            const response = await fetch(serverUrl, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                body: formData,
-                credentials: 'include'
-            });
-            
-            const responseText = await response.text(); // Get raw text response
-
-            console.log("RAW RESPONSE TEXT (first 100 chars):", responseText.substring(0, 100));
-            // Check if it looks like JSON with needsReview: true
-            if (responseText.includes('\"needsReview\":true')) {
-                console.log("RAW TEXT CONTAINS needsReview:true!");
+            // 4. Wake up service worker and send to background script for processing
+            console.log('Waking up service worker for content processing...');
+            const bgReady = await wakeUpServiceWorker();
+            if (!bgReady) {
+                throw new Error('Background service worker is not responding. Please try reloading the extension.');
             }
             
-            if (!response.ok) {
-                // Show error in processing view
-                statusMessage.textContent = `Error: ${response.status} ${response.statusText}`;
-                statusMessage.className = 'status-error';
-                console.error("Server returned error:", response.status, responseText);
-                responseData.textContent = responseText; // Show raw error response
-            } else {
-                // Try parsing successful response as JSON
-                try {
-                    resultJson = JSON.parse(responseText);
-                    console.log("PARSED JSON RESPONSE:", resultJson);
-                    console.log("needsReview:", resultJson.needsReview);
-                    console.log("confirmationToken:", resultJson.confirmationToken);
-                    console.log("icsContent length:", resultJson.icsContent ? resultJson.icsContent.length : 'missing');
+            let resultJson = null;
+            const response = await chrome.runtime.sendMessage({
+                action: 'processContent',
+                params: params
+            });
+            
+            // Handle Chrome runtime errors first
+            if (chrome.runtime.lastError) {
+                throw new Error(`Runtime error: ${chrome.runtime.lastError.message}`);
+            }
+            
+            // Handle background script response
+            if (!response) {
+                throw new Error('No response from background script. Please check extension status and try again.');
+            }
+            
+            console.log('Received response from background script:', response);
+            
+            if (!response.success) {
+                throw new Error(response.error || 'Processing failed');
+            }
+            
+            resultJson = response.result;
+            const responseText = JSON.stringify(resultJson); // For debugging
+
+            console.log("BACKGROUND SCRIPT RESPONSE:", resultJson);
+            console.log("needsReview:", resultJson.needsReview);
+            console.log("confirmationToken:", resultJson.confirmationToken);
+            console.log("icsContent length:", resultJson.icsContent ? resultJson.icsContent.length : 'missing');
  
-                    if (resultJson.needsReview) {
-                        // Review is needed according to the server
-                        if (resultJson.confirmationToken && resultJson.icsContent) {
-                            console.log("SHOWING REVIEW SECTION - conditions met");
-                            // All required data for review is present
-                            showReviewSection(resultJson);
-                            showingReview = true;
-                        } else {
-                            console.log("NOT SHOWING REVIEW - missing required data");
-                            console.log("confirmationToken present:", !!resultJson.confirmationToken);
-                            console.log("icsContent present:", !!resultJson.icsContent);
-                            // Review needed, but data is missing! Show error in processing view.
-                            console.error("Review needed, but missing confirmationToken or icsContent from server:", resultJson);
-                            statusMessage.textContent = 'Error: Review data missing from server.';
-                        }
-                    } else {
-                         // Show PROCESSING view - Success (Sent Directly)
-                        statusMessage.textContent = 'Success (Sent Directly)';
-                        statusMessage.className = 'status-success';
-                        
-                        // Create a cleaner success response structure
-                        let responseHTML = '';
-                        
-                        // Add the success message
-                        if (resultJson.message) {
-                            responseHTML += `<div class="success-message">${resultJson.message}</div>`;
-                        }
-                        
-                        // Add the event details directly, not in another card
-                        if (resultJson.icsContent) {
-                            // Extract just the essential details 
-                            responseHTML += parseAndDisplayIcs(resultJson.icsContent);
-                        } else {
-                            // Fallback for no ICS content
-                            responseHTML += `<pre class="plain-text">${responseText}</pre>`;
-                        }
-                        
-                        // Set the HTML
-                        responseData.innerHTML = responseHTML;
-                        
-                        console.log("Success (Sent Directly), displayed details");
-                        
-                        // Leave showingReview as false
-                    }
-                } catch (e) {
-                    // JSON parsing failed, show raw response in processing view
-                    console.warn("Could not parse JSON response, showing raw text.", e);
-                    statusMessage.textContent = 'Success (Raw Response)';
-                    statusMessage.className = 'status-success';
-                    responseData.textContent = responseText;
-                    // Leave showingReview as false
+            if (resultJson.needsReview) {
+                // Review is needed according to the server
+                if (resultJson.confirmationToken && resultJson.icsContent) {
+                    console.log("SHOWING REVIEW SECTION - conditions met");
+                    // All required data for review is present
+                    showReviewSection(resultJson);
+                    showingReview = true;
+                } else {
+                    console.log("NOT SHOWING REVIEW - missing required data");
+                    console.log("confirmationToken present:", !!resultJson.confirmationToken);
+                    console.log("icsContent present:", !!resultJson.icsContent);
+                    // Review needed, but data is missing! Show error in processing view.
+                    console.error("Review needed, but missing confirmationToken or icsContent from server:", resultJson);
+                    statusMessage.textContent = 'Error: Review data missing from server.';
                 }
+            } else {
+                // Show PROCESSING view - Success (Sent Directly)
+                statusMessage.textContent = 'Success (Sent Directly)';
+                statusMessage.className = 'alert alert-success mb-0';
+                
+                // Create a cleaner success response structure
+                let responseHTML = '';
+                
+                // Add the message directly without wrapper
+                if (resultJson.message) {
+                    responseHTML += `<p>${resultJson.message}</p>`;
+                }
+                
+                // Add the event details directly, not in another card
+                if (resultJson.icsContent) {
+                    // Extract just the essential details 
+                    responseHTML += parseAndDisplayIcs(resultJson.icsContent);
+                } else {
+                    // Fallback for no ICS content
+                    responseHTML += `<pre class="plain-text">${responseText}</pre>`;
+                }
+                
+                // Set the HTML
+                responseData.innerHTML = responseHTML;
+                
+                // Show the response accordion
+                const responseAccordion = document.getElementById('responseAccordion');
+                if (responseAccordion) {
+                    responseAccordion.classList.remove('d-none');
+                }
+                
+                // Show the green Close button and hide Cancel button
+                const closeButton = document.getElementById('closeButton');
+                const cancelButton = document.getElementById('cancelRequestButton');
+                if (closeButton) {
+                    closeButton.style.display = 'block';
+                    closeButton.addEventListener('click', () => {
+                        // Close the iframe if we're in one, otherwise hide the processing view
+                        if (window.self !== window.top) {
+                            // We're in an iframe, send close message to parent
+                            window.parent.postMessage({ type: 'CLOSE_IFRAME' }, '*');
+                        } else {
+                            // Regular popup, go back to form
+                            hideProcessingView();
+                            showFormSection();
+                        }
+                    });
+                }
+                if (cancelButton) {
+                    cancelButton.style.display = 'none';
+                }
+                
+                console.log("Success (Sent Directly), displayed details");
+                
+                // Leave showingReview as false
             }
 
         } catch (error) {
             // JS/Fetch error - Show PROCESSING view - Error
             console.error('generateICS Error:', error);
             statusMessage.textContent = `Error: ${error.message || 'Unknown error'}`;
-            statusMessage.className = 'status-error';
-            responseData.textContent = error.stack || ''; // Show stack trace in response for JS errors
+            statusMessage.className = 'alert alert-danger mb-0';
+            
+            // Show detailed error information
+            let errorDetails = `<div class="error-details">`;
+            errorDetails += `<h4>Error Details:</h4>`;
+            errorDetails += `<p><strong>Message:</strong> ${error.message || 'Unknown error'}</p>`;
+            errorDetails += `<p><strong>Type:</strong> ${error.name || 'Unknown'}</p>`;
+            
+            if (error.stack) {
+                errorDetails += `<p><strong>Stack Trace:</strong></p>`;
+                errorDetails += `<pre style="background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 11px; max-height: 200px; overflow-y: auto;">${error.stack}</pre>`;
+            }
+            
+            // Add troubleshooting suggestions
+            errorDetails += `<div style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 4px;">`;
+            errorDetails += `<h5>Troubleshooting:</h5>`;
+            errorDetails += `<ul style="margin: 5px 0; padding-left: 20px; font-size: 12px;">`;
+            errorDetails += `<li>Try reloading the extension</li>`;
+            errorDetails += `<li>Check your internet connection</li>`;
+            errorDetails += `<li>Verify API keys in settings</li>`;
+            errorDetails += `<li>Try with a different webpage</li>`;
+            errorDetails += `</ul>`;
+            errorDetails += `</div>`;
+            errorDetails += `</div>`;
+            
+            responseData.innerHTML = errorDetails;
+            
+            // Show the response accordion
+            const responseAccordion = document.getElementById('responseAccordion');
+            if (responseAccordion) {
+                responseAccordion.classList.remove('d-none');
+            }
             // Leave showingReview as false
         } finally {
-            // Only enable back button if processing view is shown
-            if (!showingReview && backToFormButton) {
-                backToFormButton.disabled = false;
+            // Back button should already be enabled (we don't disable it during processing)
+            // Do NOT re-enable the main form here - let the back button handler do that
+            // Always hide the cancel button when processing is done
+            const cancelButton = document.getElementById('cancelRequestButton');
+            if (cancelButton) {
+                cancelButton.style.display = 'none';
             }
-            // Do NOT re-enable the main form here regardless
         }
     }
     // --------------------------------------------
@@ -1219,24 +1382,17 @@ document.addEventListener('DOMContentLoaded', function() {
         disableReviewButtons();
 
         try {
-            const formData = new URLSearchParams();
-            formData.append('confirmationToken', reviewData.confirmationToken);
-
-            const response = await fetch(`${serverUrl}?confirm=true`, { // Send to confirmation endpoint
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                body: formData,
-                credentials: 'include'
+            const response = await chrome.runtime.sendMessage({
+                action: 'confirmEvent',
+                confirmationToken: reviewData.confirmationToken
             });
-
-            const resultText = await response.text(); // Get text response
-
-            if (!response.ok) {
-                let errorMsg = `Server error: ${response.status}`; 
-                try { errorMsg += `: ${JSON.parse(resultText).error}`; } catch(e){} // Try to get JSON error
-                throw new Error(errorMsg);
+            
+            if (!response) {
+                throw new Error('No response from background script. Please check extension status and try again.');
+            }
+            
+            if (!response.success) {
+                throw new Error(response.error || 'Confirmation failed');
             }
 
             // Success!
@@ -1272,13 +1428,60 @@ document.addEventListener('DOMContentLoaded', function() {
         radio.addEventListener('change', () => tabStateManager.saveState());
     });
 
+    // Helper functions for view management
+    function hideProcessingView() {
+        if (processingView) {
+            processingView.style.display = 'none';
+        }
+    }
+    
+    function showFormSection() {
+        if (formSection) {
+            formSection.style.display = 'block';
+        }
+        disableForm(false); // Re-enable the main form controls
+    }
+
     // --- NEW Back Button Listener ---
     backToFormButton?.addEventListener('click', () => {
-        processingView.style.display = 'none';
-        formSection.style.display = 'block';
-        disableForm(false); // Re-enable the main form controls
+        hideProcessingView();
+        showFormSection();
     });
     // -------------------------------
+    
+    // --- Cancel Request Button Listener ---
+    const cancelRequestButton = document.getElementById('cancelRequestButton');
+    cancelRequestButton?.addEventListener('click', () => {
+        // Cancel the ongoing request
+        console.log('Cancelling request...');
+        
+        // Update UI
+        const statusMessage = document.getElementById('statusMessage');
+        if (statusMessage) {
+            statusMessage.textContent = 'Request cancelled by user';
+            statusMessage.className = 'alert alert-warning mb-0';
+        }
+        
+        // Hide cancel button and show close button
+        cancelRequestButton.style.display = 'none';
+        const closeButton = document.getElementById('closeButton');
+        if (closeButton) {
+            closeButton.style.display = 'block';
+        }
+        
+        // Show the response accordion
+        const responseAccordion = document.getElementById('responseAccordion');
+        if (responseAccordion) {
+            responseAccordion.classList.remove('d-none');
+        }
+        
+        // Update response data
+        const responseData = document.getElementById('responseData');
+        if (responseData) {
+            responseData.innerHTML = '<p class="text-muted">The request was cancelled.</p>';
+        }
+    });
+    // --------------------------------------
     
     // --- NEW Keyboard Shortcut Listener ---
     document.addEventListener('keydown', function(event) {

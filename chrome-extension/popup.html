@@ -1,101 +1,144 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
     <title>Email to ICS</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-    <div id="main-content">
-        <h1>Email to ICS Converter</h1>
-        <div id="auth-section" style="display: none;">
-            <p>Please log in to the server page first.</p>
-            <button id="open-server-page">Open Server Page</button>
+    <div class="container-fluid p-0">
+        <div class="d-flex justify-content-between align-items-center p-3 bg-light border-bottom">
+            <h5 class="mb-0">Email to ICS Converter</h5>
+            <button type="button" class="btn-close" id="close-popup" aria-label="Close"></button>
         </div>
-        <div id="form-section" style="display: none;">
-            <div class="input-group">
-                <label for="url">URL:</label>
-                <input type="text" id="url" placeholder="Enter URL (optional if using page content)">
+        <div class="p-3">
+            <div id="auth-section" style="display: none;">
+                <p>Please log in to the server page first.</p>
+                <button class="btn btn-primary" id="open-server-page">Open Server Page</button>
             </div>
-            <div class="input-group inline-group">
-                <label for="model-select">Select AI Model:</label>
-                <div class="select-button-wrapper">
-                     <select id="model-select">
+            <div id="form-section" style="display: none;">
+                <div class="mb-3">
+                    <label for="url" class="form-label">URL:</label>
+                <input type="text" class="form-control" id="url" placeholder="Enter URL (optional if using page content)">
+                </div>
+                <div class="mb-3">
+                    <label for="model-select" class="form-label">Select AI Model:</label>
+                <div class="input-group">
+                     <select class="form-select" id="model-select">
                         <option value="">Loading models...</option>
                      </select>
-                     <button id="refresh-models" title="Refresh Model List">&#x21bb;</button>
+                     <button class="btn btn-outline-secondary" id="refresh-models" type="button" title="Refresh Model List">&#x21bb;</button>
                 </div>
-            </div>
-            <div class="input-group">
-                <label for="instructions">Instructions:</label>
-                <textarea id="instructions" rows="3" placeholder="Optional: Provide specific instructions for the AI (e.g., 'Focus on the flight details', 'This is a recurring event every Tuesday')"></textarea>
-            </div>
-            <div class="input-group options-group">
-                <label class="toggle-switch">
-                    <input type="checkbox" id="tentative-toggle" checked>
-                    <span class="slider round"></span>
-                    <span class="label-text">Tentative</span>
-                </label>
-                <label class="toggle-switch">
-                    <input type="checkbox" id="multiday-toggle">
-                    <span class="slider round"></span>
-                    <span class="label-text">Multi-day</span>
-                </label>
-                <div class="radio-group">
-                    <label class="radio-label">
-                        <input type="radio" name="review-option" value="direct" checked> Send Directly
-                    </label>
-                    <label class="radio-label">
-                        <input type="radio" name="review-option" value="review"> Review First
-                    </label>
                 </div>
+                <div class="mb-3">
+                    <label for="instructions" class="form-label">Instructions:</label>
+                <textarea class="form-control" id="instructions" rows="3" placeholder="Optional: Provide specific instructions for the AI (e.g., 'Focus on the flight details', 'This is a recurring event every Tuesday')"></textarea>
+                </div>
+                <div class="mb-3">
+                    <div class="row g-3">
+                    <div class="col-6">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="tentative-toggle" checked>
+                            <label class="form-check-label" for="tentative-toggle">Tentative</label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="multiday-toggle">
+                            <label class="form-check-label" for="multiday-toggle">Multi-day</label>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="review-option" id="send-direct" value="direct" checked>
+                            <label class="form-check-label" for="send-direct">
+                                Send Directly
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="review-option" id="review-first" value="review">
+                            <label class="form-check-label" for="review-first">
+                                Review First
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                </div>
+                <div class="text-center mt-3">
+                    <button id="convert-button" class="btn btn-primary">
+                    <span class="me-1">&#x1F4C5;</span> Generate ICS
+                </button>
+                </div>
+                <div id="status" class="mt-3"></div>
             </div>
-            <div class="button-group">
-                <button id="convert-button">Generate ICS</button>
-            </div>
-            <div id="status"></div>
-        </div>
-        <div id="review-section" style="display: none;">
-            <h2>Review Generated Event</h2>
+            <div id="review-section" style="display: none;">
+                <h5 class="mb-3">Review Generated Event</h5>
             <p><strong>Send to:</strong> <span id="review-recipient"></span></p>
             <p><strong>Subject:</strong> <span id="review-subject"></span></p>
             <div id="review-content" class="ics-details"></div>
-            <div class="button-group">
-                <button id="send-button" class="btn btn-success">Send Email</button>
-                <button id="reject-button" class="btn btn-danger">Cancel</button>
-            </div>
-             <div id="review-status"></div>
-        </div>
-        
-        <div id="processingView" class="mt-4" style="display: none;">
-            <h3>Processing Request</h3>
-            <div class="card mb-3">
-                <div class="card-header d-flex justify-content-between align-items-center" data-bs-toggle="collapse" data-bs-target="#requestDetailsCollapse" aria-expanded="false" aria-controls="requestDetailsCollapse" style="cursor: pointer;">
-                    <span>Request Details</span>
-                    <span class="collapse-icon">&#9660;</span>
+                <div class="d-flex gap-2 justify-content-center">
+                    <button id="send-button" class="btn btn-success">Send Email</button>
+                    <button id="reject-button" class="btn btn-danger">Cancel</button>
                 </div>
-                <div class="collapse" id="requestDetailsCollapse">
-                    <div class="card-body">
-                        <pre id="requestData"></pre>
+                <div id="review-status" class="mt-3"></div>
+            </div>
+            
+            <div id="processingView" style="display: none;">
+                <h5 class="mb-3">Processing Request</h5>
+                
+                <div class="accordion" id="processingAccordion">
+                    <!-- Request Details -->
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#response-accordion-requestData" aria-expanded="false" aria-controls="response-accordion-requestData">
+                                Request Details
+                            </button>
+                        </h2>
+                        <div id="response-accordion-requestData" class="accordion-collapse collapse">
+                            <div class="accordion-body">
+                                <pre id="requestData"></pre>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Status -->
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#response-accordion-status" aria-expanded="true" aria-controls="response-accordion-status">
+                                Status
+                            </button>
+                        </h2>
+                        <div id="response-accordion-status" class="accordion-collapse collapse show">
+                            <div class="accordion-body">
+                                <div class="alert alert-success mb-0" id="statusMessage"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Server Response (hidden initially) -->
+                    <div class="accordion-item d-none" id="responseAccordion">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#response-accordion-serverResponse" aria-expanded="true" aria-controls="response-accordion-serverResponse">
+                                Server Response
+                            </button>
+                        </h2>
+                        <div id="response-accordion-serverResponse" class="accordion-collapse collapse show">
+                            <div class="accordion-body">
+                                <div id="responseData"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
-            <div class="card mb-3">
-                <div class="card-header">Status</div>
-                <div class="card-body" id="statusMessage"></div>
-            </div>
-            <div class="card mb-3">
-                <div class="card-header">Server Response</div>
-                <div class="card-body">
-                    <pre id="responseData"></pre>
+                <div class="d-flex justify-content-between mt-3">
+                    <button id="backToFormButton" class="btn btn-secondary">&#x2190; Back</button>
+                    <button id="cancelRequestButton" class="btn btn-danger">&#x1F6D1; Cancel Request</button>
+                    <button id="closeButton" class="btn btn-success" style="display: none;">✖ Close</button>
                 </div>
             </div>
-             <div class="button-group">
-                <button id="backToFormButton">Back</button>
-            </div>
+            
         </div>
-        
     </div>
+    <!-- Bootstrap JS Bundle (includes Popper) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <script src="dist/popup.bundle.js"></script>
 </body>
 </html> 

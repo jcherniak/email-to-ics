@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Email to ICS Helper",
-  "version": "1.0",
-  "description": "Sends page content to the Email-to-ICS service.",
+  "name": "Email to ICS Helper - Standalone",
+  "version": "2.0",
+  "description": "Standalone Email to ICS converter with AI processing and email delivery.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -12,6 +12,8 @@
     "tabs"
   ],
   "host_permissions": [
+    "https://openrouter.ai/*",
+    "https://api.postmarkapp.com/*",
     "<all_urls>"
   ],
   "action": {
@@ -33,7 +35,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["popup.html", "popup.css", "dist/popup.bundle.js"],
+      "resources": ["popup.html", "popup.css", "dist/popup.bundle.js", "settings.html", "settings.js"],
       "matches": ["<all_urls>"]
     }
   ],

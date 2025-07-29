@@ -1,15 +1,94 @@
 // background.js
 const CONTEXT_MENU_ID = "emailToIcsSelection";
 
-// --- Context Menu Setup ---
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: CONTEXT_MENU_ID,
-    title: "Send selection as ICS instructions",
-    contexts: ["selection"] // Only show when text is selected
-  });
-  console.log("Context menu created.");
+let emailProcessor = null;
+let isReady = false;
+let initializationPromise = null;
+
+// Service worker startup logging
+console.log('Background service worker starting...');
+
+// Import EmailProcessor synchronously at module level
+try {
+    console.log('Importing EmailProcessor...');
+    importScripts('email-processor.js');
+    console.log('EmailProcessor imported successfully');
+} catch (error) {
+    console.error('Failed to import EmailProcessor:', error);
+}
+
+// Initialize EmailProcessor with proper error handling
+async function initializeEmailProcessor() {
+    // Use singleton pattern with promise caching
+    if (initializationPromise) {
+        return initializationPromise;
+    }
+    
+    initializationPromise = (async () => {
+        try {
+            if (!emailProcessor) {
+                // Check if EmailProcessor class is available
+                if (typeof EmailProcessor === 'undefined') {
+                    throw new Error('EmailProcessor class not available - import failed');
+                }
+                
+                console.log('Creating new EmailProcessor instance...');
+                emailProcessor = new EmailProcessor();
+                console.log('EmailProcessor created, initializing from storage...');
+                await emailProcessor.initializeFromStorage();
+                console.log('EmailProcessor initialization completed');
+            }
+            return emailProcessor;
+        } catch (error) {
+            console.error('Failed to initialize EmailProcessor:', error);
+            emailProcessor = null;
+            initializationPromise = null; // Reset for retry
+            throw new Error(`EmailProcessor initialization failed: ${error.message}`);
+        }
+    })();
+    
+    return initializationPromise;
+}
+
+// --- Service Worker Event Listeners ---
+chrome.runtime.onStartup.addListener(() => {
+    console.log('Service worker onStartup event');
+    isReady = true;
 });
+
+chrome.runtime.onInstalled.addListener(() => {
+    console.log('Service worker onInstalled event');
+    isReady = true;
+    
+    // Create context menu
+    chrome.contextMenus.create({
+        id: CONTEXT_MENU_ID,
+        title: "Send selection as ICS instructions",
+        contexts: ["selection"]
+    });
+    console.log("Context menu created.");
+});
+
+// Set ready state immediately for immediate availability
+isReady = true;
+console.log('Service worker ready state set to true');
+
+// Add immediate message listener test
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    console.log('Service worker received message:', message?.action || 'unknown', message);
+    
+    // Handle ping immediately without any async operations
+    if (message.action === 'ping') {
+        console.log('Service worker responding to ping');
+        sendResponse({ success: true, message: 'Service worker is responsive' });
+        return; // Don't return true for sync response
+    }
+    
+    // For all other messages, we'll handle them in the main handler below
+    return true; // Keep channel open for async operations
+});
+
+console.log('Message listener registered');
 
 // Function to be injected into the page to get selected HTML
 function getSelectedHtmlFragment() {
@@ -356,29 +435,235 @@ async function handleContextMenuAction(instructions, tab) {
   }
 }
 
-// --- Save preferences when popup changes them ---
+// --- Message handlers ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'savePreferences') {
+  console.log('Background script received message:', message.action, message);
+  
+  // Check if background script is ready
+  if (!isReady) {
+    console.warn('Background script not ready for action:', message.action);
+    sendResponse({ success: false, error: 'Background script not ready' });
+    return;
+  }
+  
+  // Add timeout handler to prevent hanging connections
+  const timeout = setTimeout(() => {
+    console.warn('Message handler timeout for action:', message.action);
+    if (sendResponse) {
+      sendResponse({ success: false, error: 'Request timeout' });
+    }
+  }, 30000); // 30 second timeout
+  
+  // Wrapper to clear timeout and send response
+  const safeResponse = (response) => {
+    clearTimeout(timeout);
+    try {
+      sendResponse(response);
+    } catch (error) {
+      console.error('Error sending response:', error);
+    }
+  };
+  
+  if (message.action === 'ping') {
+    // Simple connectivity test
+    console.log('Background script received ping');
+    safeResponse({ success: true, message: 'Background script is responsive' });
+    return true;
+  } else if (message.action === 'savePreferences') {
     chrome.storage.sync.set({
       takeScreenshots: message.takeScreenshots,
       defaultModel: message.defaultModel
     }, () => {
-      sendResponse({ success: true });
+      safeResponse({ success: true });
     });
     return true; // Keep the channel open for sendResponse
   } else if (message.action === 'captureScreenshot') {
     // Handle screenshot request from popup iframe
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-      if (tabs[0]) {
-        const screenshot = await captureVisibleTabScreenshot(tabs[0].id);
-        sendResponse({ screenshot: screenshot });
-      } else {
-        sendResponse({ error: 'No active tab found' });
+      try {
+        if (tabs[0]) {
+          const screenshot = await captureVisibleTabScreenshot(tabs[0].id);
+          if (screenshot) {
+            safeResponse({ success: true, screenshot: screenshot });
+          } else {
+            safeResponse({ success: false, error: 'Screenshot capture returned null' });
+          }
+        } else {
+          safeResponse({ success: false, error: 'No active tab found' });
+        }
+      } catch (error) {
+        console.error('Screenshot capture error:', error);
+        safeResponse({ success: false, error: error.message });
       }
     });
     return true; // Keep channel open for async response
+  } else if (message.action === 'processContent') {
+    // Handle content processing request
+    handleProcessContentRequest(message, safeResponse);
+    return true;
+  } else if (message.action === 'getModels') {
+    // Handle models request
+    handleGetModelsRequest(safeResponse);
+    return true;
+  } else if (message.action === 'confirmEvent') {
+    // Handle event confirmation
+    handleConfirmEventRequest(message, safeResponse);
+    return true;
+  } else if (message.action === 'saveSettings') {
+    // Handle settings save
+    handleSaveSettingsRequest(message, safeResponse);
+    return true;
+  } else if (message.action === 'getSettings') {
+    // Handle settings retrieval
+    handleGetSettingsRequest(safeResponse);
+    return true;
+  } else {
+    // Unknown action
+    console.warn('Unknown message action:', message.action);
+    safeResponse({ success: false, error: 'Unknown action: ' + message.action });
   }
 });
+
+// Handler functions
+async function handleProcessContentRequest(message, sendResponse) {
+  console.log('handleProcessContentRequest called with:', message);
+  
+  try {
+    // Ensure we always send a response
+    if (!sendResponse) {
+      console.error('No sendResponse function provided');
+      return;
+    }
+
+    console.log('Initializing EmailProcessor...');
+    const processor = await initializeEmailProcessor();
+    
+    if (!processor) {
+      throw new Error('Failed to initialize EmailProcessor');
+    }
+    
+    console.log('EmailProcessor initialized successfully');
+    
+    // Get active tab for URL and HTML content
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0]) {
+      throw new Error('No active tab found');
+    }
+    
+    const activeTab = tabs[0];
+    
+    // Get current tab URL if not provided
+    if (!message.params.url) {
+      message.params.url = activeTab.url;
+      console.log('Using current tab URL:', activeTab.url);
+    }
+    
+    // Get HTML content if not provided
+    if (!message.params.html) {
+      console.log('Getting HTML content from current tab...');
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: activeTab.id },
+          func: () => document.documentElement.outerHTML
+        });
+        if (results && results[0] && results[0].result) {
+          message.params.html = results[0].result;
+          console.log('HTML content captured successfully');
+        } else {
+          console.warn('Could not get HTML content from tab');
+        }
+      } catch (htmlError) {
+        console.warn('Failed to get HTML content:', htmlError);
+        // Continue without HTML content
+      }
+    }
+    
+    // Handle screenshot if requested
+    if (message.params && message.params.takeScreenshot) {
+      console.log('Taking screenshot for content processing...');
+      
+      try {
+        const screenshot = await captureVisibleTabScreenshot(activeTab.id);
+        if (screenshot) {
+          message.params.screenshot = screenshot;
+          console.log('Screenshot captured and added to params');
+        } else {
+          console.warn('Screenshot capture returned null');
+        }
+      } catch (screenshotError) {
+        console.warn('Screenshot capture failed:', screenshotError);
+        // Continue without screenshot
+      }
+    }
+    
+    console.log('Processing content with params:', Object.keys(message.params || {}));
+    const result = await processor.processContent(message.params);
+    console.log('Content processing completed successfully');
+    
+    sendResponse({ success: true, result });
+  } catch (error) {
+    console.error('Error in handleProcessContentRequest:', error);
+    console.error('Error stack:', error.stack);
+    
+    // Always send a response, even on error
+    try {
+      sendResponse({ success: false, error: error.message || 'Unknown error occurred' });
+    } catch (responseError) {
+      console.error('Failed to send error response:', responseError);
+    }
+  }
+}
+
+async function handleGetModelsRequest(sendResponse) {
+  try {
+    const processor = await initializeEmailProcessor();
+    const models = await processor.loadAvailableModels();
+    sendResponse({ success: true, models });
+  } catch (error) {
+    console.error('Error getting models:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
+async function handleConfirmEventRequest(message, sendResponse) {
+  try {
+    const processor = await initializeEmailProcessor();
+    const result = await processor.confirmEvent(message.confirmationToken);
+    sendResponse({ success: true, result });
+  } catch (error) {
+    console.error('Error confirming event:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
+async function handleSaveSettingsRequest(message, sendResponse) {
+  try {
+    const processor = await initializeEmailProcessor();
+    await processor.saveSettings(message.settings);
+    // Reinitialize to pick up new settings
+    emailProcessor = null;
+    await initializeEmailProcessor();
+    sendResponse({ success: true });
+  } catch (error) {
+    console.error('Error saving settings:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
+async function handleGetSettingsRequest(sendResponse) {
+  try {
+    const settings = await new Promise((resolve) => {
+      chrome.storage.sync.get([
+        'openRouterKey', 'postmarkApiKey', 'fromEmail', 
+        'inboundConfirmedEmail', 'toTentativeEmail', 'toConfirmedEmail', 'aiModel'
+      ], resolve);
+    });
+    sendResponse({ success: true, settings });
+  } catch (error) {
+    console.error('Error getting settings:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
 
 // --- Handle extension icon click ---
 chrome.action.onClicked.addListener(async (tab) => {
