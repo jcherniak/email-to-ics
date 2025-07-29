@@ -1,6 +1,8 @@
 // popup.js
 // Import ical.js for ICS parsing
 import ICAL from 'ical.js';
+// Import Bootstrap JS
+import 'bootstrap';
 
 // Make ICAL globally available for the functions that use it
 window.ICAL = ICAL;
@@ -1354,10 +1356,18 @@ document.addEventListener('DOMContentLoaded', function() {
             
             responseData.innerHTML = errorDetails;
             
-            // Show the response accordion
+            // Show the response accordion with danger styling for errors
             const responseAccordion = document.getElementById('responseAccordion');
+            const serverResponseButton = document.getElementById('serverResponseButton');
             if (responseAccordion) {
                 responseAccordion.classList.remove('d-none');
+                // Change to danger styling for errors
+                responseAccordion.classList.remove('border-primary');
+                responseAccordion.classList.add('border-danger');
+                if (serverResponseButton) {
+                    serverResponseButton.classList.remove('bg-light');
+                    serverResponseButton.classList.add('bg-danger', 'text-white');
+                }
             }
             // Leave showingReview as false
         } finally {
@@ -1450,7 +1460,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // -------------------------------
     
     // --- Cancel Request Button Listener ---
-    const cancelRequestButton = document.getElementById('cancelRequestButton');
     cancelRequestButton?.addEventListener('click', () => {
         // Cancel the ongoing request
         console.log('Cancelling request...');
@@ -1469,10 +1478,18 @@ document.addEventListener('DOMContentLoaded', function() {
             closeButton.style.display = 'block';
         }
         
-        // Show the response accordion
+        // Show the response accordion with warning styling for cancelled
         const responseAccordion = document.getElementById('responseAccordion');
+        const serverResponseButton = document.getElementById('serverResponseButton');
         if (responseAccordion) {
             responseAccordion.classList.remove('d-none');
+            // Change to warning styling for cancelled
+            responseAccordion.classList.remove('border-primary');
+            responseAccordion.classList.add('border-warning');
+            if (serverResponseButton) {
+                serverResponseButton.classList.remove('bg-light');
+                serverResponseButton.classList.add('bg-warning');
+            }
         }
         
         // Update response data

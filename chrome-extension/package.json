@@ -4,13 +4,14 @@
   "description": "Handles popup logic for email-to-ics",
   "private": true,
   "scripts": {
-    "build": "esbuild popup.js --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap",
+    "build": "esbuild popup.js --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap && cp node_modules/bootstrap/dist/css/bootstrap.min.css dist/",
     "watch": "esbuild popup.js --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --watch"
   },
   "devDependencies": {
     "esbuild": "^0.20.0"
   },
   "dependencies": {
+    "bootstrap": "^5.3.7",
     "ical.js": "^2.2.0"
   }
 }
