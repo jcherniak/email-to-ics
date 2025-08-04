@@ -12667,15 +12667,6 @@
         }
       });
     }
-    document.querySelector('[data-bs-toggle="collapse"]').addEventListener("click", function() {
-      const targetId = this.getAttribute("data-bs-target");
-      const targetElement = document.querySelector(targetId);
-      const isCurrentlyExpanded = this.getAttribute("aria-expanded") === "true";
-      this.setAttribute("aria-expanded", !isCurrentlyExpanded);
-      if (targetElement) {
-        targetElement.classList.toggle("show");
-      }
-    });
     const statusDiv = document.getElementById("status");
     const reviewStatusDiv = document.getElementById("review-status");
     const urlInput = document.getElementById("url");
@@ -13301,14 +13292,12 @@
         errorDetails += `</div>`;
         responseData.innerHTML = errorDetails;
         const responseAccordion2 = document.getElementById("responseAccordion");
-        const serverResponseButton = document.getElementById("serverResponseButton");
         if (responseAccordion2) {
           responseAccordion2.classList.remove("d-none");
-          responseAccordion2.classList.remove("border-primary");
-          responseAccordion2.classList.add("border-danger");
-          if (serverResponseButton) {
-            serverResponseButton.classList.remove("bg-light");
-            serverResponseButton.classList.add("bg-danger", "text-white");
+          const accordionItem = responseAccordion2.querySelector(".accordion-item");
+          if (accordionItem) {
+            accordionItem.classList.remove("border-primary");
+            accordionItem.classList.add("border-danger");
           }
         }
       } finally {
@@ -13390,14 +13379,12 @@
         closeButton.style.display = "block";
       }
       const responseAccordion = document.getElementById("responseAccordion");
-      const serverResponseButton = document.getElementById("serverResponseButton");
       if (responseAccordion) {
         responseAccordion.classList.remove("d-none");
-        responseAccordion.classList.remove("border-primary");
-        responseAccordion.classList.add("border-warning");
-        if (serverResponseButton) {
-          serverResponseButton.classList.remove("bg-light");
-          serverResponseButton.classList.add("bg-warning");
+        const accordionItem = responseAccordion.querySelector(".accordion-item");
+        if (accordionItem) {
+          accordionItem.classList.remove("border-primary");
+          accordionItem.classList.add("border-warning");
         }
       }
       const responseData2 = document.getElementById("responseData");

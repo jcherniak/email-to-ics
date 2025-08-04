@@ -574,22 +574,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Add a manual handler for the collapse functionality
-    document.querySelector('[data-bs-toggle="collapse"]').addEventListener('click', function() {
-        // Toggle the collapse
-        const targetId = this.getAttribute('data-bs-target');
-        const targetElement = document.querySelector(targetId);
-        
-        // Toggle the aria-expanded attribute
-        const isCurrentlyExpanded = this.getAttribute('aria-expanded') === 'true';
-        this.setAttribute('aria-expanded', !isCurrentlyExpanded);
-        
-        // Toggle the collapse element
-        if (targetElement) {
-            targetElement.classList.toggle('show');
-        }
-    });
-    
     // Define ALL DOM element constants here
     const statusDiv = document.getElementById('status');
     const reviewStatusDiv = document.getElementById('review-status');
@@ -1358,15 +1342,13 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Show the response accordion with danger styling for errors
             const responseAccordion = document.getElementById('responseAccordion');
-            const serverResponseButton = document.getElementById('serverResponseButton');
             if (responseAccordion) {
                 responseAccordion.classList.remove('d-none');
                 // Change to danger styling for errors
-                responseAccordion.classList.remove('border-primary');
-                responseAccordion.classList.add('border-danger');
-                if (serverResponseButton) {
-                    serverResponseButton.classList.remove('bg-light');
-                    serverResponseButton.classList.add('bg-danger', 'text-white');
+                const accordionItem = responseAccordion.querySelector('.accordion-item');
+                if (accordionItem) {
+                    accordionItem.classList.remove('border-primary');
+                    accordionItem.classList.add('border-danger');
                 }
             }
             // Leave showingReview as false
@@ -1480,15 +1462,13 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Show the response accordion with warning styling for cancelled
         const responseAccordion = document.getElementById('responseAccordion');
-        const serverResponseButton = document.getElementById('serverResponseButton');
         if (responseAccordion) {
             responseAccordion.classList.remove('d-none');
             // Change to warning styling for cancelled
-            responseAccordion.classList.remove('border-primary');
-            responseAccordion.classList.add('border-warning');
-            if (serverResponseButton) {
-                serverResponseButton.classList.remove('bg-light');
-                serverResponseButton.classList.add('bg-warning');
+            const accordionItem = responseAccordion.querySelector('.accordion-item');
+            if (accordionItem) {
+                accordionItem.classList.remove('border-primary');
+                accordionItem.classList.add('border-warning');
             }
         }
         

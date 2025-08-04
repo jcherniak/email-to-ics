@@ -17,7 +17,7 @@ function createIframe() {
         height: 600px;
         z-index: 999999;
         background: white;
-        border: none;
+        border: 3px solid #0d6efd;
         border-radius: 8px;
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
     `;
