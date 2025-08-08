@@ -414,7 +414,7 @@ class EmailProcessor
 {$downloadedText}
 TEXT;
 
-		$eventDetails = $this->generateIcalEvent($combinedText, $instructions, $screenshotViewport, $screenshotZoomed, $requestedModel, $cliDebug, $allowMultiDay);
+		$eventDetails = $this->generateIcalEvent($combinedText, $instructions, $screenshotViewport, $screenshotZoomed, $requestedModel, $cliDebug, $allowMultiDay, $url);
 
 		// Handle --json flag for CLI output if requested - This takes precedence over other CLI outputs.
 		if ($outputJsonOnly && defined('IS_CLI_RUN') && IS_CLI_RUN) {
@@ -900,7 +900,7 @@ HasBody:
 		}
 
         // Pass $extractedInstructions from TextBody as specific instructions to AI
-        $eventDetails = $this->generateIcalEvent($combinedText, $extractedInstructions, null, null, null, $cliDebug, false);
+        $eventDetails = $this->generateIcalEvent($combinedText, $extractedInstructions, null, null, null, $cliDebug, false, $extractedUrl);
 
         // Handle --json flag for CLI output if requested and in CLI context
         // This check is more for future-proofing if this method is called from a CLI context that sets outputJsonOnly
@@ -1051,7 +1051,7 @@ HasBody:
      * @param bool $cliDebug If true and in CLI, output AI request/response to STDERR.
      * @return array Array containing ICS content and metadata
      */
-    private function generateIcalEvent($combinedText, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $cliDebug = false, $allowMultiDay = false)
+    private function generateIcalEvent($combinedText, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $cliDebug = false, $allowMultiDay = false, $sourceUrl = null)
     {
         // Define the NEW schema for structured event data
         $eventSchema = [
@@ -1170,11 +1170,12 @@ The JSON object MUST conform EXACTLY to the following schema:
   * For conferences: Include key speakers and session topics
   * For all events: Include ticket/registration info, preparation requirements, accessibility details
   * Use `\\n` for newlines. Keep under 1000 chars. DO NOT include raw HTML. For flights, include Flight #, Confirmation #, Departure/Arrival details. Include Eventbrite ticket links prominently if found.
-- **htmlDescription:** Provide a concise HTML version of the description, ideally under 1500 characters. Use basic HTML tags only (e.g., `<p>`, `<a>`, `<b>`, `<i>`, `<ul>`, `<ol>`, `<li>`, `<br>`). DO NOT include `<style>` tags or inline `style` attributes. Minimize complex formatting.
+  * IMPORTANT: If a source URL was provided for this event, add it at the bottom of the description with the text "\\n\\nSource: [URL]"
+- **htmlDescription:** Provide a concise HTML version of the description, ideally under 1500 characters. Use basic HTML tags only (e.g., `<p>`, `<a>`, `<b>`, `<i>`, `<ul>`, `<ol>`, `<li>`, `<br>`). DO NOT include `<style>` tags or inline `style` attributes. Minimize complex formatting. If a source URL was provided, include it at the bottom as a clickable link.
 - **dtstart / dtend:** Use ISO 8601 format. Calculate end time if missing (2h default, 3h opera, 30m doctor). Use YYYY-MM-DD format ONLY if `isAllDay` is true.
 - **timezone:** Provide a valid PHP Timezone identifier (e.g., `America/Los_Angeles`, `America/New_York`, `UTC`). Infer from location if possible, default to `America/Los_Angeles` if unknown/virtual.
 - **location:** The venue name or address.
-- **url:** Link to event page, tickets, etc.
+- **url:** REQUIRED if a source URL was provided for fetching this event. Use the original source URL. If no URL was provided, include any event-specific link (tickets, registration, etc.) found in the content.
 - **isAllDay:** Set to true only if no specific start/end times are found.
 - **emailSubject:** Should be identical to the `summary`.
 - **locationLookup:** A string suitable for searching on Google Maps (e.g., "Moscone Center, San Francisco, CA").
@@ -1231,6 +1232,14 @@ PROMPT;
             $messages[] = [
                 'role' => 'system',
                 'content' => "*** EXTREMELY IMPORTANT INSTRUCTIONS ***\n" . $instructions
+            ];
+        }
+        
+        // Add source URL information if provided
+        if ($sourceUrl) {
+            $messages[] = [
+                'role' => 'system',
+                'content' => "*** SOURCE URL ***\nThe content was fetched from: {$sourceUrl}\nYou MUST include this URL in the 'url' field of the event data, and also add it to the bottom of both the plain text and HTML descriptions."
             ];
         }
 
@@ -1496,7 +1505,7 @@ PROMPT;
 					if ($alternateModel && $this->aiModel !== $alternateModel && $requestedModel === null) {
 						errlog("No dates found, retrying with ALTERNATE_MODEL: {$alternateModel}");
 						// Retry with alternate model
-						return $this->generateIcalEvent($combinedText, $instructions, $screenshotViewport, $screenshotZoomed, $alternateModel, $cliDebug, $allowMultiDay);
+						return $this->generateIcalEvent($combinedText, $instructions, $screenshotViewport, $screenshotZoomed, $alternateModel, $cliDebug, $allowMultiDay, $sourceUrl);
 					}
 				}
 				

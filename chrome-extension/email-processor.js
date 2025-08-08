@@ -18,8 +18,9 @@ class EmailProcessor {
     getOfflineAllowedModels() {
         // Return offline list of allowed models as fallback
         return [
+            { id: 'openai/gpt-5', name: 'GPT-5' },
             { id: 'google/gemini-2.5-pro', name: 'Google Gemini 2.5 Pro' },
-            { id: 'anthropic/claude-opus-4', name: 'Claude Opus 4' },
+            { id: 'anthropic/claude-opus-4.1', name: 'Claude Opus 4.1' },
             { id: 'anthropic/claude-3.7-sonnet:thinking', name: 'Claude 3.7 Sonnet (Thinking)' },
             { id: 'google/gemini-2.5-flash:thinking', name: 'Google Gemini 2.5 Flash (Thinking)' },
             { id: 'google/gemini-2.5-flash', name: 'Google Gemini 2.5 Flash' },
@@ -270,7 +271,8 @@ Extract event details from the provided content and return a JSON object with th
     "end_date": "YYYY-MM-DD", 
     "end_time": "HH:MM" or null for all-day,
     "description": "Event description",
-    "timezone": "America/New_York"
+    "timezone": "America/New_York",
+    "url": "Event URL or source URL"
 }
 
 Guidelines:
@@ -281,6 +283,8 @@ Guidelines:
 - For all-day events, set start_time and end_time to null
 - Multi-day events: ${multiday ? 'Expected' : 'Not expected'}
 - Event status: ${tentative ? 'Tentative' : 'Confirmed'}
+- IMPORTANT: If a source URL is provided, include it in the "url" field
+- IMPORTANT: If a source URL is provided, also add it at the bottom of the description field with text "\n\nSource: [URL]"
 
 ${instructions ? `Special instructions: ${instructions}\n` : ''}
 
@@ -421,6 +425,10 @@ ${html}`;
         
         if (eventData.location) {
             icsContent.push(`LOCATION:${escapeText(eventData.location)}`);
+        }
+        
+        if (eventData.url) {
+            icsContent.push(`URL:${escapeText(eventData.url)}`);
         }
         
         // Add dates
