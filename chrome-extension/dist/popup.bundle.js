@@ -12586,7 +12586,7 @@
     return [
       { id: "openai/gpt-5", name: "GPT-5" },
       { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-      { id: "anthropic/claude-opus-4", name: "Claude Opus 4" },
+      { id: "anthropic/claude-opus-4.1", name: "Claude Opus 4.1" },
       { id: "anthropic/claude-3.7-sonnet:thinking", name: "Claude 3.7 Sonnet (Thinking)" },
       { id: "google/gemini-2.5-flash:thinking", name: "Gemini 2.5 Flash (Thinking)" },
       { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash" },
@@ -12606,7 +12606,7 @@
       "openai/o3",
       "openai/gpt-4.1",
       "google/gemini-2.5-pro",
-      "anthropic/claude-opus-4",
+      "anthropic/claude-opus-4.1",
       "openai/o3-pro"
     ];
     const filteredModels = allModels.filter(
@@ -12623,7 +12623,7 @@
     const preferredOrder = [
       "openai/gpt-5",
       "google/gemini-2.5-pro",
-      "anthropic/claude-opus-4",
+      "anthropic/claude-opus-4.1",
       "anthropic/claude-3.7-sonnet:thinking",
       "google/gemini-2.5-flash:thinking",
       "google/gemini-2.5-flash",
