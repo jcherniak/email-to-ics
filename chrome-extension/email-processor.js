@@ -257,7 +257,48 @@ class EmailProcessor {
         }
     }
 
+    stripTrackingParameters(url) {
+        if (!url) return url;
+        
+        try {
+            const urlObj = new URL(url);
+            const params = new URLSearchParams(urlObj.search);
+            
+            // List of tracking parameters to remove
+            const trackingParams = [
+                'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+                'utm_id', 'utm_source_platform', 'utm_creative_format', 'utm_marketing_tactic',
+                'fbclid', 'gclid', 'dclid', 'msclkid',
+                'mc_cid', 'mc_eid', // Mailchimp
+                '_ga', '_gid', '_gac', // Google Analytics
+                'ref', 'referer', 'referrer'
+            ];
+            
+            // Remove tracking parameters
+            let hasChanges = false;
+            for (const param of trackingParams) {
+                if (params.has(param)) {
+                    params.delete(param);
+                    hasChanges = true;
+                }
+            }
+            
+            // Only rebuild if we removed something
+            if (hasChanges) {
+                urlObj.search = params.toString();
+                return urlObj.toString();
+            }
+            
+            return url;
+        } catch (error) {
+            console.error('Error stripping tracking parameters:', error);
+            return url;
+        }
+    }
+    
     buildPrompt(html, instructions, url, screenshot, tentative, multiday) {
+        // Strip tracking parameters from URL
+        const cleanUrl = url ? this.stripTrackingParameters(url) : url;
         const basePrompt = `You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
 
 CRITICAL: You must respond with valid JSON only. No markdown, no explanations, just pure JSON.
@@ -288,7 +329,7 @@ Guidelines:
 
 ${instructions ? `Special instructions: ${instructions}\n` : ''}
 
-${url ? `Source URL: ${url}\n` : ''}
+${cleanUrl ? `Source URL: ${cleanUrl}\n` : ''}
 
 Content to analyze:
 ${html}`;

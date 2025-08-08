@@ -8,6 +8,48 @@ let initializationPromise = null;
 // Service worker startup logging
 console.log('Background service worker starting...');
 
+/**
+ * Strip UTM and other tracking parameters from a URL
+ */
+function stripTrackingParameters(url) {
+  if (!url) return url;
+  
+  try {
+    const urlObj = new URL(url);
+    const params = new URLSearchParams(urlObj.search);
+    
+    // List of tracking parameters to remove
+    const trackingParams = [
+      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+      'utm_id', 'utm_source_platform', 'utm_creative_format', 'utm_marketing_tactic',
+      'fbclid', 'gclid', 'dclid', 'msclkid',
+      'mc_cid', 'mc_eid', // Mailchimp
+      '_ga', '_gid', '_gac', // Google Analytics
+      'ref', 'referer', 'referrer'
+    ];
+    
+    // Remove tracking parameters
+    let hasChanges = false;
+    for (const param of trackingParams) {
+      if (params.has(param)) {
+        params.delete(param);
+        hasChanges = true;
+      }
+    }
+    
+    // Only rebuild if we removed something
+    if (hasChanges) {
+      urlObj.search = params.toString();
+      return urlObj.toString();
+    }
+    
+    return url;
+  } catch (error) {
+    console.error('Error stripping tracking parameters:', error);
+    return url;
+  }
+}
+
 // Import EmailProcessor synchronously at module level
 try {
     console.log('Importing EmailProcessor...');
@@ -375,9 +417,10 @@ async function handleContextMenuAction(instructions, tab) {
     // Gather page content
     const pageData = await getPageContent(tab.id);
 
-    // Prepare request body
+    // Prepare request body (strip tracking parameters from URL)
+    const cleanUrl = stripTrackingParameters(pageData.url);
     const body = new URLSearchParams({
-      url: pageData.url,
+      url: cleanUrl,
       html: pageData.html,
       instructions: instructions,
       fromExtension: '1'

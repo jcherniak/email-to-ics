@@ -348,6 +348,10 @@ class EmailProcessor
         }
 
 		if (empty(trim($downloadedText)) && !empty(trim($url))) { // Only fetch if URL is given and no downloadedText
+			// Strip tracking parameters from URL
+			$url = $this->stripTrackingParameters($url);
+			errlog("URL after stripping tracking params: {$url}");
+			
 			if (!$this->is_valid_url($url)) {
                 errlog('BAD url: ' . $url);
                 if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
@@ -889,7 +893,9 @@ HasBody:
 
 		$downloadedUrlContent = null;
 		if ($extractedUrl) {
-            errlog("URL found in TextBody: {$extractedUrl}. Fetching...");
+			// Strip tracking parameters from extracted URL
+			$extractedUrl = $this->stripTrackingParameters($extractedUrl);
+            errlog("URL found in TextBody (after stripping tracking): {$extractedUrl}. Fetching...");
 			$fetchedContent = $this->fetch_url($extractedUrl); // Returns raw HTML/content
             if ($fetchedContent) {
                 $downloadedUrlContent = $this->extractMainContent($fetchedContent); // Cleaned content
@@ -982,6 +988,55 @@ HasBody:
 
 		// Check if the input matches the URL pattern
 		return preg_match($pattern, $trimmedText);
+	}
+	
+	/**
+	 * Strip UTM and other tracking parameters from a URL
+	 */
+	private function stripTrackingParameters($url) {
+		if (empty($url)) {
+			return $url;
+		}
+		
+		$parsedUrl = parse_url($url);
+		if (!$parsedUrl || !isset($parsedUrl['query'])) {
+			return $url; // No query string, return as-is
+		}
+		
+		// Parse the query string
+		parse_str($parsedUrl['query'], $params);
+		
+		// List of tracking parameters to remove
+		$trackingParams = [
+			'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+			'utm_id', 'utm_source_platform', 'utm_creative_format', 'utm_marketing_tactic',
+			'fbclid', 'gclid', 'dclid', 'msclkid',
+			'mc_cid', 'mc_eid', // Mailchimp
+			'_ga', '_gid', '_gac', // Google Analytics
+			'ref', 'referer', 'referrer'
+		];
+		
+		// Remove tracking parameters
+		foreach ($trackingParams as $param) {
+			unset($params[$param]);
+		}
+		
+		// Rebuild the URL
+		$cleanUrl = $parsedUrl['scheme'] . '://' . $parsedUrl['host'];
+		if (isset($parsedUrl['port'])) {
+			$cleanUrl .= ':' . $parsedUrl['port'];
+		}
+		if (isset($parsedUrl['path'])) {
+			$cleanUrl .= $parsedUrl['path'];
+		}
+		if (!empty($params)) {
+			$cleanUrl .= '?' . http_build_query($params);
+		}
+		if (isset($parsedUrl['fragment'])) {
+			$cleanUrl .= '#' . $parsedUrl['fragment'];
+		}
+		
+		return $cleanUrl;
 	}
 
 	private function fetch_url($url) {
