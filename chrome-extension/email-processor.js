@@ -508,7 +508,7 @@ This invitation was generated automatically.`;
                 Attachments: [
                     {
                         Name: 'invite.ics',
-                        Content: btoa(icsContent),
+                        Content: btoa(unescape(encodeURIComponent(icsContent))),
                         ContentType: 'text/calendar'
                     }
                 ]

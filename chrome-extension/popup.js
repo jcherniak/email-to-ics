@@ -54,14 +54,14 @@ async function init() { // Keep function definition for now, might be removed la
                 
                 availableModels = models;
                 
-                selectedModel = prefs.defaultModel || (availableModels.length > 0 ? (availableModels.find(model => model.default) || availableModels[0]).id : null);
+                selectedModel = prefs.defaultModel || 'openai/gpt-5' || (availableModels.length > 0 ? (availableModels.find(model => model.default) || availableModels[0]).id : null);
                 debugMode = prefs.debugMode || false;
                 
                 showForm(prefs); // Calls showForm -> Original logic tried to set contentDiv.innerHTML
             } catch (error) {
                 console.error("Error initializing models:", error); 
                 availableModels = await modelsPromise.catch(() => []);
-                selectedModel = prefs.defaultModel || null;
+                selectedModel = prefs.defaultModel || 'openai/gpt-5' || null;
                 showForm(prefs); // Still needs to show form on error
             }
         }
