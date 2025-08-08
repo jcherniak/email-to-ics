@@ -113,6 +113,7 @@ async function fetchAvailableModels() {
 function getOfflineAllowedModels() {
     // Return allowed models even when offline
     return [
+        { id: 'openai/gpt-5', name: 'GPT-5' },
         { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
         { id: 'anthropic/claude-opus-4', name: 'Claude Opus 4' },
         { id: 'anthropic/claude-3.7-sonnet:thinking', name: 'Claude 3.7 Sonnet (Thinking)' },
@@ -128,6 +129,7 @@ function getOfflineAllowedModels() {
 function filterAllowedModels(allModels) {
     // Define allowed models
     const allowedModelIds = [
+        'openai/gpt-5',
         'anthropic/claude-3.7-sonnet:thinking',
         'google/gemini-2.5-flash:thinking',
         'google/gemini-2.5-flash',
@@ -157,6 +159,7 @@ function filterAllowedModels(allModels) {
 
     // Sort models with preferred order
     const preferredOrder = [
+        'openai/gpt-5',
         'google/gemini-2.5-pro',
         'anthropic/claude-opus-4',
         'anthropic/claude-3.7-sonnet:thinking',
