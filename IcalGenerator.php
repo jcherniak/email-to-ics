@@ -71,92 +71,32 @@ class IcalGenerator {
 
     /**
      * Converts structured event data (from AI JSON) into an RFC 5545 ICS string using eluceo/ical.
+     * Handles both single events and arrays of events for multi-day support.
      *
-     * @param array $eventData Associative array conforming to the eventSchema.
+     * @param array $eventData Associative array conforming to the eventSchema, or array of such arrays.
      * @param string $fromEmail The sender email address for the organizer field.
      * @return string The generated ICS content.
      * @throws Exception If required fields are missing or dates are invalid.
      */
     public function convertJsonToIcs(array $eventData, string $fromEmail): string
     {
-        $tzid = $eventData['timezone'] ?? 'America/Los_Angeles';
-
-        if (empty($eventData['summary']) || empty($eventData['dtstart']) || empty($tzid)) {
-            throw new Exception('Missing required event data for ICS conversion (summary, dtstart, timezone).');
-        }
-
-        $isAllDay = $eventData['isAllDay'] ?? false;
-
         try {
-            // Use CustomEvent
-            $event = new CustomEvent();
-            $event->setSummary($eventData['summary']);
-
-            $description = str_replace('\\n', "\n", $eventData['description'] ?? '');
-            $event->setDescription($description);
-
-            // Preprocess and set HTML Description on CustomEvent
-            if (!empty($eventData['htmlDescription'])) {
-                $htmlDescription = trim($eventData['htmlDescription']); // Trim whitespace
-                $event->setHtmlDescription($htmlDescription);
-            }
-
-            // Set location if available
-            if (!empty($eventData['location'])) {
-                 $event->setLocation(new Location($eventData['location']));
-            }
-
-            // Set URL if available
-            if (!empty($eventData['url'])) {
-                $event->setUrl(new Uri($eventData['url']));
-            }
-
-            // Set organizer
-            $organizer = new Organizer(new EmailAddress($fromEmail), 'Email-to-ICS');
-            $event->setOrganizer($organizer);
-
-            // Create DateTime objects with the correct timezone for start and end
-            $timezone = new DateTimeZone($tzid);
-
-            // Use DateTimeImmutable for safety
-            $startDate = new DateTimeImmutable($eventData['dtstart'], $timezone);
-
-            // Set end time
-            if (!empty($eventData['dtend'])) {
-                $endDate = new DateTimeImmutable($eventData['dtend'], $timezone);
-            } else {
-                // Calculate default duration if DTEND is missing and not all-day
-                $endDate = clone $startDate;
-                if (!$isAllDay) {
-                    $durationHours = 2;
-                    if (stripos($eventData['summary'], 'opera') !== false) $durationHours = 3;
-                    elseif (stripos($eventData['summary'], 'doctor') !== false ||
-                            stripos($eventData['summary'], 'appointment') !== false) $durationHours = 0.5;
-                    $endDate = $endDate->modify('+' . ($durationHours * 3600) . ' seconds');
-                }
-            }
-
-            // Handle different event types (all-day vs timed)
-            if ($isAllDay) {
-                $startDateObj = new ICalDate($startDate);
-                if (!empty($eventData['dtend'])) {
-                    $endDateObj = new ICalDate($endDate);
-                    $occurrence = new MultiDay($startDateObj, $endDateObj);
-                } else {
-                    $occurrence = new SingleDay($startDateObj);
+            // Check if eventData is an array of events (multi-day) or single event
+            $isMultipleEvents = isset($eventData[0]) && is_array($eventData[0]);
+            
+            if ($isMultipleEvents) {
+                // Handle multiple events
+                $events = [];
+                foreach ($eventData as $singleEventData) {
+                    $events[] = $this->createEventFromData($singleEventData, $fromEmail);
                 }
             } else {
-                $occurrence = new TimeSpan(
-                    new ICalDateTime($startDate, true),
-                    new ICalDateTime($endDate, true)
-                );
+                // Handle single event
+                $events = [$this->createEventFromData($eventData, $fromEmail)];
             }
 
-            // Set the occurrence to the event
-            $event->setOccurrence($occurrence);
-
-            // Create a calendar domain entity and add the event
-            $calendar = new Calendar([$event]);
+            // Create a calendar domain entity and add all events
+            $calendar = new Calendar($events);
 
             // Use Custom Factories
             $eventFactory = new CustomEventFactory();
@@ -174,5 +114,93 @@ class IcalGenerator {
             error_log("Error creating iCalendar: " . $e->getMessage() . "\nEvent Data: " . json_encode($eventData) . "\nTrace: " . $e->getTraceAsString());
             throw new Exception("Error creating iCalendar: " . $e->getMessage(), 0, $e);
         }
+    }
+
+    /**
+     * Creates a single CustomEvent from event data array.
+     *
+     * @param array $eventData Single event data array
+     * @param string $fromEmail The sender email address for the organizer field
+     * @return CustomEvent The created event
+     * @throws Exception If required fields are missing or dates are invalid
+     */
+    private function createEventFromData(array $eventData, string $fromEmail): CustomEvent
+    {
+        $tzid = $eventData['timezone'] ?? 'America/Los_Angeles';
+
+        if (empty($eventData['summary']) || empty($eventData['dtstart']) || empty($tzid)) {
+            throw new Exception('Missing required event data for ICS conversion (summary, dtstart, timezone).');
+        }
+
+        $isAllDay = $eventData['isAllDay'] ?? false;
+
+        // Use CustomEvent
+        $event = new CustomEvent();
+        $event->setSummary($eventData['summary']);
+
+        $description = str_replace('\\n', "\n", $eventData['description'] ?? '');
+        $event->setDescription($description);
+
+        // Preprocess and set HTML Description on CustomEvent
+        if (!empty($eventData['htmlDescription'])) {
+            $htmlDescription = trim($eventData['htmlDescription']); // Trim whitespace
+            $event->setHtmlDescription($htmlDescription);
+        }
+
+        // Set location if available
+        if (!empty($eventData['location'])) {
+             $event->setLocation(new Location($eventData['location']));
+        }
+
+        // Set URL if available
+        if (!empty($eventData['url'])) {
+            $event->setUrl(new Uri($eventData['url']));
+        }
+
+        // Set organizer
+        $organizer = new Organizer(new EmailAddress($fromEmail), 'Email-to-ICS');
+        $event->setOrganizer($organizer);
+
+        // Create DateTime objects with the correct timezone for start and end
+        $timezone = new DateTimeZone($tzid);
+
+        // Use DateTimeImmutable for safety
+        $startDate = new DateTimeImmutable($eventData['dtstart'], $timezone);
+
+        // Set end time
+        if (!empty($eventData['dtend'])) {
+            $endDate = new DateTimeImmutable($eventData['dtend'], $timezone);
+        } else {
+            // Calculate default duration if DTEND is missing and not all-day
+            $endDate = clone $startDate;
+            if (!$isAllDay) {
+                $durationHours = 2;
+                if (stripos($eventData['summary'], 'opera') !== false) $durationHours = 3;
+                elseif (stripos($eventData['summary'], 'doctor') !== false ||
+                        stripos($eventData['summary'], 'appointment') !== false) $durationHours = 0.5;
+                $endDate = $endDate->modify('+' . ($durationHours * 3600) . ' seconds');
+            }
+        }
+
+        // Handle different event types (all-day vs timed)
+        if ($isAllDay) {
+            $startDateObj = new ICalDate($startDate);
+            if (!empty($eventData['dtend'])) {
+                $endDateObj = new ICalDate($endDate);
+                $occurrence = new MultiDay($startDateObj, $endDateObj);
+            } else {
+                $occurrence = new SingleDay($startDateObj);
+            }
+        } else {
+            $occurrence = new TimeSpan(
+                new ICalDateTime($startDate, true),
+                new ICalDateTime($endDate, true)
+            );
+        }
+
+        // Set the occurrence to the event
+        $event->setOccurrence($occurrence);
+
+        return $event;
     }
 } 
