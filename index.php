@@ -430,8 +430,15 @@ TEXT;
 
             // --- Revised Check for Valid Event Data ---
             $isEventDataValid = false; // Assume invalid initially
-            if (isset($eventDataValue) && is_array($eventDataValue) && !empty($eventDataValue['summary'])) {
-                 $isEventDataValid = true;
+            if (isset($eventDataValue) && is_array($eventDataValue)) {
+                // Check for single event (has 'summary' key directly)
+                if (!empty($eventDataValue['summary'])) {
+                    $isEventDataValid = true;
+                }
+                // Check for multiple events (array of events)
+                elseif (isset($eventDataValue[0]) && is_array($eventDataValue[0]) && !empty($eventDataValue[0]['summary'])) {
+                    $isEventDataValid = true;
+                }
             }
             // Log the result of this simplified check
             errlog("eventData validity check result: " . ($isEventDataValid ? 'VALID' : 'INVALID'));
@@ -919,8 +926,15 @@ HasBody:
 
             // --- Revised Check for Valid Event Data ---
             $isEventDataValid = false; // Assume invalid initially
-            if (isset($eventDataValue) && is_array($eventDataValue) && !empty($eventDataValue['summary'])) {
-                 $isEventDataValid = true;
+            if (isset($eventDataValue) && is_array($eventDataValue)) {
+                // Check for single event (has 'summary' key directly)
+                if (!empty($eventDataValue['summary'])) {
+                    $isEventDataValid = true;
+                }
+                // Check for multiple events (array of events)
+                elseif (isset($eventDataValue[0]) && is_array($eventDataValue[0]) && !empty($eventDataValue[0]['summary'])) {
+                    $isEventDataValid = true;
+                }
             }
             // Log the result of this simplified check
             errlog("eventData validity check result (Postmark): " . ($isEventDataValid ? 'VALID' : 'INVALID'));
@@ -1577,7 +1591,22 @@ PROMPT;
                 */
 			}
 
-			if (empty($ret['eventData']['summary'] ?? null)) {
+			// Check for valid eventData structure (single event or array of events)
+			$eventData = $ret['eventData'] ?? null;
+			$hasValidEventData = false;
+			
+			if (is_array($eventData)) {
+				// Check for single event (has 'summary' key directly)
+				if (!empty($eventData['summary'])) {
+					$hasValidEventData = true;
+				}
+				// Check for multiple events (array of events)
+				elseif (isset($eventData[0]) && is_array($eventData[0]) && !empty($eventData[0]['summary'])) {
+					$hasValidEventData = true;
+				}
+			}
+			
+			if (!$hasValidEventData) {
 				errlog("AI response missing required 'eventData.summary'. JSON: {$jsonData}");
                 throw new \RuntimeException("AI response missing required 'eventData.summary'. JSON: {$jsonData}");
 			}
@@ -1622,13 +1651,16 @@ PROMPT;
 			$eventData = $eventDetails['eventData'];
 			
 			// Extract date from dtstart (e.g., "2024-10-28T06:30:00" -> "2024-10-28")
-			if (!empty($eventData['dtstart'])) {
-				$eventDate = substr($eventData['dtstart'], 0, 10);
+			// Get first event's data for filename (whether single event or array of events)
+			$firstEvent = isset($eventData[0]) && is_array($eventData[0]) ? $eventData[0] : $eventData;
+			
+			if (!empty($firstEvent['dtstart'])) {
+				$eventDate = substr($firstEvent['dtstart'], 0, 10);
 			}
 			
 			// Clean the summary for use in filename
-			if (!empty($eventData['summary'])) {
-				$eventSummary = $eventData['summary'];
+			if (!empty($firstEvent['summary'])) {
+				$eventSummary = $firstEvent['summary'];
 				// Remove special characters and replace spaces with hyphens
 				$eventSummary = preg_replace('/[^a-zA-Z0-9\-_\s]/', '', $eventSummary);
 				$eventSummary = preg_replace('/\s+/', '-', trim($eventSummary));

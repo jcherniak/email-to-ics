@@ -398,43 +398,10 @@ ${html}`;
     }
 
     async generateICS(eventData, tentative, multiday) {
-        // Manual ICS generation since ical.js may not be available in service worker
-        const uid = this.generateUID();
-        const now = new Date();
-        const timestamp = now.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+        // Handle both single events and arrays of events
+        const events = Array.isArray(eventData) ? eventData : [eventData];
         
-        // Parse dates
-        const startDate = new Date(eventData.start_date + (eventData.start_time ? `T${eventData.start_time}:00` : 'T00:00:00'));
-        let endDate;
-        
-        if (eventData.end_date && eventData.end_time) {
-            endDate = new Date(eventData.end_date + `T${eventData.end_time}:00`);
-        } else if (eventData.end_date) {
-            endDate = new Date(eventData.end_date + 'T23:59:59');
-        } else if (eventData.start_time === null) {
-            // All-day event, end next day
-            endDate = new Date(startDate);
-            endDate.setDate(endDate.getDate() + 1);
-        } else {
-            // Default to 1 hour duration
-            endDate = new Date(startDate);
-            endDate.setHours(endDate.getHours() + 1);
-        }
-        
-        // Format dates for ICS
-        const formatDate = (date, allDay = false) => {
-            if (allDay) {
-                return date.toISOString().split('T')[0].replace(/-/g, '');
-            } else {
-                return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-            }
-        };
-        
-        const isAllDay = eventData.start_time === null;
-        const dtstart = isAllDay ? formatDate(startDate, true) : formatDate(startDate);
-        const dtend = isAllDay ? formatDate(endDate, true) : formatDate(endDate);
-        
-        // Escape text for ICS format
+        // Helper functions
         const escapeText = (text) => {
             if (!text) return '';
             return text.replace(/\\/g, '\\\\')
@@ -444,56 +411,96 @@ ${html}`;
                       .replace(/\r/g, '');
         };
         
-        // Build ICS content
+        const formatDate = (date, allDay = false) => {
+            if (allDay) {
+                return date.toISOString().split('T')[0].replace(/-/g, '');
+            } else {
+                return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+            }
+        };
+        
+        // Start building ICS content
         let icsContent = [
             'BEGIN:VCALENDAR',
             'VERSION:2.0',
             'PRODID:-//Email to ICS Extension//EN',
             'CALSCALE:GREGORIAN',
-            'METHOD:REQUEST',
-            'BEGIN:VEVENT',
-            `UID:${uid}`,
-            `DTSTAMP:${timestamp}`,
-            `CREATED:${timestamp}`,
-            `LAST-MODIFIED:${timestamp}`,
-            `SUMMARY:${escapeText(eventData.summary)}`,
+            'METHOD:REQUEST'
         ];
         
-        // Add optional fields
-        if (eventData.description) {
-            icsContent.push(`DESCRIPTION:${escapeText(eventData.description)}`);
+        // Add each event
+        for (const singleEvent of events) {
+            const uid = this.generateUID();
+            const now = new Date();
+            const timestamp = now.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+            
+            // Parse dates
+            const startDate = new Date(singleEvent.start_date + (singleEvent.start_time ? `T${singleEvent.start_time}:00` : 'T00:00:00'));
+            let endDate;
+            
+            if (singleEvent.end_date && singleEvent.end_time) {
+                endDate = new Date(singleEvent.end_date + `T${singleEvent.end_time}:00`);
+            } else if (singleEvent.end_date) {
+                endDate = new Date(singleEvent.end_date + 'T23:59:59');
+            } else if (singleEvent.start_time === null) {
+                // All-day event, end next day
+                endDate = new Date(startDate);
+                endDate.setDate(endDate.getDate() + 1);
+            } else {
+                // Default to 1 hour duration
+                endDate = new Date(startDate);
+                endDate.setHours(endDate.getHours() + 1);
+            }
+            
+            const isAllDay = singleEvent.start_time === null;
+            const dtstart = isAllDay ? formatDate(startDate, true) : formatDate(startDate);
+            const dtend = isAllDay ? formatDate(endDate, true) : formatDate(endDate);
+            
+            // Add event to ICS
+            icsContent.push('BEGIN:VEVENT');
+            icsContent.push(`UID:${uid}`);
+            icsContent.push(`DTSTAMP:${timestamp}`);
+            icsContent.push(`CREATED:${timestamp}`);
+            icsContent.push(`LAST-MODIFIED:${timestamp}`);
+            icsContent.push(`SUMMARY:${escapeText(singleEvent.summary)}`);
+            
+            // Add optional fields
+            if (singleEvent.description) {
+                icsContent.push(`DESCRIPTION:${escapeText(singleEvent.description)}`);
+            }
+            
+            if (singleEvent.location) {
+                icsContent.push(`LOCATION:${escapeText(singleEvent.location)}`);
+            }
+            
+            if (singleEvent.url) {
+                icsContent.push(`URL:${escapeText(singleEvent.url)}`);
+            }
+            
+            // Add dates
+            if (isAllDay) {
+                icsContent.push(`DTSTART;VALUE=DATE:${dtstart}`);
+                icsContent.push(`DTEND;VALUE=DATE:${dtend}`);
+            } else {
+                icsContent.push(`DTSTART:${dtstart}`);
+                icsContent.push(`DTEND:${dtend}`);
+            }
+            
+            // Add status
+            if (tentative) {
+                icsContent.push('STATUS:TENTATIVE');
+            } else {
+                icsContent.push('STATUS:CONFIRMED');
+            }
+            
+            // Add organizer if configured
+            if (this.fromEmail) {
+                icsContent.push(`ORGANIZER:mailto:${this.fromEmail}`);
+            }
+            
+            icsContent.push('END:VEVENT');
         }
         
-        if (eventData.location) {
-            icsContent.push(`LOCATION:${escapeText(eventData.location)}`);
-        }
-        
-        if (eventData.url) {
-            icsContent.push(`URL:${escapeText(eventData.url)}`);
-        }
-        
-        // Add dates
-        if (isAllDay) {
-            icsContent.push(`DTSTART;VALUE=DATE:${dtstart}`);
-            icsContent.push(`DTEND;VALUE=DATE:${dtend}`);
-        } else {
-            icsContent.push(`DTSTART:${dtstart}`);
-            icsContent.push(`DTEND:${dtend}`);
-        }
-        
-        // Add status
-        if (tentative) {
-            icsContent.push('STATUS:TENTATIVE');
-        } else {
-            icsContent.push('STATUS:CONFIRMED');
-        }
-        
-        // Add organizer if configured
-        if (this.fromEmail) {
-            icsContent.push(`ORGANIZER:mailto:${this.fromEmail}`);
-        }
-        
-        icsContent.push('END:VEVENT');
         icsContent.push('END:VCALENDAR');
         
         return icsContent.join('\r\n');
