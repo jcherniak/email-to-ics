@@ -13426,40 +13426,79 @@
       try {
         const jcalData = ICALmodule.parse(icsString);
         const vcalendar = new ICALmodule.Component(jcalData);
-        const vevent = vcalendar.getFirstSubcomponent("vevent");
-        if (!vevent) {
-          throw new Error("Could not find VEVENT component in ICS data.");
+        const vevents = vcalendar.getAllSubcomponents("vevent");
+        if (!vevents || vevents.length === 0) {
+          throw new Error("Could not find VEVENT component(s) in ICS data.");
         }
-        const event = new ICALmodule.Event(vevent);
-        let html = '<dl class="ics-details">';
+        let html = "";
+        if (vevents.length > 1) {
+          html += `<div class="alert alert-info mb-3">
+                    <strong>Multiple Events:</strong> ${vevents.length} events found
+                </div>`;
+        }
         const addProperty = (label, value) => {
           if (value) {
             const displayValue = String(value).replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\\\/g, "\\").replace(/\\n/g, "<br>");
-            html += `<dt>${label}:</dt><dd>${displayValue}</dd>`;
+            return `<dt>${label}:</dt><dd>${displayValue}</dd>`;
           }
+          return "";
         };
-        addProperty("Event", event.summary);
-        addProperty("Location", event.location);
-        const startDate = event.startDate;
-        const endDate = event.endDate;
-        if (startDate) {
-          try {
-            addProperty("Start", startDate.toJSDate().toLocaleString());
-          } catch (dateError) {
-            console.warn("Could not format start date:", dateError);
-            addProperty("Start", startDate.toString());
+        if (vevents.length > 1) {
+          vevents.forEach((vevent, index) => {
+            const event = new ICALmodule.Event(vevent);
+            html += `<div class="event-card mb-3 border p-3 rounded">`;
+            html += `<h6 class="text-primary mb-2">Event ${index + 1}</h6>`;
+            html += '<dl class="ics-details mb-0">';
+            html += addProperty("Event", event.summary);
+            html += addProperty("Location", event.location);
+            const startDate = event.startDate;
+            const endDate = event.endDate;
+            if (startDate) {
+              try {
+                html += addProperty("Start", startDate.toJSDate().toLocaleString());
+              } catch (dateError) {
+                console.warn("Could not format start date:", dateError);
+                html += addProperty("Start", startDate.toString());
+              }
+            }
+            if (endDate) {
+              try {
+                html += addProperty("End", endDate.toJSDate().toLocaleString());
+              } catch (dateError) {
+                console.warn("Could not format end date:", dateError);
+                html += addProperty("End", endDate.toString());
+              }
+            }
+            html += addProperty("Description", event.description);
+            html += "</dl>";
+            html += "</div>";
+          });
+        } else {
+          const event = new ICALmodule.Event(vevents[0]);
+          html += '<dl class="ics-details">';
+          html += addProperty("Event", event.summary);
+          html += addProperty("Location", event.location);
+          const startDate = event.startDate;
+          const endDate = event.endDate;
+          if (startDate) {
+            try {
+              html += addProperty("Start", startDate.toJSDate().toLocaleString());
+            } catch (dateError) {
+              console.warn("Could not format start date:", dateError);
+              html += addProperty("Start", startDate.toString());
+            }
           }
-        }
-        if (endDate) {
-          try {
-            addProperty("End", endDate.toJSDate().toLocaleString());
-          } catch (dateError) {
-            console.warn("Could not format end date:", dateError);
-            addProperty("End", endDate.toString());
+          if (endDate) {
+            try {
+              html += addProperty("End", endDate.toJSDate().toLocaleString());
+            } catch (dateError) {
+              console.warn("Could not format end date:", dateError);
+              html += addProperty("End", endDate.toString());
+            }
           }
+          html += addProperty("Description", event.description);
+          html += "</dl>";
         }
-        addProperty("Description", event.description);
-        html += "</dl>";
         html += "<details><summary>Raw ICS Data</summary><pre>";
         html += icsString.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         html += "</pre></details>";

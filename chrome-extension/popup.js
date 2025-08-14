@@ -1527,15 +1527,20 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const jcalData = ICAL.parse(icsString);
             const vcalendar = new ICAL.Component(jcalData);
-            const vevent = vcalendar.getFirstSubcomponent('vevent');
+            const vevents = vcalendar.getAllSubcomponents('vevent');
 
-            if (!vevent) {
-                throw new Error('Could not find VEVENT component in ICS data.');
+            if (!vevents || vevents.length === 0) {
+                throw new Error('Could not find VEVENT component(s) in ICS data.');
             }
 
-            const event = new ICAL.Event(vevent);
-
-            let html = '<dl class="ics-details">';
+            let html = '';
+            
+            // Handle multiple events (multi-day support)
+            if (vevents.length > 1) {
+                html += `<div class="alert alert-info mb-3">
+                    <strong>Multiple Events:</strong> ${vevents.length} events found
+                </div>`;
+            }
 
             // Helper to add property if it exists
             const addProperty = (label, value) => {
@@ -1546,36 +1551,79 @@ document.addEventListener('DOMContentLoaded', function() {
                         .replace(/\\;/g, ';')
                         .replace(/\\\\/g, '\\')
                         .replace(/\\n/g, '<br>'); // Convert escaped newlines to HTML breaks
-                    html += `<dt>${label}:</dt><dd>${displayValue}</dd>`;
+                    return `<dt>${label}:</dt><dd>${displayValue}</dd>`;
                 }
+                return '';
             };
 
-            addProperty('Event', event.summary);
-            addProperty('Location', event.location);
-
-            // Format dates using toJSDate().toLocaleString() for better readability
-            const startDate = event.startDate;
-            const endDate = event.endDate;
-            if (startDate) {
-                try {
-                    addProperty('Start', startDate.toJSDate().toLocaleString());
-                } catch(dateError) {
-                    console.warn("Could not format start date:", dateError);
-                    addProperty('Start', startDate.toString()); // Fallback to basic string
+            // Process events (single or multiple)
+            if (vevents.length > 1) {
+                // Multiple events
+                vevents.forEach((vevent, index) => {
+                    const event = new ICAL.Event(vevent);
+                    
+                    html += `<div class="event-card mb-3 border p-3 rounded">`;
+                    html += `<h6 class="text-primary mb-2">Event ${index + 1}</h6>`;
+                    html += '<dl class="ics-details mb-0">';
+                    
+                    html += addProperty('Event', event.summary);
+                    html += addProperty('Location', event.location);
+                    
+                    // Format dates
+                    const startDate = event.startDate;
+                    const endDate = event.endDate;
+                    if (startDate) {
+                        try {
+                            html += addProperty('Start', startDate.toJSDate().toLocaleString());
+                        } catch(dateError) {
+                            console.warn("Could not format start date:", dateError);
+                            html += addProperty('Start', startDate.toString());
+                        }
+                    }
+                    if (endDate) {
+                         try {
+                            html += addProperty('End', endDate.toJSDate().toLocaleString());
+                         } catch(dateError) {
+                            console.warn("Could not format end date:", dateError);
+                            html += addProperty('End', endDate.toString());
+                        }
+                    }
+                    
+                    html += addProperty('Description', event.description);
+                    html += '</dl>';
+                    html += '</div>';
+                });
+            } else {
+                // Single event (legacy display)
+                const event = new ICAL.Event(vevents[0]);
+                
+                html += '<dl class="ics-details">';
+                html += addProperty('Event', event.summary);
+                html += addProperty('Location', event.location);
+                
+                // Format dates
+                const startDate = event.startDate;
+                const endDate = event.endDate;
+                if (startDate) {
+                    try {
+                        html += addProperty('Start', startDate.toJSDate().toLocaleString());
+                    } catch(dateError) {
+                        console.warn("Could not format start date:", dateError);
+                        html += addProperty('Start', startDate.toString());
+                    }
                 }
-            }
-            if (endDate) {
-                 try {
-                    addProperty('End', endDate.toJSDate().toLocaleString());
-                 } catch(dateError) {
-                    console.warn("Could not format end date:", dateError);
-                    addProperty('End', endDate.toString()); // Fallback to basic string
+                if (endDate) {
+                     try {
+                        html += addProperty('End', endDate.toJSDate().toLocaleString());
+                     } catch(dateError) {
+                        console.warn("Could not format end date:", dateError);
+                        html += addProperty('End', endDate.toString());
+                    }
                 }
+                
+                html += addProperty('Description', event.description);
+                html += '</dl>';
             }
-
-            addProperty('Description', event.description);
-
-            html += '</dl>';
 
             // Add the raw ICS for debugging (collapsible)
             html += '<details><summary>Raw ICS Data</summary><pre>';
