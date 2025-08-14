@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "iOS Orion API Test PoC",
+  "version": "1.0.0",
+  "description": "Test WebExtensions API compatibility for iOS Orion",
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Test Orion APIs"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": false
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

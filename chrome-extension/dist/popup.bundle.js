@@ -12549,7 +12549,36 @@
   enableDismissTrigger(Toast);
   defineJQueryPlugin(Toast);
 
+  // models-config.js
+  var ALLOWED_MODELS = [
+    { id: "openai/gpt-5", name: "GPT-5" },
+    { id: "openai/gpt-5-mini", name: "GPT-5 Mini" },
+    { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+    { id: "anthropic/claude-opus-4", name: "Claude Opus 4" },
+    { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4" },
+    { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+    { id: "openai/o3", name: "GPT-O3" },
+    { id: "openai/gpt-4.1", name: "GPT-4.1" },
+    { id: "openai/o3-pro", name: "GPT-O3 Pro" }
+  ];
+  var ALLOWED_MODEL_IDS = ALLOWED_MODELS.map((m) => m.id);
+  var PREFERRED_ORDER = [
+    "openai/gpt-5",
+    "openai/gpt-5-mini",
+    "google/gemini-2.5-pro",
+    "anthropic/claude-opus-4",
+    "anthropic/claude-sonnet-4",
+    "google/gemini-2.5-flash",
+    "openai/o3",
+    "openai/gpt-4.1",
+    "openai/o3-pro"
+  ];
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { ALLOWED_MODELS, ALLOWED_MODEL_IDS, PREFERRED_ORDER };
+  }
+
   // popup.js
+  window.ModelsConfig = { ALLOWED_MODELS, ALLOWED_MODEL_IDS, PREFERRED_ORDER };
   window.ICAL = ICALmodule;
   var baseUrl = "https://new.justin-c.com/email-to-ics";
   var targetUrl = `${baseUrl}/?display=email`;
@@ -12583,58 +12612,30 @@
     }
   }
   function getOfflineAllowedModels() {
-    return [
-      { id: "openai/gpt-5", name: "GPT-5" },
-      { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-      { id: "anthropic/claude-opus-4.1", name: "Claude Opus 4.1" },
-      { id: "anthropic/claude-3.7-sonnet:thinking", name: "Claude 3.7 Sonnet (Thinking)" },
-      { id: "google/gemini-2.5-flash:thinking", name: "Gemini 2.5 Flash (Thinking)" },
-      { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-      { id: "openai/o4-mini-high", name: "GPT-4 Mini High" },
-      { id: "openai/o3", name: "GPT-O3" },
-      { id: "openai/gpt-4.1", name: "GPT-4.1" },
-      { id: "openai/o3-pro", name: "GPT-O3 Pro" }
-    ];
+    if (typeof window.ModelsConfig === "undefined" || !window.ModelsConfig.ALLOWED_MODELS) {
+      throw new Error("Shared model configuration not loaded - models-config.js import failed");
+    }
+    return window.ModelsConfig.ALLOWED_MODELS;
   }
   function filterAllowedModels(allModels) {
-    const allowedModelIds = [
-      "openai/gpt-5",
-      "anthropic/claude-3.7-sonnet:thinking",
-      "google/gemini-2.5-flash:thinking",
-      "google/gemini-2.5-flash",
-      "openai/o4-mini-high",
-      "openai/o3",
-      "openai/gpt-4.1",
-      "google/gemini-2.5-pro",
-      "anthropic/claude-opus-4.1",
-      "openai/o3-pro"
-    ];
+    if (typeof window.ModelsConfig === "undefined" || !window.ModelsConfig.ALLOWED_MODEL_IDS || !window.ModelsConfig.PREFERRED_ORDER) {
+      throw new Error("Shared model configuration not loaded - models-config.js import failed");
+    }
+    const { ALLOWED_MODEL_IDS: ALLOWED_MODEL_IDS2, PREFERRED_ORDER: PREFERRED_ORDER2, ALLOWED_MODELS: ALLOWED_MODELS2 } = window.ModelsConfig;
     const filteredModels = allModels.filter(
-      (model) => allowedModelIds.includes(model.id)
+      (model) => ALLOWED_MODEL_IDS2.includes(model.id)
     );
     const foundIds = filteredModels.map((m) => m.id);
-    const missingIds = allowedModelIds.filter((id) => !foundIds.includes(id));
+    const missingIds = ALLOWED_MODEL_IDS2.filter((id) => !foundIds.includes(id));
     missingIds.forEach((id) => {
-      const fallbackModel = getOfflineAllowedModels().find((m) => m.id === id);
+      const fallbackModel = ALLOWED_MODELS2.find((m) => m.id === id);
       if (fallbackModel) {
         filteredModels.push(fallbackModel);
       }
     });
-    const preferredOrder = [
-      "openai/gpt-5",
-      "google/gemini-2.5-pro",
-      "anthropic/claude-opus-4.1",
-      "anthropic/claude-3.7-sonnet:thinking",
-      "google/gemini-2.5-flash:thinking",
-      "google/gemini-2.5-flash",
-      "openai/o4-mini-high",
-      "openai/o3",
-      "openai/gpt-4.1",
-      "openai/o3-pro"
-    ];
     return filteredModels.sort((a, b) => {
-      const aIndex = preferredOrder.indexOf(a.id);
-      const bIndex = preferredOrder.indexOf(b.id);
+      const aIndex = PREFERRED_ORDER2.indexOf(a.id);
+      const bIndex = PREFERRED_ORDER2.indexOf(b.id);
       return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
     });
   }
@@ -13420,21 +13421,26 @@
       disableForm(false);
     }
     function parseAndDisplayIcs(icsString) {
-      console.log("parseAndDisplayIcs (using ical.js) called - icsString length:", icsString ? icsString.length : "none");
+      console.log("\u{1F3A8} parseAndDisplayIcs v2.0 - Multi-day display support");
+      console.log("\u{1F4CF} ICS string length:", icsString ? icsString.length : "none");
       if (!icsString)
         return "<p>No ICS data available.</p>";
       try {
         const jcalData = ICALmodule.parse(icsString);
         const vcalendar = new ICALmodule.Component(jcalData);
         const vevents = vcalendar.getAllSubcomponents("vevent");
+        console.log("\u{1F50D} Found VEVENT components:", vevents.length);
         if (!vevents || vevents.length === 0) {
           throw new Error("Could not find VEVENT component(s) in ICS data.");
         }
         let html = "";
         if (vevents.length > 1) {
+          console.log("\u{1F3AD} Multi-event display mode activated");
           html += `<div class="alert alert-info mb-3">
                     <strong>Multiple Events:</strong> ${vevents.length} events found
                 </div>`;
+        } else {
+          console.log("\u{1F4C5} Single event display mode");
         }
         const addProperty = (label, value) => {
           if (value) {

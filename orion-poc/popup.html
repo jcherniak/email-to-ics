@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 350px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    .test-section {
+      margin-bottom: 16px;
+      padding: 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    .test-result {
+      margin: 8px 0;
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .success { background-color: #d4edda; color: #155724; }
+    .error { background-color: #f8d7da; color: #721c24; }
+    .warning { background-color: #fff3cd; color: #856404; }
+    button {
+      background: #007AFF;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin: 4px;
+    }
+    button:hover { background: #0056CC; }
+  </style>
+</head>
+<body>
+  <h3>iOS Orion API Test</h3>
+  
+  <div class="test-section">
+    <h4>Storage API Test</h4>
+    <button id="test-storage">Test Storage</button>
+    <div id="storage-result"></div>
+  </div>
+
+  <div class="test-section">
+    <h4>Page Content Access</h4>
+    <button id="test-content">Extract Page Content</button>
+    <div id="content-result"></div>
+  </div>
+
+  <div class="test-section">
+    <h4>Screenshot Test (Desktop Only)</h4>
+    <button id="test-screenshot">Test Screenshot</button>
+    <div id="screenshot-result"></div>
+  </div>
+
+  <div class="test-section">
+    <h4>Runtime Environment</h4>
+    <div id="env-info"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

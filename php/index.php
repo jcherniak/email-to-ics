@@ -1141,12 +1141,25 @@ HasBody:
             'additionalProperties' => false
         ];
 
+        // Support both single events and arrays for multi-day mode
+        $eventDataSchema = $allowMultiDay ? [
+            'oneOf' => [
+                $eventSchema, // Single event
+                [
+                    'type' => 'array',
+                    'items' => $eventSchema,
+                    'minItems' => 1,
+                    'description' => 'Array of events for multi-day mode'
+                ]
+            ]
+        ] : $eventSchema; // Single event only for non-multi-day
+
         $responseSchema = [
             'type' => 'object',
             'properties' => [
                 'success' => ['type' => 'boolean'],
                 'errorMessage' => ['type' => 'string'],
-                'eventData' => $eventSchema,
+                'eventData' => $eventDataSchema,
                 'emailSubject' => ['type' => 'string', 'description' => 'The generated summary, used for the email subject line.'],
                 'locationLookup' => ['type' => 'string', 'description' => 'Location string for Google Maps lookup.'],
             ],
@@ -1163,7 +1176,23 @@ HasBody:
             "MULTI-DAY MODE ENABLED: If you find multiple related events (like conference sessions, multi-day trips, festival schedules), extract ALL events as separate entries. Each event should have its own summary, dates, and details." :
             "SINGLE EVENT MODE: Focus on extracting ONLY the main/primary event. Ignore secondary or related events.";
 
-        $system = <<<PROMPT
+        // Load system prompt from JSON file
+        $systemPromptFile = __DIR__ . '/system_prompt.json';
+        $system = '';
+        
+        if (file_exists($systemPromptFile)) {
+            $systemPromptData = json_decode(file_get_contents($systemPromptFile), true);
+            if (isset($systemPromptData['system_prompt']) && is_array($systemPromptData['system_prompt'])) {
+                $system = implode("\n", $systemPromptData['system_prompt']);
+            } elseif (isset($systemPromptData['system_prompt'])) {
+                $system = $systemPromptData['system_prompt'];
+            }
+        }
+        
+        // Fallback if system prompt couldn't be loaded
+        if (empty($system)) {
+            errlog("Failed to load system prompt from JSON file, using fallback");
+            $system = <<<PROMPT
 Create calendar event data from the following email text or downloaded HTML.
 
 # PRIMARY EVENT IDENTIFICATION - READ THIS FIRST
