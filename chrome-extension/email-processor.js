@@ -299,11 +299,67 @@ class EmailProcessor {
     buildPrompt(html, instructions, url, screenshot, tentative, multiday) {
         // Strip tracking parameters from URL
         const cleanUrl = url ? this.stripTrackingParameters(url) : url;
+        
+        const multiDayInstructions = multiday ? 
+            `MULTI-DAY MODE ENABLED: Extract ALL related performances/sessions as SEPARATE events.
+
+When you see multiple performances like:
+- "Friday, October 3, 2025 at 7:30PM"
+- "Saturday, October 4, 2025 at 7:30PM" 
+- "Sunday, October 5, 2025 at 2:00PM"
+
+Create SEPARATE events for each performance, each with:
+- Same summary/title (e.g., "Gimeno Conducts Tchaikovsky 5")
+- Same location and description
+- Different start_date, start_time, end_date, end_time for each performance
+- Same timezone
+
+RETURN FORMAT FOR MULTI-DAY MODE: Return an ARRAY of event objects: [{event1}, {event2}, {event3}]
+
+This applies to:
+- Multiple concert performances  
+- Conference sessions across days
+- Festival events on different dates
+- Any scheduled performances of the same show` :
+            `SINGLE EVENT MODE: Focus on extracting ONLY the main/primary event. Ignore secondary or related events.`;
+            
         const basePrompt = `You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
 
 CRITICAL: You must respond with valid JSON only. No markdown, no explanations, just pure JSON.
 
-Extract event details from the provided content and return a JSON object with this exact structure:
+# PRIMARY EVENT IDENTIFICATION
+Your primary task is to identify and extract events described in the content.
+
+${multiDayInstructions}
+
+# OUTPUT FORMAT
+${multiday ? 
+    `Return an ARRAY of event objects (one for each performance):
+[
+    {
+        "summary": "Event 1 title",
+        "location": "Event location",
+        "start_date": "2025-10-03",
+        "start_time": "19:30",
+        "end_date": "2025-10-03", 
+        "end_time": "21:30",
+        "description": "Event 1 description",
+        "timezone": "America/Los_Angeles",
+        "url": "Event URL"
+    },
+    {
+        "summary": "Event 2 title", 
+        "location": "Event location",
+        "start_date": "2025-10-04",
+        "start_time": "19:30",
+        "end_date": "2025-10-04",
+        "end_time": "21:30", 
+        "description": "Event 2 description",
+        "timezone": "America/Los_Angeles",
+        "url": "Event URL"
+    }
+]` :
+    `Return a single event object:
 {
     "summary": "Event title",
     "location": "Event location or empty string",
@@ -314,18 +370,18 @@ Extract event details from the provided content and return a JSON object with th
     "description": "Event description",
     "timezone": "America/New_York",
     "url": "Event URL or source URL"
+}`
 }
 
 Guidelines:
 - Use ISO 8601 date format (YYYY-MM-DD)
 - Use 24-hour time format (HH:MM)
-- If no end time specified, make reasonable estimate
-- Default timezone is America/New_York unless specified
+- If no end time specified, make reasonable estimate (2h default, 3h opera)
+- Default timezone is America/Los_Angeles unless specified
 - For all-day events, set start_time and end_time to null
-- Multi-day events: ${multiday ? 'Expected' : 'Not expected'}
 - Event status: ${tentative ? 'Tentative' : 'Confirmed'}
 - IMPORTANT: If a source URL is provided, include it in the "url" field
-- IMPORTANT: If a source URL is provided, also add it at the bottom of the description field with text "\n\nSource: [URL]"
+- IMPORTANT: If a source URL is provided, also add it at the bottom of the description field with text "\\n\\nSource: [URL]"
 
 ${instructions ? `Special instructions: ${instructions}\n` : ''}
 
