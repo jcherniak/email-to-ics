@@ -5,10 +5,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run clean && npm run build:shared-core && npm run build:popup && npm run copy-assets",
+    "build": "npm run clean && npm run build:shared-core && npm run build:popup && npm run build:content && npm run copy-assets",
     "build:shared-core": "cd ../shared-core && npm run build",
     "build:popup": "esbuild src/popup.ts --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --external:chrome --external:fs --external:path --external:ical-generator --define:global=globalThis --platform=browser",
-    "copy-assets": "cp node_modules/bootstrap/dist/css/bootstrap.min.css dist/ && cp src/popup.html dist/popup.html && cp manifest.json dist/ && cp -r icons dist/ 2>/dev/null || true",
+    "build:content": "esbuild src/content.ts --bundle --outfile=dist/content.js --format=iife --sourcemap --external:chrome --platform=browser",
+    "copy-assets": "cp node_modules/bootstrap/dist/css/bootstrap.min.css dist/ && cp src/popup.html dist/popup.html && cp src/background.js dist/ && cp manifest.json dist/ && cp -r icons dist/ 2>/dev/null || true",
     "watch": "npm run build:shared-core && esbuild src/popup.ts --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --watch --external:chrome",
     "clean": "rm -rf dist && mkdir -p dist"
   },

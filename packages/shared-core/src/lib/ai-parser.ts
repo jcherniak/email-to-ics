@@ -12,7 +12,7 @@ export class AiParserService {
   constructor(
     private adapters: PlatformAdapters,
     private apiKey: string,
-    private defaultModel: string = 'google/gemini-2.5-pro-preview'
+    private defaultModel: string = 'openai/gpt-5'
   ) {}
 
   /**

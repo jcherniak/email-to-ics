@@ -52,6 +52,21 @@ async function init() {
     // Initialize UI
     initializeUI();
     
+    // Check if we should show settings directly (from context menu)
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('settings') === 'true') {
+      showSettings();
+      updateStatus('Configure extension settings');
+      return;
+    }
+    
+    // Check if required settings are configured
+    if (!areRequiredSettingsConfigured()) {
+      // Auto-open settings dialog if any required settings are missing
+      showSettings();
+      updateStatus('Please configure all required settings to continue');
+    }
+    
     adapters.logger.info('Email-to-ICS extension initialized successfully');
   } catch (error) {
     console.error('Failed to initialize extension:', error);
@@ -69,7 +84,7 @@ async function loadSettings(): Promise<ExtensionSettings> {
     fromEmail: '',
     toTentativeEmail: '',
     toConfirmedEmail: '',
-    defaultModel: 'google/gemini-2.5-pro-preview'
+    defaultModel: 'openai/gpt-5'
   };
 
   try {
@@ -90,6 +105,23 @@ async function saveSettings(newSettings: Partial<ExtensionSettings>): Promise<vo
 }
 
 /**
+ * Check if all required settings are configured
+ */
+function areRequiredSettingsConfigured(): boolean {
+  const requiredFields = [
+    'openRouterKey',
+    'postmarkApiKey', 
+    'fromEmail',
+    'toConfirmedEmail'
+  ] as const;
+  
+  return requiredFields.every(field => {
+    const value = settings[field];
+    return value && value.trim().length > 0;
+  });
+}
+
+/**
  * Initialize UI components
  */
 function initializeUI() {
@@ -103,8 +135,25 @@ function initializeUI() {
   generateButton?.addEventListener('click', handleGenerateICS);
   settingsButton?.addEventListener('click', showSettings);
 
-  // Initial UI state
-  updateStatus('Ready to generate ICS files');
+  // Update UI state based on settings
+  updateUIForSettings();
+}
+
+/**
+ * Update UI state based on current settings
+ */
+function updateUIForSettings() {
+  const settingsConfigured = areRequiredSettingsConfigured();
+  
+  if (generateButton) {
+    generateButton.disabled = !settingsConfigured;
+  }
+  
+  if (settingsConfigured) {
+    updateStatus('Ready to generate ICS files');
+  } else {
+    updateStatus('Configure settings to get started', 'warning');
+  }
 }
 
 /**
@@ -119,6 +168,15 @@ async function handleGenerateICS() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab.id) {
       throw new Error('No active tab found');
+    }
+
+    // Try to create in-page dialog first, fallback to popup processing
+    try {
+      await createInPageDialog(tab.id);
+      return;
+    } catch (error) {
+      adapters.logger.warn('In-page dialog failed, using popup mode:', error);
+      // Continue with popup processing below
     }
 
     // Capture page content and screenshot
@@ -139,7 +197,7 @@ async function handleGenerateICS() {
       model: settings.defaultModel
     });
 
-    if (!result.success || !result.events || result.events.length === 0) {
+    if (!result.events || result.events.length === 0) {
       throw new Error('No events found on this page');
     }
 
@@ -293,34 +351,41 @@ function showSettings() {
   contentDiv.innerHTML = `
     <div class="settings">
       <h3>Extension Settings</h3>
+      <p class="text-muted">All fields marked with * are required</p>
       <form id="settings-form">
         <div class="mb-3">
-          <label for="openrouter-key" class="form-label">OpenRouter API Key</label>
-          <input type="password" class="form-control" id="openrouter-key" value="${settings.openRouterKey}">
+          <label for="openrouter-key" class="form-label">OpenRouter API Key *</label>
+          <input type="password" class="form-control" id="openrouter-key" value="${settings.openRouterKey}" required>
+          <div class="form-text">Get your API key from <a href="https://openrouter.ai/keys" target="_blank">OpenRouter</a></div>
         </div>
         
         <div class="mb-3">
-          <label for="postmark-key" class="form-label">Postmark API Key</label>
-          <input type="password" class="form-control" id="postmark-key" value="${settings.postmarkApiKey}">
+          <label for="postmark-key" class="form-label">Postmark API Key *</label>
+          <input type="password" class="form-control" id="postmark-key" value="${settings.postmarkApiKey}" required>
+          <div class="form-text">Get your API key from <a href="https://account.postmarkapp.com/api_tokens" target="_blank">Postmark</a></div>
         </div>
         
         <div class="mb-3">
-          <label for="from-email" class="form-label">From Email</label>
-          <input type="email" class="form-control" id="from-email" value="${settings.fromEmail}">
+          <label for="from-email" class="form-label">From Email *</label>
+          <input type="email" class="form-control" id="from-email" value="${settings.fromEmail}" required>
+          <div class="form-text">Must be verified in your Postmark account</div>
         </div>
         
         <div class="mb-3">
-          <label for="to-email" class="form-label">To Email</label>
-          <input type="email" class="form-control" id="to-email" value="${settings.toConfirmedEmail}">
+          <label for="to-email" class="form-label">To Email *</label>
+          <input type="email" class="form-control" id="to-email" value="${settings.toConfirmedEmail}" required>
+          <div class="form-text">Where calendar invites will be sent</div>
         </div>
-        
         
         <div class="mb-3">
           <label for="default-model" class="form-label">Default AI Model</label>
           <select class="form-control" id="default-model">
-            <option value="google/gemini-2.5-pro-preview" ${settings.defaultModel === 'google/gemini-2.5-pro-preview' ? 'selected' : ''}>Gemini 2.5 Pro</option>
-            <option value="openai/gpt-4o-mini" ${settings.defaultModel === 'openai/gpt-4o-mini' ? 'selected' : ''}>GPT-4o Mini</option>
-            <option value="anthropic/claude-3.7-sonnet:thinking" ${settings.defaultModel === 'anthropic/claude-3.7-sonnet:thinking' ? 'selected' : ''}>Claude 3.7 Sonnet</option>
+            <option value="openai/gpt-5" ${settings.defaultModel === 'openai/gpt-5' ? 'selected' : ''}>GPT-5</option>
+            <option value="anthropic/claude-sonnet-4" ${settings.defaultModel === 'anthropic/claude-sonnet-4' ? 'selected' : ''}>Claude Sonnet 4</option>
+            <option value="google/gemini-2.5-pro" ${settings.defaultModel === 'google/gemini-2.5-pro' ? 'selected' : ''}>Gemini 2.5 Pro</option>
+            <option value="openai/o3" ${settings.defaultModel === 'openai/o3' ? 'selected' : ''}>OpenAI o3</option>
+            <option value="anthropic/claude-opus-4.1" ${settings.defaultModel === 'anthropic/claude-opus-4.1' ? 'selected' : ''}>Claude Opus 4.1</option>
+            <option value="openai/o4-mini-high" ${settings.defaultModel === 'openai/o4-mini-high' ? 'selected' : ''}>OpenAI o4 Mini High</option>
           </select>
         </div>
         
@@ -333,8 +398,13 @@ function showSettings() {
   // Add form event listeners
   document.getElementById('settings-form')?.addEventListener('submit', handleSaveSettings);
   document.getElementById('back-button')?.addEventListener('click', () => {
-    contentDiv.innerHTML = '';
-    updateStatus('Ready to generate ICS files');
+    // Only allow going back if all required settings are configured
+    if (areRequiredSettingsConfigured()) {
+      contentDiv.innerHTML = '';
+      updateUIForSettings();
+    } else {
+      updateStatus('Please configure all required settings before continuing', 'warning');
+    }
   });
 }
 
@@ -346,27 +416,48 @@ async function handleSaveSettings(event: Event) {
   
   try {
     const form = event.target as HTMLFormElement;
-    const formData = new FormData(form);
     
     const newSettings: Partial<ExtensionSettings> = {
-      openRouterKey: (document.getElementById('openrouter-key') as HTMLInputElement).value,
-      postmarkApiKey: (document.getElementById('postmark-key') as HTMLInputElement).value,
-      fromEmail: (document.getElementById('from-email') as HTMLInputElement).value,
-      toConfirmedEmail: (document.getElementById('to-email') as HTMLInputElement).value,
+      openRouterKey: (document.getElementById('openrouter-key') as HTMLInputElement).value.trim(),
+      postmarkApiKey: (document.getElementById('postmark-key') as HTMLInputElement).value.trim(),
+      fromEmail: (document.getElementById('from-email') as HTMLInputElement).value.trim(),
+      toConfirmedEmail: (document.getElementById('to-email') as HTMLInputElement).value.trim(),
       defaultModel: (document.getElementById('default-model') as HTMLSelectElement).value
     };
+
+    // Validate required fields
+    const requiredFields = [
+      { key: 'openRouterKey', label: 'OpenRouter API Key' },
+      { key: 'postmarkApiKey', label: 'Postmark API Key' },
+      { key: 'fromEmail', label: 'From Email' },
+      { key: 'toConfirmedEmail', label: 'To Email' }
+    ];
+    
+    const missingFields = requiredFields.filter(field => 
+      !newSettings[field.key as keyof ExtensionSettings] || 
+      newSettings[field.key as keyof ExtensionSettings] === ''
+    );
+    
+    if (missingFields.length > 0) {
+      const missingLabels = missingFields.map(f => f.label).join(', ');
+      updateStatus(`Please fill in all required fields: ${missingLabels}`, 'error');
+      return;
+    }
 
     await saveSettings(newSettings);
     
     // Reinitialize AI parser with new settings
     aiParser = new AiParserService(adapters, settings.openRouterKey, settings.defaultModel);
     
-    updateStatus('Settings saved successfully');
+    updateStatus('Settings saved successfully', 'success');
     
-    setTimeout(() => {
-      contentDiv.innerHTML = '';
-      updateStatus('Ready to generate ICS files');
-    }, 2000);
+    // Only allow going back if all required settings are now configured
+    if (areRequiredSettingsConfigured()) {
+      setTimeout(() => {
+        contentDiv.innerHTML = '';
+        updateUIForSettings();
+      }, 2000);
+    }
     
   } catch (error) {
     showError('Failed to save settings: ' + (error instanceof Error ? error.message : String(error)));
@@ -389,6 +480,25 @@ function updateStatus(message: string, type: 'info' | 'error' | 'success' = 'inf
 function showError(message: string) {
   updateStatus(message, 'error');
   adapters?.logger.error(message);
+}
+
+
+/**
+ * Create an in-page dialog on the current tab
+ */
+async function createInPageDialog(tabId: number) {
+  try {
+    // Send message to content script to create dialog
+    await chrome.tabs.sendMessage(tabId, { action: 'createInPageDialog' });
+    
+    // Close the popup since we're now using in-page dialog
+    window.close();
+  } catch (error) {
+    adapters.logger.warn('Failed to create in-page dialog, falling back to popup mode:', error);
+    // Fall back to normal popup behavior
+    generateButton.disabled = false;
+    updateStatus('Using popup mode - click Generate ICS again');
+  }
 }
 
 // Initialize when DOM is ready
