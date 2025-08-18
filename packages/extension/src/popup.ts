@@ -810,7 +810,7 @@ ${pageData.html}`;
     });
 
     openServerPageButton?.addEventListener('click', () => {
-        chrome.tabs.create({ url: 'chrome://extensions/' });
+        chrome.tabs.create({ url: 'http://localhost:3000/' });
     });
 
     // Listen for iframe initialization
