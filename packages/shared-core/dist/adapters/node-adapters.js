@@ -1,4 +1,4 @@
-import { BaseTimeAdapter, ConsoleLoggerAdapter } from './base-adapters';
+import { BaseTimeAdapter, ConsoleLoggerAdapter } from './base-adapters.js';
 /**
  * Node.js HTTP client using fetch (Node 18+)
  */

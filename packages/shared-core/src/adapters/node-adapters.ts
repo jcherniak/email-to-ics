@@ -5,8 +5,8 @@ import {
   StorageAdapter, 
   CryptoAdapter,
   PlatformAdapters 
-} from '../types/adapters';
-import { BaseTimeAdapter, ConsoleLoggerAdapter } from './base-adapters';
+} from '../types/adapters.js';
+import { BaseTimeAdapter, ConsoleLoggerAdapter } from './base-adapters.js';
 
 /**
  * Node.js HTTP client using fetch (Node 18+)

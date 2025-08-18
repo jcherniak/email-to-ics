@@ -1,4 +1,4 @@
-import { HttpClient, HttpOptions, HttpResponse, StorageAdapter, CryptoAdapter, PlatformAdapters } from '../types/adapters';
+import { HttpClient, HttpOptions, HttpResponse, StorageAdapter, CryptoAdapter, PlatformAdapters } from '../types/adapters.js';
 /**
  * Browser HTTP client using fetch API
  */

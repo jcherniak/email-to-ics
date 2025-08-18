@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { ParsingInput, ExtractionResult, EventData, EventDataSchema } from '../types/event';
-import { PlatformAdapters } from '../types/adapters';
+import { ParsingInput, ExtractionResult, EventData, EventDataSchema } from '../types/event.js';
+import { PlatformAdapters } from '../types/adapters.js';
 
 /**
  * AI Parser service for extracting events from content using OpenRouter API

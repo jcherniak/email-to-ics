@@ -1,3 +1,3 @@
-export * from './node-adapters';
-export * from './browser-adapters';
-export * from './base-adapters';
+export * from './node-adapters.js';
+export * from './browser-adapters.js';
+export * from './base-adapters.js';

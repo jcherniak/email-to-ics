@@ -1,0 +1,40 @@
+{
+  "name": "@email-to-ics/server",
+  "version": "2.0.0",
+  "description": "Node.js Fastify server for email-to-ICS with SQLite caching",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint src/**/*.ts",
+    "test": "vitest",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@email-to-ics/shared-core": "file:../shared-core",
+    "@fastify/cors": "^8.4.0",
+    "@fastify/env": "^4.2.0",
+    "@fastify/multipart": "^8.0.0",
+    "@fastify/static": "^6.12.0",
+    "dotenv": "^17.2.1",
+    "fastify": "^4.24.0",
+    "pino-pretty": "^13.1.1",
+    "postmark": "^4.0.0",
+    "sqlite3": "^5.1.7",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/sqlite3": "^3.1.11",
+    "eslint": "^8.57.0",
+    "tsx": "^4.6.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "files": [
+    "dist"
+  ]
+}

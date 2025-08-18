@@ -1,5 +1,5 @@
-import { ParsingInput, ExtractionResult } from '../types/event';
-import { PlatformAdapters } from '../types/adapters';
+import { ParsingInput, ExtractionResult } from '../types/event.js';
+import { PlatformAdapters } from '../types/adapters.js';
 /**
  * AI Parser service for extracting events from content using OpenRouter API
  * Maintains compatibility with PHP EmailProcessor logic

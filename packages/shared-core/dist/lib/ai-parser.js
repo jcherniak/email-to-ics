@@ -1,4 +1,4 @@
-import { EventDataSchema } from '../types/event';
+import { EventDataSchema } from '../types/event.js';
 /**
  * AI Parser service for extracting events from content using OpenRouter API
  * Maintains compatibility with PHP EmailProcessor logic
