@@ -1,6 +1,6 @@
 
 > @email-to-ics/extension@2.0.0 build
-> npm run clean && npm run build:shared-core && npm run build:popup && npm run copy-assets
+> npm run clean && npm run build:shared-core && npm run build:popup && npm run build:content && npm run copy-assets
 
 
 > @email-to-ics/extension@2.0.0 clean
@@ -16,28 +16,23 @@
 
 
 > @email-to-ics/extension@2.0.0 build:popup
-> esbuild src/popup.ts --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --external:chrome --define:global=globalThis --platform=browser
+> esbuild src/popup.ts --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --external:chrome --external:fs --external:path --external:ical-generator --define:global=globalThis --platform=browser
 
-✘ [ERROR] Could not resolve "fs"
 
-    ../../node_modules/ical-generator/dist/index.js:60:65:
-      60 │ ...leSync as W,promises as q}from"fs";var F=(g=>(g.PUBLISH="PUBLIS...
-         ╵                                  ~~~~
+  dist/popup.bundle.js      161.5kb
+  dist/popup.bundle.js.map  300.2kb
 
-  The package "fs" wasn't found on the file system but is built into node. Are you trying to bundle for node? You can use "--platform=node" to do that, which will remove this error.
+⚡ Done in 14ms
 
-1 error
-npm error Lifecycle script `build:popup` failed with error:
-npm error code 1
-npm error path /Users/jcherniak/Code/email-to-ics/packages/extension
-npm error workspace @email-to-ics/extension@2.0.0
-npm error location /Users/jcherniak/Code/email-to-ics/packages/extension
-npm error command failed
-npm error command sh -c esbuild src/popup.ts --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --external:chrome --define:global=globalThis --platform=browser
-npm error Lifecycle script `build` failed with error:
-npm error code 1
-npm error path /Users/jcherniak/Code/email-to-ics/packages/extension
-npm error workspace @email-to-ics/extension@2.0.0
-npm error location /Users/jcherniak/Code/email-to-ics/packages/extension
-npm error command failed
-npm error command sh -c npm run clean && npm run build:shared-core && npm run build:popup && npm run copy-assets
+> @email-to-ics/extension@2.0.0 build:content
+> esbuild src/content.ts --bundle --outfile=dist/content.js --format=iife --sourcemap --external:chrome --platform=browser
+
+
+  dist/content.js      15.5kb
+  dist/content.js.map  25.9kb
+
+⚡ Done in 2ms
+
+> @email-to-ics/extension@2.0.0 copy-assets
+> cp node_modules/bootstrap/dist/css/bootstrap.min.css dist/ && cp src/popup.html dist/popup.html && cp src/background.js dist/ && cp manifest.json dist/ && cp -r icons dist/ 2>/dev/null || true
+

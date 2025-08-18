@@ -8,7 +8,7 @@ export class AiParserService {
     apiKey;
     defaultModel;
     openRouterUrl = 'https://openrouter.ai/api/v1/chat/completions';
-    constructor(adapters, apiKey, defaultModel = 'google/gemini-2.5-pro-preview') {
+    constructor(adapters, apiKey, defaultModel = 'openai/gpt-5') {
         this.adapters = adapters;
         this.apiKey = apiKey;
         this.defaultModel = defaultModel;

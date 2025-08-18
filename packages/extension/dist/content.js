@@ -1,22 +1,88 @@
-/**
- * Content script for Email-to-ICS Extension
- * Runs on all web pages to help with event extraction
- */
-
-// Listen for messages from popup or background script
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'getPageContent') {
-    // Extract page content for event processing
-    const content = {
-      html: document.documentElement.outerHTML,
-      text: document.body.innerText,
-      title: document.title,
-      url: window.location.href
+"use strict";
+(() => {
+  // src/content.ts
+  var emailToIcsFrame = null;
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === "toggle-iframe") {
+      if (emailToIcsFrame) {
+        removeIframe();
+      } else {
+        createIframe(message.selectedText);
+      }
+      sendResponse({ success: true });
+    } else if (message.action === "close-iframe") {
+      removeIframe();
+      sendResponse({ success: true });
+    } else if (message.action === "get-page-info") {
+      sendResponse({
+        url: window.location.href,
+        title: document.title,
+        html: document.documentElement.outerHTML,
+        text: document.body.innerText
+      });
+    }
+  });
+  function createIframe(selectedText) {
+    if (emailToIcsFrame) {
+      return;
+    }
+    const iframe = document.createElement("iframe");
+    iframe.id = "email-to-ics-iframe";
+    iframe.src = chrome.runtime.getURL("popup.html");
+    iframe.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    width: 450px;
+    height: 600px;
+    z-index: 2147483647;
+    background: white;
+    border: 3px solid #0d6efd;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    resize: both;
+    min-width: 350px;
+    min-height: 400px;
+  `;
+    document.body.appendChild(iframe);
+    emailToIcsFrame = iframe;
+    iframe.onload = () => {
+      iframe.contentWindow?.postMessage({
+        type: "INIT_FROM_CONTENT",
+        data: {
+          url: window.location.href,
+          title: document.title,
+          selectedText
+        }
+      }, "*");
     };
-    sendResponse(content);
   }
-});
-
-
-// Add visual indicator that extension is active
-console.log('Email-to-ICS extension content script loaded');
+  function removeIframe() {
+    if (emailToIcsFrame) {
+      emailToIcsFrame.remove();
+      emailToIcsFrame = null;
+    }
+  }
+  window.addEventListener("message", (event) => {
+    if (event.source === emailToIcsFrame?.contentWindow) {
+      if (event.data.type === "RESIZE_IFRAME") {
+        if (emailToIcsFrame) {
+          emailToIcsFrame.style.height = event.data.height + "px";
+        }
+      } else if (event.data.type === "CLOSE_IFRAME") {
+        removeIframe();
+      }
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "E") {
+      e.preventDefault();
+      if (emailToIcsFrame) {
+        removeIframe();
+      } else {
+        createIframe();
+      }
+    }
+  });
+})();
+//# sourceMappingURL=content.js.map

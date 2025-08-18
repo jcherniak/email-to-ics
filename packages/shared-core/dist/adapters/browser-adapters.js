@@ -56,7 +56,21 @@ export class ChromeStorageAdapter {
             throw new Error('Chrome storage API not available');
         }
         const result = await chrome.storage.local.get([key]);
-        return result[key] || null;
+        const item = result[key];
+        if (!item) {
+            return null;
+        }
+        // Check if item has metadata wrapper (from our set method)
+        if (typeof item === 'object' && item.value !== undefined) {
+            // Check expiration if present
+            if (item.expires && Date.now() > item.expires) {
+                await this.delete(key);
+                return null;
+            }
+            return item.value;
+        }
+        // Return item directly if it doesn't have our wrapper
+        return item;
     }
     async set(key, value, ttl) {
         if (typeof chrome === 'undefined' || !chrome.storage) {

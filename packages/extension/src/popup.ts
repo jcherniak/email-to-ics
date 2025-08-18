@@ -1,15 +1,11 @@
 /**
- * Chrome Extension Popup - Using Shared Core Library
- * Replaces the old EmailProcessor with the new shared architecture
+ * Chrome Extension Popup - Iframe-based with direct API calls
+ * Self-hosting architecture with review workflow caching
  */
 
 import { 
   createBrowserAdapters,
-  BrowserPlatformIcsGenerator,
-  AiParserService,
-  EventData,
-  ParsingInput,
-  ExtractionResult 
+  BrowserPlatformIcsGenerator
 } from '@email-to-ics/shared-core';
 
 // Extension configuration
@@ -22,56 +18,146 @@ interface ExtensionSettings {
   defaultModel: string;
 }
 
+// Review cache for in-memory review workflow
+interface ReviewCacheEntry {
+  timestamp: number;
+  originalData: any;
+  eventData: any;
+  icsContent: string;
+  settings: ExtensionSettings;
+  confirmationToken: string;
+}
+
 // Global state
 let adapters: ReturnType<typeof createBrowserAdapters>;
 let icsGenerator: BrowserPlatformIcsGenerator;
-let aiParser: AiParserService;
 let settings: ExtensionSettings;
+let reviewCache = new Map<string, ReviewCacheEntry>();
+let currentPageInfo: any = null;
+let selectedText: string = '';
+let isInIframe = false;
 
-// DOM elements
+// DOM elements (will be populated after DOM loads)
 let statusDiv: HTMLElement;
 let contentDiv: HTMLElement;
-let generateButton: HTMLButtonElement;
-let settingsButton: HTMLButtonElement;
+let processingDiv: HTMLElement;
+let formSection: HTMLElement;
+let reviewSection: HTMLElement;
 
 /**
  * Initialize the extension popup
  */
 async function init() {
   try {
-    // Initialize platform adapters for Chrome extension
-    adapters = createBrowserAdapters();
+    // Detect if running in iframe
+    isInIframe = window.self !== window.top;
     
-    // Load settings from Chrome storage
+    // Initialize platform adapters
+    adapters = createBrowserAdapters();
+    icsGenerator = new BrowserPlatformIcsGenerator(adapters);
+    
+    // Load settings
     settings = await loadSettings();
     
-    // Initialize services with settings
-    icsGenerator = new BrowserPlatformIcsGenerator(adapters);
-    aiParser = new AiParserService(adapters, settings.openRouterKey, settings.defaultModel);
+    // Initialize DOM elements
+    initializeDOM();
     
-    // Initialize UI
-    initializeUI();
+    // Set up event listeners
+    setupEventListeners();
     
-    // Check if we should show settings directly (from context menu)
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('settings') === 'true') {
-      showSettings();
-      updateStatus('Configure extension settings');
-      return;
+    // Handle iframe initialization
+    if (isInIframe) {
+      setupIframeMessageHandling();
+      // Show close button for iframe
+      const closeControls = document.getElementById('close-controls');
+      if (closeControls) {
+        closeControls.style.display = 'block';
+      }
     }
     
-    // Check if required settings are configured
-    if (!areRequiredSettingsConfigured()) {
-      // Auto-open settings dialog if any required settings are missing
-      showSettings();
-      updateStatus('Please configure all required settings to continue');
-    }
+    // Check if settings are complete
+    await validateAndShowForm();
     
-    adapters.logger.info('Email-to-ICS extension initialized successfully');
   } catch (error) {
-    console.error('Failed to initialize extension:', error);
-    showError('Failed to initialize extension: ' + (error instanceof Error ? error.message : String(error)));
+    console.error('Initialization failed:', error);
+    showError(`Initialization failed: ${error.message}`);
   }
+}
+
+/**
+ * Initialize DOM elements and basic UI
+ */
+function initializeDOM() {
+  statusDiv = document.getElementById('status')!;
+  contentDiv = document.getElementById('content')!;
+  processingDiv = document.getElementById('processing-view')!;
+  formSection = document.getElementById('form-section')!;
+  reviewSection = document.getElementById('review-section')!;
+  
+  // Show loading initially
+  showStatus('Initializing...', 'info');
+}
+
+/**
+ * Set up event listeners for form interactions
+ */
+function setupEventListeners() {
+  // Convert to ICS button
+  const generateBtn = document.getElementById('generate-ics') as HTMLButtonElement;
+  generateBtn?.addEventListener('click', handleGenerateICS);
+  
+  // Cancel button
+  const cancelBtn = document.getElementById('cancel-processing') as HTMLButtonElement;
+  cancelBtn?.addEventListener('click', cancelProcessing);
+  
+  // Settings button
+  const settingsBtn = document.getElementById('open-settings') as HTMLButtonElement;
+  settingsBtn?.addEventListener('click', openSettings);
+  
+  // Review workflow buttons
+  const acceptBtn = document.getElementById('accept-review') as HTMLButtonElement;
+  acceptBtn?.addEventListener('click', acceptReview);
+  
+  const rejectBtn = document.getElementById('reject-review') as HTMLButtonElement;
+  rejectBtn?.addEventListener('click', rejectReview);
+  
+  // Close iframe button (if in iframe)
+  const closeBtn = document.getElementById('close-iframe') as HTMLButtonElement;
+  closeBtn?.addEventListener('click', closeIframe);
+}
+
+/**
+ * Handle iframe message communication
+ */
+function setupIframeMessageHandling() {
+  // Listen for messages from content script
+  window.addEventListener('message', (event) => {
+    if (event.data.type === 'INIT_FROM_CONTENT') {
+      currentPageInfo = event.data.data;
+      selectedText = event.data.data.selectedText || '';
+      
+      // Pre-fill instructions if we have selected text
+      if (selectedText) {
+        const instructionsTextarea = document.getElementById('instructions') as HTMLTextAreaElement;
+        if (instructionsTextarea) {
+          instructionsTextarea.value = `Focus on this section exclusively. Use surrounding HTML for context, but this is the event we want:\n\n${selectedText}`;
+        }
+      }
+    }
+  });
+  
+  // Send resize messages to parent
+  const resizeObserver = new ResizeObserver(() => {
+    const height = document.body.scrollHeight;
+    if (height > 0) {
+      window.parent.postMessage({
+        type: 'RESIZE_IFRAME',
+        height: height
+      }, '*');
+    }
+  });
+  
+  resizeObserver.observe(document.body);
 }
 
 /**
@@ -86,420 +172,482 @@ async function loadSettings(): Promise<ExtensionSettings> {
     toConfirmedEmail: '',
     defaultModel: 'openai/gpt-5'
   };
+  
+  const stored = await adapters.storage.get('extension_settings');
+  return stored ? { ...defaultSettings, ...stored } : defaultSettings;
+}
 
-  try {
-    const stored = await adapters.storage.get<ExtensionSettings>('extension_settings');
-    return { ...defaultSettings, ...stored };
-  } catch (error) {
-    adapters.logger.warn('Failed to load settings, using defaults:', error);
-    return defaultSettings;
+/**
+ * Validate settings and show appropriate form
+ */
+async function validateAndShowForm() {
+  const requiredFields = ['openRouterKey', 'postmarkApiKey', 'fromEmail', 'toConfirmedEmail'];
+  const missingFields = requiredFields.filter(field => !settings[field] || settings[field].trim() === '');
+  
+  if (missingFields.length > 0) {
+    showStatus(`Missing required settings: ${missingFields.join(', ')}`, 'error');
+    // Could automatically open settings here
+    return;
+  }
+  
+  // Settings are valid, show the main form
+  showMainForm();
+}
+
+/**
+ * Show the main ICS generation form
+ */
+function showMainForm() {
+  hideStatus();
+  formSection.style.display = 'block';
+  processingDiv.style.display = 'none';
+  reviewSection.style.display = 'none';
+  
+  // Populate model dropdown
+  const modelSelect = document.getElementById('model') as HTMLSelectElement;
+  if (modelSelect) {
+    modelSelect.innerHTML = `
+      <option value="openai/gpt-5">GPT-5</option>
+      <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
+      <option value="anthropic/claude-sonnet-4">Claude Sonnet 4</option>
+      <option value="openai/o3">OpenAI o3</option>
+      <option value="anthropic/claude-opus-4.1">Claude Opus 4.1</option>
+      <option value="openai/o4-mini-high">OpenAI o4 Mini High</option>
+    `;
+    modelSelect.value = settings.defaultModel;
   }
 }
 
 /**
- * Save settings to Chrome storage
- */
-async function saveSettings(newSettings: Partial<ExtensionSettings>): Promise<void> {
-  settings = { ...settings, ...newSettings };
-  await adapters.storage.set('extension_settings', settings);
-}
-
-/**
- * Check if all required settings are configured
- */
-function areRequiredSettingsConfigured(): boolean {
-  const requiredFields = [
-    'openRouterKey',
-    'postmarkApiKey', 
-    'fromEmail',
-    'toConfirmedEmail'
-  ] as const;
-  
-  return requiredFields.every(field => {
-    const value = settings[field];
-    return value && value.trim().length > 0;
-  });
-}
-
-/**
- * Initialize UI components
- */
-function initializeUI() {
-  // Get DOM elements
-  statusDiv = document.getElementById('status')!;
-  contentDiv = document.getElementById('content')!;
-  generateButton = document.getElementById('generate-ics') as HTMLButtonElement;
-  settingsButton = document.getElementById('settings') as HTMLButtonElement;
-
-  // Add event listeners
-  generateButton?.addEventListener('click', handleGenerateICS);
-  settingsButton?.addEventListener('click', showSettings);
-
-  // Update UI state based on settings
-  updateUIForSettings();
-}
-
-/**
- * Update UI state based on current settings
- */
-function updateUIForSettings() {
-  const settingsConfigured = areRequiredSettingsConfigured();
-  
-  if (generateButton) {
-    generateButton.disabled = !settingsConfigured;
-  }
-  
-  if (settingsConfigured) {
-    updateStatus('Ready to generate ICS files');
-  } else {
-    updateStatus('Configure settings to get started', 'warning');
-  }
-}
-
-/**
- * Handle ICS generation from current page
+ * Handle ICS generation
  */
 async function handleGenerateICS() {
   try {
-    updateStatus('Capturing page content...');
-    generateButton.disabled = true;
-
-    // Get current tab
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab.id) {
-      throw new Error('No active tab found');
-    }
-
-    // Try to create in-page dialog first, fallback to popup processing
-    try {
-      await createInPageDialog(tab.id);
-      return;
-    } catch (error) {
-      adapters.logger.warn('In-page dialog failed, using popup mode:', error);
-      // Continue with popup processing below
-    }
-
-    // Capture page content and screenshot
-    const pageData = await capturePageData(tab.id);
+    // Get form values
+    const instructions = (document.getElementById('instructions') as HTMLTextAreaElement).value;
+    const model = (document.getElementById('model') as HTMLSelectElement).value;
+    const tentative = (document.getElementById('tentative') as HTMLInputElement).checked;
+    const multiday = (document.getElementById('multiday') as HTMLInputElement).checked;
     
-    updateStatus('Extracting events with AI...');
+    // Show processing view
+    showProcessingView();
     
-    // Use AI parser to extract events
-    const extractionInput: ParsingInput = {
-      html: pageData.html || '',
-      text: pageData.text || '',
-      url: tab.url || '',
-      screenshot: pageData.screenshot,
-      source: 'webpage' as const
-    };
-
-    const result = await aiParser.extractEvents(extractionInput, {
-      model: settings.defaultModel
-    });
-
-    if (!result.events || result.events.length === 0) {
-      throw new Error('No events found on this page');
+    // Step 1: Get current page info (if not already available)
+    if (!currentPageInfo) {
+      updateProgress(10, 'Getting page information...');
+      currentPageInfo = await getCurrentPageInfo();
     }
-
-    updateStatus('Generating ICS file...');
     
-    // Generate ICS content
-    const icsContent = await icsGenerator.generateIcs(
-      result.events,
-      { method: 'PUBLISH', includeHtmlDescription: true },
-      settings.fromEmail
-    );
-
-    // Validate ICS
-    const validation = icsGenerator.validateIcs(icsContent);
-    if (!validation.valid) {
-      throw new Error('Generated ICS is invalid: ' + validation.errors.join(', '));
+    // Step 2: Capture screenshot via background script
+    updateProgress(30, 'Capturing screenshot...');
+    const screenshot = await captureScreenshot();
+    
+    // Step 3: Call AI model
+    updateProgress(50, 'Analyzing content with AI...');
+    const eventData = await callAIModel({
+      html: currentPageInfo.html,
+      text: currentPageInfo.text,
+      url: currentPageInfo.url,
+      screenshot: screenshot
+    }, instructions, model, tentative, multiday);
+    
+    // Step 4: Generate ICS
+    updateProgress(80, 'Generating ICS file...');
+    const icsContent = await generateICS(eventData, tentative);
+    
+    // Step 5: Check if needs review
+    const needsReview = shouldReviewEvent(eventData, instructions);
+    
+    if (needsReview) {
+      // Cache for review workflow
+      const confirmationToken = generateConfirmationToken();
+      reviewCache.set(confirmationToken, {
+        timestamp: Date.now(),
+        originalData: currentPageInfo,
+        eventData,
+        icsContent,
+        settings,
+        confirmationToken
+      });
+      
+      showReviewWorkflow(eventData, icsContent, confirmationToken);
+    } else {
+      // Direct completion
+      updateProgress(100, 'Complete!');
+      showResults(eventData, icsContent);
     }
-
-    // Show results
-    showResults(result.events, icsContent);
-    updateStatus(`Generated ICS for ${result.events.length} event(s)`);
-
+    
   } catch (error) {
-    adapters.logger.error('ICS generation failed:', error);
-    showError('ICS generation failed: ' + (error instanceof Error ? error.message : String(error)));
-  } finally {
-    generateButton.disabled = false;
+    console.error('ICS generation failed:', error);
+    showError(`Failed to generate ICS: ${error.message}`);
+    showMainForm();
   }
 }
 
 /**
- * Capture page content and screenshot
+ * Capture screenshot via background script
  */
-async function capturePageData(tabId: number): Promise<{
-  html?: string;
-  text?: string;
-  screenshot?: string;
-}> {
-  // Inject content script to get page data
-  const [result] = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => {
-      return {
-        html: document.documentElement.outerHTML,
-        text: document.body.innerText,
-        title: document.title
-      };
+async function captureScreenshot(): Promise<string | null> {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'captureScreenshot' });
+    if (response && response.success && response.screenshot) {
+      return 'data:image/jpeg;base64,' + response.screenshot;
     }
-  });
-
-  // Capture screenshot
-  const screenshot = await chrome.tabs.captureVisibleTab(undefined, {
-    format: 'png',
-    quality: 80
-  });
-
-  return {
-    html: result.result?.html,
-    text: result.result?.text,
-    screenshot: screenshot
-  };
+    console.warn('Screenshot capture failed:', response?.error);
+    return null;
+  } catch (error) {
+    console.error('Screenshot request failed:', error);
+    return null;
+  }
 }
 
 /**
- * Show extraction results and ICS content
+ * Get current page info (fallback if not from iframe)
  */
-function showResults(events: EventData[], icsContent: string) {
-  contentDiv.innerHTML = `
-    <div class="results">
-      <h3>Extracted Events (${events.length})</h3>
-      <div class="events-list">
-        ${events.map((event, index) => `
-          <div class="event-item">
-            <h4>${event.summary}</h4>
-            <p><strong>Date:</strong> ${new Date(event.dtstart).toLocaleString()}</p>
-            ${event.location ? `<p><strong>Location:</strong> ${event.location}</p>` : ''}
-            ${event.description ? `<p><strong>Description:</strong> ${event.description.substring(0, 100)}...</p>` : ''}
-          </div>
-        `).join('')}
-      </div>
-      
-      <div class="actions">
-        <button id="download-ics" class="btn btn-primary">Download ICS</button>
-        <button id="send-email" class="btn btn-secondary">Send Email</button>
-        <button id="copy-ics" class="btn btn-outline-secondary">Copy ICS</button>
-      </div>
+async function getCurrentPageInfo(): Promise<any> {
+  if (isInIframe && currentPageInfo) {
+    return currentPageInfo;
+  }
+  
+  try {
+    // Request page info from content script
+    const response = await chrome.runtime.sendMessage({ action: 'get-page-info' });
+    return response;
+  } catch (error) {
+    console.error('Failed to get page info:', error);
+    return {
+      url: window.location.href,
+      title: document.title,
+      html: document.documentElement.outerHTML,
+      text: document.body.innerText
+    };
+  }
+}
+
+/**
+ * Call AI model with direct API
+ */
+async function callAIModel(pageData: any, instructions: string, model: string, tentative: boolean, multiday: boolean): Promise<any> {
+  const cleanUrl = stripTrackingParameters(pageData.url);
+  
+  // Build prompt exactly like the original
+  const prompt = `You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
+
+CRITICAL: You must respond with valid JSON only. No markdown, no explanations, just pure JSON.
+
+Extract event details from the provided content and return a JSON object with this exact structure:
+{
+    "summary": "Event title",
+    "location": "Event location or empty string",
+    "start_date": "YYYY-MM-DD",
+    "start_time": "HH:MM" or null for all-day,
+    "end_date": "YYYY-MM-DD", 
+    "end_time": "HH:MM" or null for all-day,
+    "description": "Event description",
+    "timezone": "America/New_York",
+    "url": "Event URL or source URL"
+}
+
+Guidelines:
+- Use ISO 8601 date format (YYYY-MM-DD)
+- Use 24-hour time format (HH:MM)
+- If no end time specified, make reasonable estimate
+- Default timezone is America/New_York unless specified
+- For all-day events, set start_time and end_time to null
+- Multi-day events: ${multiday ? 'Expected' : 'Not expected'}
+- Event status: ${tentative ? 'Tentative' : 'Confirmed'}
+- IMPORTANT: If a source URL is provided, include it in the "url" field
+- IMPORTANT: If a source URL is provided, also add it at the bottom of the description field with text "\\n\\nSource: [URL]"
+
+${instructions ? `Special instructions: ${instructions}\n` : ''}
+
+${cleanUrl ? `Source URL: ${cleanUrl}\n` : ''}
+
+Content to analyze:
+${pageData.html}`;
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${settings.openRouterKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': window.location.origin,
+      'X-Title': 'Email to ICS Chrome Extension'
+    },
+    body: JSON.stringify({
+      model: model,
+      messages: [
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      max_tokens: 20000,
+      temperature: 0.1
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json();
+  const aiResponse = data.choices[0]?.message?.content || '';
+
+  return parseAiResponse(aiResponse);
+}
+
+/**
+ * Parse AI response
+ */
+function parseAiResponse(response: string): any {
+  try {
+    let cleaned = response.trim();
+    if (cleaned.startsWith('```json')) {
+      cleaned = cleaned.replace(/```json\n?/, '').replace(/\n?```$/, '');
+    } else if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/```\n?/, '').replace(/\n?```$/, '');
+    }
+    
+    const parsed = JSON.parse(cleaned);
+    
+    if (!parsed.summary) {
+      throw new Error('Missing required field: summary');
+    }
+    
+    return parsed;
+  } catch (error) {
+    console.error('Error parsing AI response:', error);
+    throw new Error(`Failed to parse AI response: ${error.message}`);
+  }
+}
+
+/**
+ * Generate ICS content using shared library
+ */
+async function generateICS(eventData: any, tentative: boolean): Promise<string> {
+  return await icsGenerator.generateICS({
+    summary: eventData.summary,
+    description: eventData.description || '',
+    location: eventData.location || '',
+    dtstart: eventData.start_date + (eventData.start_time ? `T${eventData.start_time}:00` : 'T00:00:00'),
+    dtend: eventData.end_date ? eventData.end_date + (eventData.end_time ? `T${eventData.end_time}:00` : 'T23:59:59') : undefined,
+    timezone: eventData.timezone || 'America/New_York',
+    isAllDay: eventData.start_time === null,
+    status: tentative ? 'tentative' : 'confirmed',
+    url: eventData.url
+  });
+}
+
+/**
+ * Determine if event needs review
+ */
+function shouldReviewEvent(eventData: any, instructions: string): boolean {
+  // Simple heuristics for review requirement
+  if (!eventData.start_date || !eventData.summary) return true;
+  if (instructions.toLowerCase().includes('review') || instructions.toLowerCase().includes('check')) return true;
+  if (!eventData.location && !eventData.description) return true;
+  return false;
+}
+
+/**
+ * Show review workflow
+ */
+function showReviewWorkflow(eventData: any, icsContent: string, token: string) {
+  hideProcessing();
+  reviewSection.style.display = 'block';
+  
+  // Populate review details
+  const reviewContent = document.getElementById('review-content')!;
+  reviewContent.innerHTML = `
+    <h4>Review Extracted Event</h4>
+    <div class="event-preview">
+      <h5>${eventData.summary}</h5>
+      <p><strong>Date:</strong> ${eventData.start_date}${eventData.start_time ? ' at ' + eventData.start_time : ' (All day)'}</p>
+      ${eventData.location ? `<p><strong>Location:</strong> ${eventData.location}</p>` : ''}
+      ${eventData.description ? `<p><strong>Description:</strong> ${eventData.description.substring(0, 200)}...</p>` : ''}
+    </div>
+    <div class="mt-3">
+      <button class="btn btn-success me-2" onclick="acceptReview('${token}')">✓ Accept & Send</button>
+      <button class="btn btn-secondary" onclick="rejectReview('${token}')">✗ Cancel</button>
     </div>
   `;
-
-  // Add action event listeners
-  document.getElementById('download-ics')?.addEventListener('click', () => downloadICS(icsContent));
-  document.getElementById('send-email')?.addEventListener('click', () => sendEmailConfirmation(events, icsContent));
-  document.getElementById('copy-ics')?.addEventListener('click', () => copyToClipboard(icsContent));
 }
 
 /**
- * Download ICS file
+ * Accept review and send ICS
  */
-function downloadICS(icsContent: string) {
-  const blob = new Blob([icsContent], { type: 'text/calendar' });
+function acceptReview(token?: string) {
+  if (!token) return;
+  
+  const cached = reviewCache.get(token);
+  if (!cached) {
+    showError('Review session expired');
+    return;
+  }
+  
+  // Show final results
+  showResults(cached.eventData, cached.icsContent);
+  
+  // Clean up cache
+  reviewCache.delete(token);
+}
+
+/**
+ * Reject review and return to form
+ */
+function rejectReview(token?: string) {
+  if (token) {
+    reviewCache.delete(token);
+  }
+  showMainForm();
+}
+
+/**
+ * Show final results
+ */
+function showResults(eventData: any, icsContent: string) {
+  hideProcessing();
+  const resultDiv = document.getElementById('results')!;
+  resultDiv.style.display = 'block';
+  
+  resultDiv.innerHTML = `
+    <div class="alert alert-success">
+      <h4>✅ Event Created Successfully</h4>
+      <h5>${eventData.summary}</h5>
+      <p>${eventData.start_date}${eventData.start_time ? ' at ' + eventData.start_time : ' (All day)'}</p>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-primary" onclick="downloadICS('${encodeURIComponent(icsContent)}', '${eventData.summary}')">💾 Download ICS</button>
+      <button class="btn btn-secondary" onclick="copyToClipboard('${encodeURIComponent(icsContent)}')">📋 Copy</button>
+      <button class="btn btn-success" onclick="sendEmail('${encodeURIComponent(JSON.stringify(eventData))}', '${encodeURIComponent(icsContent)}')">📧 Send Email</button>
+    </div>
+  `;
+}
+
+// Utility functions
+function showProcessingView() {
+  formSection.style.display = 'none';
+  processingDiv.style.display = 'block';
+  reviewSection.style.display = 'none';
+}
+
+function hideProcessing() {
+  processingDiv.style.display = 'none';
+}
+
+function updateProgress(percent: number, message: string) {
+  const progressBar = document.getElementById('progress-bar')!;
+  const statusText = document.getElementById('progress-status')!;
+  
+  progressBar.style.width = percent + '%';
+  statusText.textContent = message;
+}
+
+function showStatus(message: string, type: 'info' | 'error' | 'success' = 'info') {
+  statusDiv.className = `alert alert-${type === 'error' ? 'danger' : type === 'success' ? 'success' : 'info'}`;
+  statusDiv.textContent = message;
+  statusDiv.style.display = 'block';
+}
+
+function hideStatus() {
+  statusDiv.style.display = 'none';
+}
+
+function showError(message: string) {
+  showStatus(message, 'error');
+}
+
+function cancelProcessing() {
+  showMainForm();
+}
+
+function openSettings() {
+  if (isInIframe) {
+    chrome.runtime.sendMessage({ action: 'openSettings' });
+  } else {
+    // Handle settings in standalone mode
+    window.location.href = 'popup.html?settings=true';
+  }
+}
+
+function closeIframe() {
+  if (isInIframe) {
+    window.parent.postMessage({ type: 'CLOSE_IFRAME' }, '*');
+  }
+}
+
+function stripTrackingParameters(url: string): string {
+  if (!url) return url;
+  
+  try {
+    const urlObj = new URL(url);
+    const params = new URLSearchParams(urlObj.search);
+    
+    const trackingParams = [
+      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+      'utm_id', 'utm_source_platform', 'utm_creative_format', 'utm_marketing_tactic',
+      'fbclid', 'gclid', 'dclid', 'msclkid',
+      'mc_cid', 'mc_eid',
+      '_ga', '_gid', '_gac',
+      'ref', 'referer', 'referrer'
+    ];
+    
+    let hasChanges = false;
+    for (const param of trackingParams) {
+      if (params.has(param)) {
+        params.delete(param);
+        hasChanges = true;
+      }
+    }
+    
+    if (hasChanges) {
+      urlObj.search = params.toString();
+      return urlObj.toString();
+    }
+    
+    return url;
+  } catch (error) {
+    return url;
+  }
+}
+
+function generateConfirmationToken(): string {
+  return Math.random().toString(36).substring(2) + Date.now().toString(36);
+}
+
+// Global functions for HTML onclick handlers
+(window as any).acceptReview = acceptReview;
+(window as any).rejectReview = rejectReview;
+(window as any).downloadICS = (content: string, filename: string) => {
+  const decoded = decodeURIComponent(content);
+  const blob = new Blob([decoded], { type: 'text/calendar' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'events.ics';
+  a.download = `${filename.replace(/[^a-zA-Z0-9]/g, '_')}.ics`;
   a.click();
   URL.revokeObjectURL(url);
-  updateStatus('ICS file downloaded');
-}
-
-/**
- * Send email confirmation using mailto link
- */
-async function sendEmailConfirmation(events: EventData[], icsContent: string) {
-  try {
-    updateStatus('Opening email client...');
-    
-    const subject = encodeURIComponent(`Calendar Event${events.length > 1 ? 's' : ''}: ${events[0].summary}${events.length > 1 ? ` and ${events.length - 1} more` : ''}`);
-    const body = encodeURIComponent(`Please find the attached calendar event${events.length > 1 ? 's' : ''}.\n\nEvent Details:\n${events.map(e => `• ${e.summary} - ${new Date(e.dtstart).toLocaleString()}`).join('\n')}`);
-    
-    // Create mailto link
-    const mailtoLink = `mailto:${settings.toConfirmedEmail}?subject=${subject}&body=${body}`;
-    
-    // Open email client
-    window.open(mailtoLink, '_blank');
-    
-    // Also provide download option since mailto can't attach files
-    downloadICS(icsContent);
-    
-    updateStatus('Email client opened. Please attach the downloaded ICS file manually.');
-  } catch (error) {
-    showError('Failed to open email client: ' + (error instanceof Error ? error.message : String(error)));
-  }
-}
-
-/**
- * Copy ICS content to clipboard
- */
-async function copyToClipboard(icsContent: string) {
-  try {
-    await navigator.clipboard.writeText(icsContent);
-    updateStatus('ICS content copied to clipboard');
-  } catch (error) {
-    showError('Failed to copy to clipboard');
-  }
-}
-
-/**
- * Show settings panel
- */
-function showSettings() {
-  contentDiv.innerHTML = `
-    <div class="settings">
-      <h3>Extension Settings</h3>
-      <p class="text-muted">All fields marked with * are required</p>
-      <form id="settings-form">
-        <div class="mb-3">
-          <label for="openrouter-key" class="form-label">OpenRouter API Key *</label>
-          <input type="password" class="form-control" id="openrouter-key" value="${settings.openRouterKey}" required>
-          <div class="form-text">Get your API key from <a href="https://openrouter.ai/keys" target="_blank">OpenRouter</a></div>
-        </div>
-        
-        <div class="mb-3">
-          <label for="postmark-key" class="form-label">Postmark API Key *</label>
-          <input type="password" class="form-control" id="postmark-key" value="${settings.postmarkApiKey}" required>
-          <div class="form-text">Get your API key from <a href="https://account.postmarkapp.com/api_tokens" target="_blank">Postmark</a></div>
-        </div>
-        
-        <div class="mb-3">
-          <label for="from-email" class="form-label">From Email *</label>
-          <input type="email" class="form-control" id="from-email" value="${settings.fromEmail}" required>
-          <div class="form-text">Must be verified in your Postmark account</div>
-        </div>
-        
-        <div class="mb-3">
-          <label for="to-email" class="form-label">To Email *</label>
-          <input type="email" class="form-control" id="to-email" value="${settings.toConfirmedEmail}" required>
-          <div class="form-text">Where calendar invites will be sent</div>
-        </div>
-        
-        <div class="mb-3">
-          <label for="default-model" class="form-label">Default AI Model</label>
-          <select class="form-control" id="default-model">
-            <option value="openai/gpt-5" ${settings.defaultModel === 'openai/gpt-5' ? 'selected' : ''}>GPT-5</option>
-            <option value="anthropic/claude-sonnet-4" ${settings.defaultModel === 'anthropic/claude-sonnet-4' ? 'selected' : ''}>Claude Sonnet 4</option>
-            <option value="google/gemini-2.5-pro" ${settings.defaultModel === 'google/gemini-2.5-pro' ? 'selected' : ''}>Gemini 2.5 Pro</option>
-            <option value="openai/o3" ${settings.defaultModel === 'openai/o3' ? 'selected' : ''}>OpenAI o3</option>
-            <option value="anthropic/claude-opus-4.1" ${settings.defaultModel === 'anthropic/claude-opus-4.1' ? 'selected' : ''}>Claude Opus 4.1</option>
-            <option value="openai/o4-mini-high" ${settings.defaultModel === 'openai/o4-mini-high' ? 'selected' : ''}>OpenAI o4 Mini High</option>
-          </select>
-        </div>
-        
-        <button type="submit" class="btn btn-primary">Save Settings</button>
-        <button type="button" class="btn btn-secondary" id="back-button">Back</button>
-      </form>
-    </div>
-  `;
-
-  // Add form event listeners
-  document.getElementById('settings-form')?.addEventListener('submit', handleSaveSettings);
-  document.getElementById('back-button')?.addEventListener('click', () => {
-    // Only allow going back if all required settings are configured
-    if (areRequiredSettingsConfigured()) {
-      contentDiv.innerHTML = '';
-      updateUIForSettings();
-    } else {
-      updateStatus('Please configure all required settings before continuing', 'warning');
-    }
-  });
-}
-
-/**
- * Handle settings form submission
- */
-async function handleSaveSettings(event: Event) {
-  event.preventDefault();
+};
+(window as any).copyToClipboard = (content: string) => {
+  const decoded = decodeURIComponent(content);
+  navigator.clipboard.writeText(decoded);
+};
+(window as any).sendEmail = (eventData: string, icsContent: string) => {
+  const event = JSON.parse(decodeURIComponent(eventData));
+  const subject = `Calendar Event: ${event.summary}`;
+  const body = `Please find the attached calendar event.\n\nEvent: ${event.summary}\nDate: ${event.start_date}${event.start_time ? ' at ' + event.start_time : ''}`;
+  const mailtoLink = `mailto:${settings.toConfirmedEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.open(mailtoLink, '_blank');
   
-  try {
-    const form = event.target as HTMLFormElement;
-    
-    const newSettings: Partial<ExtensionSettings> = {
-      openRouterKey: (document.getElementById('openrouter-key') as HTMLInputElement).value.trim(),
-      postmarkApiKey: (document.getElementById('postmark-key') as HTMLInputElement).value.trim(),
-      fromEmail: (document.getElementById('from-email') as HTMLInputElement).value.trim(),
-      toConfirmedEmail: (document.getElementById('to-email') as HTMLInputElement).value.trim(),
-      defaultModel: (document.getElementById('default-model') as HTMLSelectElement).value
-    };
-
-    // Validate required fields
-    const requiredFields = [
-      { key: 'openRouterKey', label: 'OpenRouter API Key' },
-      { key: 'postmarkApiKey', label: 'Postmark API Key' },
-      { key: 'fromEmail', label: 'From Email' },
-      { key: 'toConfirmedEmail', label: 'To Email' }
-    ];
-    
-    const missingFields = requiredFields.filter(field => 
-      !newSettings[field.key as keyof ExtensionSettings] || 
-      newSettings[field.key as keyof ExtensionSettings] === ''
-    );
-    
-    if (missingFields.length > 0) {
-      const missingLabels = missingFields.map(f => f.label).join(', ');
-      updateStatus(`Please fill in all required fields: ${missingLabels}`, 'error');
-      return;
-    }
-
-    await saveSettings(newSettings);
-    
-    // Reinitialize AI parser with new settings
-    aiParser = new AiParserService(adapters, settings.openRouterKey, settings.defaultModel);
-    
-    updateStatus('Settings saved successfully', 'success');
-    
-    // Only allow going back if all required settings are now configured
-    if (areRequiredSettingsConfigured()) {
-      setTimeout(() => {
-        contentDiv.innerHTML = '';
-        updateUIForSettings();
-      }, 2000);
-    }
-    
-  } catch (error) {
-    showError('Failed to save settings: ' + (error instanceof Error ? error.message : String(error)));
-  }
-}
-
-/**
- * Update status message
- */
-function updateStatus(message: string, type: 'info' | 'error' | 'success' = 'info') {
-  if (statusDiv) {
-    statusDiv.textContent = message;
-    statusDiv.className = `status status-${type}`;
-  }
-}
-
-/**
- * Show error message
- */
-function showError(message: string) {
-  updateStatus(message, 'error');
-  adapters?.logger.error(message);
-}
-
-
-/**
- * Create an in-page dialog on the current tab
- */
-async function createInPageDialog(tabId: number) {
-  try {
-    // Send message to content script to create dialog
-    await chrome.tabs.sendMessage(tabId, { action: 'createInPageDialog' });
-    
-    // Close the popup since we're now using in-page dialog
-    window.close();
-  } catch (error) {
-    adapters.logger.warn('Failed to create in-page dialog, falling back to popup mode:', error);
-    // Fall back to normal popup behavior
-    generateButton.disabled = false;
-    updateStatus('Using popup mode - click Generate ICS again');
-  }
-}
+  // Also trigger download
+  (window as any).downloadICS(icsContent, event.summary);
+};
 
 // Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', init);
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}

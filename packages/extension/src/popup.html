@@ -68,18 +68,69 @@
 
         <!-- Main Content -->
         <div class="p-3">
-            <!-- Initial Controls -->
-            <div class="text-center mb-3">
-                <button id="generate-ics" class="btn btn-primary">
-                    📅 Generate ICS from Page
-                </button>
+            <!-- Status Message -->
+            <div id="status" class="alert d-none"></div>
+
+            <!-- Main Form Section -->
+            <div id="form-section" style="display: none;">
+                <div class="mb-3">
+                    <label for="instructions" class="form-label">Instructions (optional):</label>
+                    <textarea id="instructions" class="form-control" rows="3" placeholder="Add specific instructions for the AI..."></textarea>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="model" class="form-label">AI Model:</label>
+                    <select id="model" class="form-select">
+                        <option value="openai/gpt-5">GPT-5</option>
+                    </select>
+                </div>
+                
+                <div class="mb-3">
+                    <div class="form-check">
+                        <input type="checkbox" id="tentative" class="form-check-input">
+                        <label class="form-check-label" for="tentative">Mark as tentative</label>
+                    </div>
+                    <div class="form-check">
+                        <input type="checkbox" id="multiday" class="form-check-input">
+                        <label class="form-check-label" for="multiday">Multi-day event</label>
+                    </div>
+                </div>
+                
+                <div class="text-center">
+                    <button id="generate-ics" class="btn btn-primary">📅 Convert to ICS</button>
+                    <button id="open-settings" class="btn btn-secondary ms-2">⚙️ Settings</button>
+                </div>
             </div>
 
-            <!-- Status Message -->
-            <div id="status" class="status status-info d-none"></div>
+            <!-- Processing View -->
+            <div id="processing-view" style="display: none;">
+                <div class="text-center">
+                    <div class="spinner-border text-primary mb-3" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <div id="progress-status" class="fw-bold mb-2">Processing...</div>
+                    <div class="progress mb-3">
+                        <div id="progress-bar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                    </div>
+                    <button id="cancel-processing" class="btn btn-danger btn-sm">Cancel</button>
+                </div>
+            </div>
 
-            <!-- Content Area (for results, settings, etc.) -->
+            <!-- Review Section -->
+            <div id="review-section" style="display: none;">
+                <div id="review-content"></div>
+            </div>
+
+            <!-- Results -->
+            <div id="results" style="display: none;"></div>
+
+            <!-- Content Area (legacy) -->
             <div id="content"></div>
+            
+            <!-- Close button for iframe -->
+            <div class="text-end mt-2" id="close-controls" style="display: none;">
+                <button id="close-iframe" class="btn btn-sm btn-outline-secondary">✕ Close</button>
+            </div>
         </div>
     </div>
 
