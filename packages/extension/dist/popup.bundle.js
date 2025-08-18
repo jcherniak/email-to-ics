@@ -9667,7 +9667,6 @@
   var icsGenerator;
   var availableModels = [];
   var selectedModel = null;
-  var isAuthenticated = false;
   var reviewData = null;
   var currentTabId = null;
   var TabStateManager = class {
@@ -9758,7 +9757,7 @@
     await tabStateManager.initialize();
     const statusDiv = document.getElementById("status");
     const reviewStatusDiv = document.getElementById("review-status");
-    const authSection = document.getElementById("auth-section");
+    const settingsSection = document.getElementById("settings-section");
     const formSection = document.getElementById("form-section");
     const reviewSection = document.getElementById("review-section");
     const processingView = document.getElementById("processingView");
@@ -9773,8 +9772,13 @@
     const rejectButton = document.getElementById("reject-button");
     const backToFormButton = document.getElementById("backToFormButton");
     const cancelRequestButton = document.getElementById("cancelRequestButton");
-    const openServerPageButton = document.getElementById("open-server-page");
     const closePopupButton = document.getElementById("close-popup");
+    const openSettingsButton = document.getElementById("open-settings");
+    const saveSettingsButton = document.getElementById("save-settings");
+    const testConnectionButton = document.getElementById("test-connection");
+    const openRouterKeyInput = document.getElementById("openRouterKey");
+    const defaultModelSelect = document.getElementById("defaultModel");
+    const fromEmailInput = document.getElementById("fromEmail");
     if (cancelRequestButton) {
       cancelRequestButton.style.display = "none";
     }
@@ -9952,23 +9956,64 @@
         modelSelect.appendChild(option);
       });
     }
-    async function checkAuthenticationAndFetchConfig() {
+    function areRequiredSettingsPresent(settings) {
+      return Boolean(settings.openRouterKey);
+    }
+    async function loadSettingsIntoUI() {
+      const settings = await chrome.storage.sync.get(["openRouterKey", "defaultModel", "fromEmail"]);
+      openRouterKeyInput.value = settings.openRouterKey || "";
+      fromEmailInput.value = settings.fromEmail || "";
+      await populateDefaultModels(settings.defaultModel);
+    }
+    async function populateDefaultModels(selectedModel2) {
       try {
-        const settings = await chrome.storage.sync.get(["openRouterKey", "postmarkApiKey", "fromEmail", "toConfirmedEmail", "toTentativeEmail"]);
-        if (settings.openRouterKey && settings.postmarkApiKey && settings.fromEmail && settings.toConfirmedEmail) {
-          isAuthenticated = true;
-          authSection.style.display = "none";
-          formSection.style.display = "block";
-          await loadModels();
-        } else {
-          isAuthenticated = false;
-          authSection.style.display = "block";
-          formSection.style.display = "none";
+        const models = await fetchAvailableModels();
+        defaultModelSelect.innerHTML = "";
+        if (models.length === 0) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "No models available";
+          defaultModelSelect.appendChild(option);
+          return;
+        }
+        models.forEach((model) => {
+          const option = document.createElement("option");
+          option.value = model.id;
+          option.textContent = model.name;
+          if (selectedModel2 && selectedModel2 === model.id) {
+            option.selected = true;
+          }
+          defaultModelSelect.appendChild(option);
+        });
+        if (!selectedModel2 && models.length > 0) {
+          const defaultModel = models.find((m) => m.id === "openai/gpt-5") || models[0];
+          defaultModel && (defaultModelSelect.value = defaultModel.id);
         }
       } catch (error) {
-        console.error("Error checking authentication:", error);
-        authSection.style.display = "block";
-        formSection.style.display = "none";
+        console.error("Error loading models for settings:", error);
+        defaultModelSelect.innerHTML = '<option value="">Error loading models</option>';
+      }
+    }
+    async function showSettings() {
+      await loadSettingsIntoUI();
+      settingsSection.style.display = "block";
+      formSection.style.display = "none";
+      reviewSection.style.display = "none";
+      processingView.style.display = "none";
+    }
+    async function showForm() {
+      settingsSection.style.display = "none";
+      formSection.style.display = "block";
+      reviewSection.style.display = "none";
+      processingView.style.display = "none";
+      await loadModels();
+    }
+    async function initializeExtension() {
+      const settings = await chrome.storage.sync.get(["openRouterKey", "defaultModel", "fromEmail"]);
+      if (!areRequiredSettingsPresent(settings)) {
+        await showSettings();
+      } else {
+        await showForm();
       }
     }
     async function generateICS() {
@@ -10345,8 +10390,52 @@ ${pageData.html}`;
         window.close();
       }
     });
-    openServerPageButton?.addEventListener("click", () => {
-      chrome.tabs.create({ url: "chrome://extensions/" });
+    openSettingsButton?.addEventListener("click", () => {
+      showSettings();
+    });
+    saveSettingsButton?.addEventListener("click", async () => {
+      const openRouterKey = openRouterKeyInput.value.trim();
+      const defaultModel = defaultModelSelect.value;
+      const fromEmail = fromEmailInput.value.trim();
+      if (!openRouterKey) {
+        showStatus("OpenRouter API key is required", "error", true);
+        return;
+      }
+      await chrome.storage.sync.set({
+        openRouterKey,
+        defaultModel,
+        fromEmail
+      });
+      showStatus("Settings saved successfully!", "success");
+      if (areRequiredSettingsPresent({ openRouterKey })) {
+        setTimeout(showForm, 1e3);
+      }
+    });
+    testConnectionButton?.addEventListener("click", async () => {
+      const openRouterKey = openRouterKeyInput.value.trim();
+      if (!openRouterKey) {
+        showStatus("Please enter an OpenRouter API key first", "error", true);
+        return;
+      }
+      showStatus("Testing connection...", "loading");
+      try {
+        const response = await fetch("https://openrouter.ai/api/v1/models", {
+          headers: {
+            "Authorization": `Bearer ${openRouterKey}`,
+            "Content-Type": "application/json"
+          }
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        const modelCount = data.data?.length || 0;
+        showStatus(`\u2705 Connection successful! Found ${modelCount} models`, "success");
+        await populateDefaultModels(defaultModelSelect.value);
+      } catch (error) {
+        console.error("Connection test failed:", error);
+        showStatus(`\u274C Connection failed: ${error.message}`, "error", true);
+      }
     });
     if (isInIframe) {
       window.addEventListener("message", (event) => {
@@ -10398,7 +10487,7 @@ Date: ${event.start_date}${event.start_time ? " at " + event.start_time : ""}`;
         window.downloadICS(icsContent, event.summary);
       }
     };
-    await checkAuthenticationAndFetchConfig();
+    await initializeExtension();
   });
 })();
 /*! Bundled license information:

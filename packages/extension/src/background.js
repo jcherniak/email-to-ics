@@ -178,5 +178,67 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     })();
     return true; // Keep message channel open for async response
+  } else if (request.action === 'listModels') {
+    // List available models from OpenRouter
+    (async () => {
+      try {
+        const { openRouterKey } = await chrome.storage.sync.get(['openRouterKey']);
+        
+        const response = await fetch('https://openrouter.ai/api/v1/models', {
+          headers: openRouterKey ? {
+            'Authorization': `Bearer ${openRouterKey}`,
+            'Content-Type': 'application/json'
+          } : {
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        sendResponse({ success: true, data: data.data || [] });
+      } catch (error) {
+        console.error('Models list error:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true; // Keep message channel open for async response
+  } else if (request.action === 'callOpenRouter') {
+    // Make OpenRouter API call for event extraction
+    (async () => {
+      try {
+        const { openRouterKey } = await chrome.storage.sync.get(['openRouterKey']);
+        
+        if (!openRouterKey) {
+          sendResponse({ success: false, error: 'OpenRouter API key not found in storage' });
+          return;
+        }
+
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openRouterKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://chrome-extension://email-to-ics',
+            'X-Title': 'Email to ICS Chrome Extension'
+          },
+          body: JSON.stringify(request.payload)
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '');
+          throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
+        }
+
+        const data = await response.json();
+        sendResponse({ success: true, data });
+      } catch (error) {
+        console.error('OpenRouter API error:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true; // Keep message channel open for async response
   }
 });

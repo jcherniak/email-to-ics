@@ -10,12 +10,35 @@
     <div class="container-fluid p-0">
         <div class="d-flex justify-content-between align-items-center p-3 bg-light border-bottom">
             <h5 class="mb-0">Email to ICS Converter</h5>
-            <button type="button" class="btn-close" id="close-popup" aria-label="Close"></button>
+            <div class="d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="open-settings">Settings</button>
+                <button type="button" class="btn-close" id="close-popup" aria-label="Close"></button>
+            </div>
         </div>
         <div class="p-3">
-            <div id="auth-section" style="display: none;">
-                <p>Please log in to the server page first.</p>
-                <button class="btn btn-primary" id="open-server-page">Open Server Page</button>
+            <!-- Settings Section (shown when key missing or user clicks Settings) -->
+            <div id="settings-section" style="display: none;">
+                <div class="mb-3">
+                    <label for="openRouterKey" class="form-label">OpenRouter API Key</label>
+                    <input type="password" class="form-control" id="openRouterKey" placeholder="sk-or-v1-...">
+                    <div class="form-text">Required for AI-powered event extraction. Stored locally in Chrome storage.</div>
+                </div>
+                <div class="mb-3">
+                    <label for="defaultModel" class="form-label">Default AI Model</label>
+                    <select id="defaultModel" class="form-select">
+                        <option value="">Loading models...</option>
+                    </select>
+                    <div class="form-text">AI model to use for event extraction.</div>
+                </div>
+                <div class="mb-3">
+                    <label for="fromEmail" class="form-label">From Email (Optional)</label>
+                    <input type="email" class="form-control" id="fromEmail" placeholder="your-email@example.com">
+                    <div class="form-text">Used in generated ICS files.</div>
+                </div>
+                <div class="d-flex gap-2">
+                    <button id="test-connection" class="btn btn-outline-primary">Test Connection</button>
+                    <button id="save-settings" class="btn btn-primary">Save Settings</button>
+                </div>
             </div>
             <div id="form-section" style="display: none;">
                 <div class="mb-3">
