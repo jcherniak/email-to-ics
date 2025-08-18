@@ -9850,22 +9850,12 @@
     }
     async function fetchAvailableModels() {
       try {
-        const settings = await chrome.storage.sync.get(["openRouterKey"]);
-        if (!settings.openRouterKey) {
-          console.warn("No OpenRouter API key found, using offline models");
+        const response = await chrome.runtime.sendMessage({ action: "listModels" });
+        if (!response.success) {
+          console.warn("Failed to fetch models from background:", response.error);
           return getOfflineAllowedModels();
         }
-        const response = await fetch("https://openrouter.ai/api/v1/models", {
-          headers: {
-            "Authorization": `Bearer ${settings.openRouterKey}`,
-            "Content-Type": "application/json"
-          }
-        });
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        const data = await response.json();
-        const allModels = data.data || [];
+        const allModels = response.data || [];
         const filteredModels = filterAllowedModels(allModels);
         console.log("Available models:", filteredModels);
         return filteredModels;
@@ -10094,7 +10084,6 @@
       }
     }
     async function callAIModel(pageData, instructions, model, tentative, multiday, screenshot) {
-      const settings = await chrome.storage.sync.get(["openRouterKey"]);
       const cleanUrl = stripTrackingParameters(pageData.url);
       const prompt = `You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
 
@@ -10176,40 +10165,33 @@ ${pageData.html}`;
         required: ["events"],
         additionalProperties: false
       };
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${settings.openRouterKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": window.location.origin,
-          "X-Title": "Email to ICS Chrome Extension"
+      const payload = {
+        model,
+        messages: [
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "calendar_event",
+            schema: eventSchema,
+            strict: true
+          }
         },
-        body: JSON.stringify({
-          model,
-          messages: [
-            {
-              role: "user",
-              content: prompt
-            }
-          ],
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: "calendar_event",
-              schema: eventSchema,
-              strict: true
-            }
-          },
-          max_tokens: 2e4,
-          temperature: 0.1
-        })
+        max_tokens: 2e4,
+        temperature: 0.1
+      };
+      const response = await chrome.runtime.sendMessage({
+        action: "callOpenRouter",
+        payload
       });
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
+      if (!response.success) {
+        throw new Error(`OpenRouter API error: ${response.error}`);
       }
-      const data = await response.json();
-      const aiResponse = data.choices[0]?.message?.content || "";
+      const aiResponse = response.data.choices[0]?.message?.content || "";
       return parseAiResponse(aiResponse);
     }
     function parseAiResponse(response) {
