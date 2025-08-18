@@ -19,21 +19,41 @@
             <!-- Settings Section (shown when key missing or user clicks Settings) -->
             <div id="settings-section" style="display: none;">
                 <div class="mb-3">
-                    <label for="openRouterKey" class="form-label">OpenRouter API Key</label>
-                    <input type="password" class="form-control" id="openRouterKey" placeholder="sk-or-v1-...">
-                    <div class="form-text">Required for AI-powered event extraction. Stored locally in Chrome storage.</div>
+                    <label for="openRouterKey" class="form-label">OpenRouter API Key *</label>
+                    <input type="password" class="form-control" id="openRouterKey" placeholder="sk-or-v1-..." required>
+                    <div class="form-text">Get your API key from <a href="https://openrouter.ai/keys" target="_blank">OpenRouter</a>. This is used for AI processing of web content.</div>
                 </div>
                 <div class="mb-3">
-                    <label for="defaultModel" class="form-label">Default AI Model</label>
+                    <label for="postmarkApiKey" class="form-label">Postmark Server Token *</label>
+                    <input type="password" class="form-control" id="postmarkApiKey" placeholder="Enter Postmark Server API Token" required>
+                    <div class="form-text">Get your server token from <a href="https://postmarkapp.com" target="_blank">Postmark</a>. This is used for sending calendar invitations via email.</div>
+                </div>
+                <div class="mb-3">
+                    <label for="defaultModel" class="form-label">AI Model</label>
                     <select id="defaultModel" class="form-select">
                         <option value="">Loading models...</option>
                     </select>
-                    <div class="form-text">AI model to use for event extraction.</div>
+                    <div class="form-text">Choose the AI model for processing calendar events.</div>
                 </div>
                 <div class="mb-3">
-                    <label for="fromEmail" class="form-label">From Email (Optional)</label>
-                    <input type="email" class="form-control" id="fromEmail" placeholder="your-email@example.com">
-                    <div class="form-text">Used in generated ICS files.</div>
+                    <label for="fromEmail" class="form-label">From Email Address *</label>
+                    <input type="email" class="form-control" id="fromEmail" placeholder="your-email@example.com" required>
+                    <div class="form-text">The email address that calendar invitations will be sent from. Must be verified in your Postmark account.</div>
+                </div>
+                <div class="mb-3">
+                    <label for="toTentativeEmail" class="form-label">Tentative Events Recipient *</label>
+                    <input type="email" class="form-control" id="toTentativeEmail" placeholder="tentative@example.com" required>
+                    <div class="form-text">Email address to receive tentative calendar invitations.</div>
+                </div>
+                <div class="mb-3">
+                    <label for="toConfirmedEmail" class="form-label">Confirmed Events Recipient *</label>
+                    <input type="email" class="form-control" id="toConfirmedEmail" placeholder="confirmed@example.com" required>
+                    <div class="form-text">Email address to receive confirmed calendar invitations.</div>
+                </div>
+                <div class="mb-3">
+                    <label for="inboundConfirmedEmail" class="form-label">Inbound Confirmed Email</label>
+                    <input type="email" class="form-control" id="inboundConfirmedEmail" placeholder="Optional">
+                    <div class="form-text">Optional: Email address for inbound confirmed events (advanced usage).</div>
                 </div>
                 <div class="d-flex gap-2">
                     <button id="test-connection" class="btn btn-outline-primary">Test Connection</button>

@@ -352,13 +352,27 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Settings management
     function areRequiredSettingsPresent(settings: any): boolean {
-        return Boolean(settings.openRouterKey);
+        return Boolean(settings.openRouterKey && settings.postmarkApiKey && settings.fromEmail && 
+                       settings.toTentativeEmail && settings.toConfirmedEmail);
     }
 
     async function loadSettingsIntoUI() {
-        const settings = await chrome.storage.sync.get(['openRouterKey', 'defaultModel', 'fromEmail']);
+        const settings = await chrome.storage.sync.get([
+            'openRouterKey', 'postmarkApiKey', 'fromEmail', 
+            'toTentativeEmail', 'toConfirmedEmail', 'inboundConfirmedEmail', 'defaultModel'
+        ]);
+        
         openRouterKeyInput.value = settings.openRouterKey || '';
+        const postmarkApiKeyInput = document.getElementById('postmarkApiKey') as HTMLInputElement;
+        postmarkApiKeyInput.value = settings.postmarkApiKey || '';
         fromEmailInput.value = settings.fromEmail || '';
+        const toTentativeEmailInput = document.getElementById('toTentativeEmail') as HTMLInputElement;
+        toTentativeEmailInput.value = settings.toTentativeEmail || '';
+        const toConfirmedEmailInput = document.getElementById('toConfirmedEmail') as HTMLInputElement;
+        toConfirmedEmailInput.value = settings.toConfirmedEmail || '';
+        const inboundConfirmedEmailInput = document.getElementById('inboundConfirmedEmail') as HTMLInputElement;
+        inboundConfirmedEmailInput.value = settings.inboundConfirmedEmail || '';
+        
         await populateDefaultModels(settings.defaultModel);
     }
 
@@ -413,7 +427,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     async function initializeExtension() {
-        const settings = await chrome.storage.sync.get(['openRouterKey', 'defaultModel', 'fromEmail']);
+        const settings = await chrome.storage.sync.get([
+            'openRouterKey', 'postmarkApiKey', 'fromEmail', 
+            'toTentativeEmail', 'toConfirmedEmail', 'inboundConfirmedEmail', 'defaultModel'
+        ]);
         
         if (!areRequiredSettingsPresent(settings)) {
             await showSettings();
@@ -488,7 +505,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             const icsContent = await generateICSContent(events, tentative);
             
             if (reviewFirst) {
-                showReviewSection(events, icsContent);
+                await showReviewSection(events, icsContent);
             } else {
                 // Direct send - show completion
                 statusMessage.textContent = 'Complete! ICS file generated.';
@@ -735,7 +752,7 @@ ${pageData.html}`;
         }
     }
 
-    function showReviewSection(events: any[], icsContent: string) {
+    async function showReviewSection(events: any[], icsContent: string) {
         processingView.style.display = 'none';
         reviewSection.style.display = 'block';
         
@@ -745,7 +762,12 @@ ${pageData.html}`;
         const reviewRecipient = document.getElementById('review-recipient')!;
         const reviewSubject = document.getElementById('review-subject')!;
         
-        reviewRecipient.textContent = tentativeToggle.checked ? 'tentative@example.com' : 'confirmed@example.com';
+        // Load stored email settings to show correct recipient
+        const settings = await chrome.storage.sync.get(['toTentativeEmail', 'toConfirmedEmail']);
+        const recipientEmail = tentativeToggle.checked ? 
+            (settings.toTentativeEmail || 'tentative@example.com') : 
+            (settings.toConfirmedEmail || 'confirmed@example.com');
+        reviewRecipient.textContent = recipientEmail;
         
         if (events.length === 1) {
             const eventData = events[0];
@@ -852,58 +874,111 @@ ${pageData.html}`;
 
     saveSettingsButton?.addEventListener('click', async () => {
         const openRouterKey = openRouterKeyInput.value.trim();
-        const defaultModel = defaultModelSelect.value;
+        const postmarkApiKeyInput = document.getElementById('postmarkApiKey') as HTMLInputElement;
+        const postmarkApiKey = postmarkApiKeyInput.value.trim();
         const fromEmail = fromEmailInput.value.trim();
+        const toTentativeEmailInput = document.getElementById('toTentativeEmail') as HTMLInputElement;
+        const toTentativeEmail = toTentativeEmailInput.value.trim();
+        const toConfirmedEmailInput = document.getElementById('toConfirmedEmail') as HTMLInputElement;
+        const toConfirmedEmail = toConfirmedEmailInput.value.trim();
+        const inboundConfirmedEmailInput = document.getElementById('inboundConfirmedEmail') as HTMLInputElement;
+        const inboundConfirmedEmail = inboundConfirmedEmailInput.value.trim();
+        const defaultModel = defaultModelSelect.value;
 
         if (!openRouterKey) {
             showStatus('OpenRouter API key is required', 'error', true);
             return;
         }
+        
+        if (!postmarkApiKey) {
+            showStatus('Postmark API key is required', 'error', true);
+            return;
+        }
+        
+        if (!fromEmail) {
+            showStatus('From email is required', 'error', true);
+            return;
+        }
+        
+        if (!toTentativeEmail) {
+            showStatus('Tentative email recipient is required', 'error', true);
+            return;
+        }
+        
+        if (!toConfirmedEmail) {
+            showStatus('Confirmed email recipient is required', 'error', true);
+            return;
+        }
 
         await chrome.storage.sync.set({
             openRouterKey,
-            defaultModel,
-            fromEmail
+            postmarkApiKey,
+            fromEmail,
+            toTentativeEmail,
+            toConfirmedEmail,
+            inboundConfirmedEmail,
+            defaultModel
         });
 
         showStatus('Settings saved successfully!', 'success');
         
-        if (areRequiredSettingsPresent({ openRouterKey })) {
+        if (areRequiredSettingsPresent({ openRouterKey, postmarkApiKey, fromEmail, toTentativeEmail, toConfirmedEmail })) {
             setTimeout(showForm, 1000);
         }
     });
 
     testConnectionButton?.addEventListener('click', async () => {
         const openRouterKey = openRouterKeyInput.value.trim();
+        const postmarkApiKeyInput = document.getElementById('postmarkApiKey') as HTMLInputElement;
+        const postmarkKey = postmarkApiKeyInput.value.trim();
         
         if (!openRouterKey) {
             showStatus('Please enter an OpenRouter API key first', 'error', true);
             return;
         }
 
-        showStatus('Testing connection...', 'loading');
+        showStatus('Testing OpenRouter API...', 'loading');
         
         try {
-            const response = await fetch('https://openrouter.ai/api/v1/models', {
-                headers: {
-                    'Authorization': `Bearer ${openRouterKey}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            const data = await response.json();
-            const modelCount = data.data?.length || 0;
-            showStatus(`✅ Connection successful! Found ${modelCount} models`, 'success');
+            // Test OpenRouter API via background script
+            const openRouterResponse = await chrome.runtime.sendMessage({ action: 'listModels' });
             
-            // Refresh the models dropdown
-            await populateDefaultModels(defaultModelSelect.value);
+            if (!openRouterResponse.success) {
+                throw new Error(`OpenRouter API test failed: ${openRouterResponse.error}`);
+            }
+            
+            const modelCount = openRouterResponse.data?.length || 0;
+            
+            if (!postmarkKey) {
+                showStatus(`✅ OpenRouter API test passed! Found ${modelCount} models. Postmark API Key not provided - email sending will not work.`, 'success');
+                await populateDefaultModels(defaultModelSelect.value);
+                return;
+            }
+            
+            showStatus('OpenRouter API test passed. Testing Postmark API...', 'loading');
+            
+            // Test Postmark API
+            try {
+                const response = await fetch('https://api.postmarkapp.com/server', {
+                    headers: {
+                        'X-Postmark-Server-Token': postmarkKey,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                showStatus(`✅ Both APIs tested successfully! Found ${modelCount} models.`, 'success');
+                await populateDefaultModels(defaultModelSelect.value);
+            } catch (postmarkError) {
+                throw new Error(`Postmark API test failed: ${postmarkError.message}`);
+            }
+            
         } catch (error) {
             console.error('Connection test failed:', error);
-            showStatus(`❌ Connection failed: ${error.message}`, 'error', true);
+            showStatus(`❌ Connection test failed: ${error.message}`, 'error', true);
         }
     });
 
@@ -933,28 +1008,70 @@ ${pageData.html}`;
         URL.revokeObjectURL(url);
     };
 
-    (window as any).sendEmail = (eventData: string, icsContent: string) => {
-        const events = JSON.parse(decodeURIComponent(eventData));
-        const isMultiple = Array.isArray(events) && events.length > 1;
-        
-        if (isMultiple) {
-            const subject = `Calendar Events: ${events.length} Events`;
-            const eventsList = events.map((event: any, index: number) => 
-                `${index + 1}. ${event.summary} - ${event.start_date}${event.start_time ? ' at ' + event.start_time : ''}`
-            ).join('\n');
-            const body = `Please find the attached calendar events.\n\n${eventsList}`;
-            const mailtoLink = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-            window.open(mailtoLink, '_blank');
+    // Email sending function using Postmark API via background script
+    async function sendEmail(events: any[], icsContent: string, tentative: boolean) {
+        try {
+            const settings = await chrome.storage.sync.get([
+                'fromEmail', 'toTentativeEmail', 'toConfirmedEmail'
+            ]);
             
-            (window as any).downloadICS(icsContent, `${events.length}_events`);
-        } else {
-            const event = Array.isArray(events) ? events[0] : events;
-            const subject = `Calendar Event: ${event.summary}`;
-            const body = `Please find the attached calendar event.\n\nEvent: ${event.summary}\nDate: ${event.start_date}${event.start_time ? ' at ' + event.start_time : ''}`;
-            const mailtoLink = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-            window.open(mailtoLink, '_blank');
+            const recipientEmail = tentative ? settings.toTentativeEmail : settings.toConfirmedEmail;
+            const isMultiple = Array.isArray(events) && events.length > 1;
             
-            (window as any).downloadICS(icsContent, event.summary);
+            let subject: string;
+            let emailBody: string;
+            
+            if (isMultiple) {
+                subject = `Calendar Events: ${events.length} Events`;
+                const eventsList = events.map((event: any, index: number) => 
+                    `${index + 1}. ${event.summary} - ${event.start_date}${event.start_time ? ' at ' + event.start_time : ''}`
+                ).join('\n');
+                emailBody = `Please find the attached calendar events.\n\n${eventsList}\n\nThis invitation was generated automatically.`;
+            } else {
+                const event = events[0];
+                subject = `Calendar Event: ${event.summary}`;
+                emailBody = `Please find the calendar invitation attached.\n\nEvent: ${event.summary}\n${event.location ? `Location: ${event.location}\n` : ''}${event.description ? `Description: ${event.description}\n` : ''}\nThis invitation was generated automatically.`;
+            }
+            
+            const emailPayload = {
+                From: settings.fromEmail,
+                To: recipientEmail,
+                Subject: subject,
+                TextBody: emailBody,
+                Attachments: [
+                    {
+                        Name: 'invite.ics',
+                        Content: btoa(unescape(encodeURIComponent(icsContent))),
+                        ContentType: 'text/calendar'
+                    }
+                ]
+            };
+            
+            const response = await chrome.runtime.sendMessage({
+                action: 'sendEmail',
+                payload: emailPayload
+            });
+            
+            if (response.success) {
+                return { message: 'Calendar invite sent successfully!' };
+            } else {
+                throw new Error(response.error);
+            }
+        } catch (error) {
+            console.error('Email sending error:', error);
+            throw error;
+        }
+    }
+    
+    // Global sendEmail function for backward compatibility and review section
+    (window as any).sendEmail = async (eventData: string, icsContent: string) => {
+        try {
+            const events = JSON.parse(decodeURIComponent(eventData));
+            await sendEmail(events, icsContent, tentativeToggle.checked);
+            showStatus('Email sent successfully!', 'success');
+        } catch (error) {
+            console.error('Error sending email:', error);
+            showStatus(`Failed to send email: ${error.message}`, 'error', true);
         }
     };
 

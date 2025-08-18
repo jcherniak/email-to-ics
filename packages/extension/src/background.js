@@ -240,5 +240,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     })();
     return true; // Keep message channel open for async response
+  } else if (request.action === 'sendEmail') {
+    // Send email via Postmark API
+    (async () => {
+      try {
+        const { postmarkApiKey } = await chrome.storage.sync.get(['postmarkApiKey']);
+        
+        if (!postmarkApiKey) {
+          sendResponse({ success: false, error: 'Postmark API key not found in storage' });
+          return;
+        }
+
+        const response = await fetch('https://api.postmarkapp.com/email', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'X-Postmark-Server-Token': postmarkApiKey
+          },
+          body: JSON.stringify(request.payload)
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '');
+          throw new Error(`Postmark API error: ${response.status} ${errorText}`);
+        }
+
+        const data = await response.json();
+        sendResponse({ success: true, data });
+      } catch (error) {
+        console.error('Postmark API error:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true; // Keep message channel open for async response
   }
 });
