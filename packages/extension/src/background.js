@@ -181,6 +181,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === 'listModels') {
     // List available models from OpenRouter
     (async () => {
+      console.log('📋 Background: Starting models list request');
+      let controller = new AbortController();
+      
       try {
         const { openRouterKey } = await chrome.storage.sync.get(['openRouterKey']);
         
@@ -190,7 +193,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             'Content-Type': 'application/json'
           } : {
             'Content-Type': 'application/json'
-          }
+          },
+          signal: controller.signal
         });
 
         if (!response.ok) {
@@ -198,24 +202,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         const data = await response.json();
+        console.log('✅ Background: Models list completed:', { modelCount: data.data?.length || 0 });
         sendResponse({ success: true, data: data.data || [] });
       } catch (error) {
-        console.error('Models list error:', error);
+        console.error('💥 Background: Models list error:', error);
         sendResponse({ success: false, error: error.message });
+      } finally {
+        if (controller) {
+          controller.abort();
+          controller = null;
+        }
+        console.log('🧹 Background: Models request cleanup completed');
       }
     })();
     return true; // Keep message channel open for async response
   } else if (request.action === 'callOpenRouter') {
     // Make OpenRouter API call for event extraction
     (async () => {
+      console.log('🔄 Background: Starting OpenRouter API call');
+      const startTime = Date.now();
+      let controller = new AbortController();
+      
       try {
         const { openRouterKey } = await chrome.storage.sync.get(['openRouterKey']);
         
         if (!openRouterKey) {
+          console.error('❌ Background: No OpenRouter API key found');
           sendResponse({ success: false, error: 'OpenRouter API key not found in storage' });
           return;
         }
 
+        console.log('📤 Background: Making fetch request to OpenRouter...');
         const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -224,33 +241,65 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             'HTTP-Referer': 'https://chrome-extension://email-to-ics',
             'X-Title': 'Email to ICS Chrome Extension'
           },
-          body: JSON.stringify(request.payload)
+          body: JSON.stringify(request.payload),
+          signal: controller.signal
+        });
+
+        console.log('📥 Background: Response received:', {
+          status: response.status,
+          ok: response.ok,
+          headers: Object.fromEntries(response.headers.entries())
         });
 
         if (!response.ok) {
           const errorText = await response.text().catch(() => '');
+          console.error('❌ Background: API error response:', errorText);
           throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
         }
 
         const data = await response.json();
+        const endTime = Date.now();
+        console.log('✅ Background: API call completed successfully:', {
+          duration: `${endTime - startTime}ms`,
+          choices: data.choices?.length || 0,
+          usage: data.usage
+        });
+        
         sendResponse({ success: true, data });
       } catch (error) {
-        console.error('OpenRouter API error:', error);
+        const endTime = Date.now();
+        console.error('💥 Background: OpenRouter API error:', {
+          error: error.message,
+          duration: `${endTime - startTime}ms`,
+          stack: error.stack
+        });
         sendResponse({ success: false, error: error.message });
+      } finally {
+        // Ensure the controller is cleaned up
+        if (controller) {
+          controller.abort();
+          controller = null;
+        }
+        console.log('🧹 Background: Request cleanup completed');
       }
     })();
     return true; // Keep message channel open for async response
   } else if (request.action === 'sendEmail') {
     // Send email via Postmark API
     (async () => {
+      console.log('📧 Background: Starting email send request');
+      let controller = new AbortController();
+      
       try {
         const { postmarkApiKey } = await chrome.storage.sync.get(['postmarkApiKey']);
         
         if (!postmarkApiKey) {
+          console.error('❌ Background: No Postmark API key found');
           sendResponse({ success: false, error: 'Postmark API key not found in storage' });
           return;
         }
 
+        console.log('📤 Background: Making fetch request to Postmark...');
         const response = await fetch('https://api.postmarkapp.com/email', {
           method: 'POST',
           headers: {
@@ -258,19 +307,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             'Content-Type': 'application/json',
             'X-Postmark-Server-Token': postmarkApiKey
           },
-          body: JSON.stringify(request.payload)
+          body: JSON.stringify(request.payload),
+          signal: controller.signal
+        });
+
+        console.log('📥 Background: Email response received:', {
+          status: response.status,
+          ok: response.ok
         });
 
         if (!response.ok) {
           const errorText = await response.text().catch(() => '');
+          console.error('❌ Background: Email API error response:', errorText);
           throw new Error(`Postmark API error: ${response.status} ${errorText}`);
         }
 
         const data = await response.json();
+        console.log('✅ Background: Email sent successfully:', data);
         sendResponse({ success: true, data });
       } catch (error) {
-        console.error('Postmark API error:', error);
+        console.error('💥 Background: Email send error:', error);
         sendResponse({ success: false, error: error.message });
+      } finally {
+        if (controller) {
+          controller.abort();
+          controller = null;
+        }
+        console.log('🧹 Background: Email request cleanup completed');
       }
     })();
     return true; // Keep message channel open for async response
