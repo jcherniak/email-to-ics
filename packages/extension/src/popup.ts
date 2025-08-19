@@ -252,6 +252,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     function getOfflineAllowedModels() {
         return [
             { id: 'openai/gpt-5', name: 'GPT-5' },
+            { id: 'openai/gpt-5-nano', name: 'GPT-5 Nano' },
             { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
             { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4' },
             { id: 'openai/o3', name: 'OpenAI o3' },
@@ -263,6 +264,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     function filterAllowedModels(allModels: any[]) {
         const allowedModelIds = [
             'openai/gpt-5',
+            'openai/gpt-5-nano',
             'google/gemini-2.5-pro', 
             'anthropic/claude-sonnet-4',
             'openai/o3',
