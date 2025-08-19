@@ -4302,41 +4302,6 @@
     }
   };
 
-  // ../shared-core/dist/lib/browser-platform-ics-generator.js
-  var BrowserPlatformIcsGenerator = class {
-    adapters;
-    browserGenerator;
-    constructor(adapters2) {
-      this.adapters = adapters2;
-      this.browserGenerator = new BrowserIcsGenerator();
-    }
-    /**
-     * Generate ICS content from events (browser-only)
-     */
-    async generateIcs(events, config = {}, fromEmail) {
-      try {
-        const eventsArray = Array.isArray(events) ? events : [events];
-        return this.browserGenerator.generateIcs(eventsArray, config, fromEmail);
-      } catch (error) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        this.adapters.logger.error("Error generating ICS:", err);
-        throw new Error(`Error creating iCalendar: ${err.message}`);
-      }
-    }
-    /**
-     * Validate ICS content
-     */
-    validateIcs(icsContent) {
-      return this.browserGenerator.validateIcs(icsContent);
-    }
-    /**
-     * Parse ICS content to events
-     */
-    parseIcs(icsContent) {
-      return this.browserGenerator.parseIcs(icsContent);
-    }
-  };
-
   // ../shared-core/dist/adapters/base-adapters.js
   var BaseTimeAdapter = class {
     now() {
@@ -9687,14 +9652,12 @@
     async saveState() {
       if (!this.tabId || !this.stateKey)
         return;
-      const urlInput = document.getElementById("url");
       const instructionsInput = document.getElementById("instructions");
       const modelSelect = document.getElementById("model-select");
       const tentativeToggle = document.getElementById("tentative-toggle");
       const multidayToggle = document.getElementById("multiday-toggle");
       const state = {
         formData: {
-          url: urlInput?.value || "",
           instructions: instructionsInput?.value || "",
           model: modelSelect?.value || "",
           tentative: tentativeToggle?.checked || false,
@@ -9722,13 +9685,10 @@
         const state = result[this.stateKey];
         if (state && Date.now() - state.timestamp < 36e5) {
           const form = state.formData;
-          const urlInput = document.getElementById("url");
           const instructionsInput = document.getElementById("instructions");
           const modelSelect = document.getElementById("model-select");
           const tentativeToggle = document.getElementById("tentative-toggle");
           const multidayToggle = document.getElementById("multiday-toggle");
-          if (form.url && urlInput)
-            urlInput.value = form.url;
           if (form.instructions && instructionsInput)
             instructionsInput.value = form.instructions;
           if (form.model && modelSelect)
@@ -9751,7 +9711,7 @@
   };
   document.addEventListener("DOMContentLoaded", async function() {
     adapters = createBrowserAdapters();
-    icsGenerator = new BrowserPlatformIcsGenerator(adapters);
+    icsGenerator = new BrowserIcsGenerator();
     const isInIframe = window.self !== window.top;
     const tabStateManager = new TabStateManager();
     await tabStateManager.initialize();
@@ -9761,7 +9721,6 @@
     const formSection = document.getElementById("form-section");
     const reviewSection = document.getElementById("review-section");
     const processingView = document.getElementById("processingView");
-    const urlInput = document.getElementById("url");
     const instructionsInput = document.getElementById("instructions");
     const modelSelect = document.getElementById("model-select");
     const tentativeToggle = document.getElementById("tentative-toggle");
@@ -9807,7 +9766,6 @@
       reviewStatusDiv.textContent = "";
     }
     function disableForm(disable = true) {
-      urlInput.disabled = disable;
       instructionsInput.disabled = disable;
       convertButton.disabled = disable;
       modelSelect.disabled = disable;
@@ -10027,7 +9985,6 @@
       }
     }
     async function generateICS() {
-      const url = urlInput.value.trim();
       const instructions = instructionsInput.value.trim();
       const model = modelSelect.value;
       const tentative = tentativeToggle.checked;
@@ -10042,33 +9999,27 @@
         processingView.style.display = "block";
         const requestData = document.getElementById("requestData");
         const statusMessage = document.getElementById("statusMessage");
+        statusMessage.textContent = "Getting page content...";
+        const tab = await getActiveTab();
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => ({
+            url: window.location.href,
+            html: document.documentElement.outerHTML,
+            text: document.body.innerText
+          })
+        });
+        const pageContent = results[0].result;
         requestData.textContent = JSON.stringify({
-          url: url || "Current page",
+          url: pageContent.url,
           instructions: instructions || "None",
           model,
           tentative,
           multiday,
           reviewFirst
         }, null, 2);
-        statusMessage.textContent = "Getting page content...";
-        let pageContent;
-        let screenshot = null;
-        if (url) {
-          pageContent = { url, html: "", text: "" };
-        } else {
-          const tab = await getActiveTab();
-          const results = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: () => ({
-              url: window.location.href,
-              html: document.documentElement.outerHTML,
-              text: document.body.innerText
-            })
-          });
-          pageContent = results[0].result;
-          statusMessage.textContent = "Capturing screenshot...";
-          screenshot = await captureVisibleTabScreenshot();
-        }
+        statusMessage.textContent = "Capturing screenshot...";
+        const screenshot = await captureVisibleTabScreenshot();
         statusMessage.textContent = "Analyzing content with AI...";
         const events = await callAIModel(pageContent, instructions, model, tentative, multiday, screenshot);
         statusMessage.textContent = "Generating ICS file...";
@@ -10244,49 +10195,19 @@ ${pageData.html}`;
       }
     }
     async function generateICSContent(events, tentative) {
-      if (events.length === 1) {
-        const eventData = events[0];
-        return await icsGenerator.generateICS({
-          summary: eventData.summary,
-          description: eventData.description || "",
-          location: eventData.location || "",
-          dtstart: eventData.start_date + (eventData.start_time ? `T${eventData.start_time}:00` : "T00:00:00"),
-          dtend: eventData.end_date ? eventData.end_date + (eventData.end_time ? `T${eventData.end_time}:00` : "T23:59:59") : void 0,
-          timezone: eventData.timezone || "America/New_York",
-          isAllDay: eventData.start_time === null,
-          status: tentative ? "tentative" : "confirmed",
-          url: eventData.url
-        });
-      } else {
-        let icsContent = "";
-        for (const eventData of events) {
-          const eventICS = await icsGenerator.generateICS({
-            summary: eventData.summary,
-            description: eventData.description || "",
-            location: eventData.location || "",
-            dtstart: eventData.start_date + (eventData.start_time ? `T${eventData.start_time}:00` : "T00:00:00"),
-            dtend: eventData.end_date ? eventData.end_date + (eventData.end_time ? `T${eventData.end_time}:00` : "T23:59:59") : void 0,
-            timezone: eventData.timezone || "America/New_York",
-            isAllDay: eventData.start_time === null,
-            status: tentative ? "tentative" : "confirmed",
-            url: eventData.url
-          });
-          if (icsContent === "") {
-            icsContent = eventICS;
-          } else {
-            const lines = eventICS.split("\n");
-            const eventBlock = lines.slice(
-              lines.findIndex((line) => line.includes("BEGIN:VEVENT")),
-              lines.findIndex((line) => line.includes("END:VEVENT")) + 1
-            );
-            const contentLines = icsContent.split("\n");
-            const insertIndex = contentLines.findIndex((line) => line.includes("END:VCALENDAR"));
-            contentLines.splice(insertIndex, 0, ...eventBlock);
-            icsContent = contentLines.join("\n");
-          }
-        }
-        return icsContent;
-      }
+      const eventDataArray = events.map((eventData) => ({
+        summary: eventData.summary,
+        description: eventData.description || "",
+        location: eventData.location || "",
+        dtstart: eventData.start_date + (eventData.start_time ? `T${eventData.start_time}:00` : "T00:00:00"),
+        dtend: eventData.end_date ? eventData.end_date + (eventData.end_time ? `T${eventData.end_time}:00` : "T23:59:59") : void 0,
+        timezone: eventData.timezone || "America/New_York",
+        isAllDay: eventData.start_time === null,
+        status: tentative ? "tentative" : "confirmed",
+        url: eventData.url
+      }));
+      const settings = await chrome.storage.sync.get(["fromEmail"]);
+      return icsGenerator.generateIcs(eventDataArray, {}, settings.fromEmail);
     }
     async function showReviewSection(events, icsContent) {
       processingView.style.display = "none";
@@ -10489,9 +10410,6 @@ Postmark API Key not provided - email sending will not work.`);
     if (isInIframe) {
       window.addEventListener("message", (event) => {
         if (event.data.type === "INIT_FROM_CONTENT") {
-          if (urlInput && event.data.data.url) {
-            urlInput.value = event.data.data.url;
-          }
           if (instructionsInput && event.data.data.selectedText) {
             instructionsInput.value = `Focus on this section exclusively. Use surrounding HTML for context, but this is the event we want:
 

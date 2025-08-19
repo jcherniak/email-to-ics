@@ -5,13 +5,14 @@
 
 import { 
   createBrowserAdapters,
-  BrowserPlatformIcsGenerator
+  BrowserIcsGenerator,
+  EventData
 } from '@email-to-ics/shared-core';
 import 'bootstrap';
 
 // Global state
 let adapters: ReturnType<typeof createBrowserAdapters>;
-let icsGenerator: BrowserPlatformIcsGenerator;
+let icsGenerator: BrowserIcsGenerator;
 let availableModels: any[] = [];
 let selectedModel: string | null = null;
 let serverUrl = '';
@@ -43,7 +44,6 @@ class TabStateManager {
     async saveState() {
         if (!this.tabId || !this.stateKey) return;
         
-        const urlInput = document.getElementById('url') as HTMLInputElement;
         const instructionsInput = document.getElementById('instructions') as HTMLTextAreaElement;
         const modelSelect = document.getElementById('model-select') as HTMLSelectElement;
         const tentativeToggle = document.getElementById('tentative-toggle') as HTMLInputElement;
@@ -51,7 +51,6 @@ class TabStateManager {
         
         const state = {
             formData: {
-                url: urlInput?.value || '',
                 instructions: instructionsInput?.value || '',
                 model: modelSelect?.value || '',
                 tentative: tentativeToggle?.checked || false,
@@ -82,13 +81,11 @@ class TabStateManager {
             
             if (state && (Date.now() - state.timestamp) < 3600000) {
                 const form = state.formData;
-                const urlInput = document.getElementById('url') as HTMLInputElement;
                 const instructionsInput = document.getElementById('instructions') as HTMLTextAreaElement;
                 const modelSelect = document.getElementById('model-select') as HTMLSelectElement;
                 const tentativeToggle = document.getElementById('tentative-toggle') as HTMLInputElement;
                 const multidayToggle = document.getElementById('multiday-toggle') as HTMLInputElement;
                 
-                if (form.url && urlInput) urlInput.value = form.url;
                 if (form.instructions && instructionsInput) instructionsInput.value = form.instructions;
                 if (form.model && modelSelect) modelSelect.value = form.model;
                 if (tentativeToggle) tentativeToggle.checked = form.tentative;
@@ -110,7 +107,7 @@ class TabStateManager {
 document.addEventListener('DOMContentLoaded', async function() {
     // Initialize platform adapters
     adapters = createBrowserAdapters();
-    icsGenerator = new BrowserPlatformIcsGenerator(adapters);
+    icsGenerator = new BrowserIcsGenerator();
     
     // Check if we're running in an iframe
     const isInIframe = window.self !== window.top;
@@ -126,7 +123,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     const formSection = document.getElementById('form-section')!;
     const reviewSection = document.getElementById('review-section')!;
     const processingView = document.getElementById('processingView')!;
-    const urlInput = document.getElementById('url') as HTMLInputElement;
     const instructionsInput = document.getElementById('instructions') as HTMLTextAreaElement;
     const modelSelect = document.getElementById('model-select') as HTMLSelectElement;
     const tentativeToggle = document.getElementById('tentative-toggle') as HTMLInputElement;
@@ -182,7 +178,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     function disableForm(disable = true) {
-        urlInput.disabled = disable;
         instructionsInput.disabled = disable;
         convertButton.disabled = disable;
         modelSelect.disabled = disable;
@@ -439,7 +434,6 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Main ICS generation
     async function generateICS() {
-        const url = urlInput.value.trim();
         const instructions = instructionsInput.value.trim();
         const model = modelSelect.value;
         const tentative = tentativeToggle.checked;
@@ -459,40 +453,32 @@ document.addEventListener('DOMContentLoaded', async function() {
             const requestData = document.getElementById('requestData')!;
             const statusMessage = document.getElementById('statusMessage')!;
             
+            // Get current page content and URL
+            statusMessage.textContent = 'Getting page content...';
+            const tab = await getActiveTab();
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tab.id! },
+                func: () => ({
+                    url: window.location.href,
+                    html: document.documentElement.outerHTML,
+                    text: document.body.innerText
+                })
+            });
+            const pageContent = results[0].result;
+            
             // Update request details
             requestData.textContent = JSON.stringify({
-                url: url || 'Current page',
+                url: pageContent.url,
                 instructions: instructions || 'None',
                 model: model,
                 tentative: tentative,
                 multiday: multiday,
                 reviewFirst: reviewFirst
             }, null, 2);
-
-            // Get page content
-            statusMessage.textContent = 'Getting page content...';
-            let pageContent;
-            let screenshot = null;
             
-            if (url) {
-                pageContent = { url: url, html: '', text: '' };
-            } else {
-                // Get current page content
-                const tab = await getActiveTab();
-                const results = await chrome.scripting.executeScript({
-                    target: { tabId: tab.id! },
-                    func: () => ({
-                        url: window.location.href,
-                        html: document.documentElement.outerHTML,
-                        text: document.body.innerText
-                    })
-                });
-                pageContent = results[0].result;
-                
-                // Capture screenshot
-                statusMessage.textContent = 'Capturing screenshot...';
-                screenshot = await captureVisibleTabScreenshot();
-            }
+            // Capture screenshot
+            statusMessage.textContent = 'Capturing screenshot...';
+            const screenshot = await captureVisibleTabScreenshot();
 
             // Call AI model
             statusMessage.textContent = 'Analyzing content with AI...';
@@ -699,55 +685,26 @@ ${pageData.html}`;
 
     // ICS generation using shared library
     async function generateICSContent(events: any[], tentative: boolean): Promise<string> {
-        if (events.length === 1) {
-            // Single event
-            const eventData = events[0];
-            return await icsGenerator.generateICS({
-                summary: eventData.summary,
-                description: eventData.description || '',
-                location: eventData.location || '',
-                dtstart: eventData.start_date + (eventData.start_time ? `T${eventData.start_time}:00` : 'T00:00:00'),
-                dtend: eventData.end_date ? eventData.end_date + (eventData.end_time ? `T${eventData.end_time}:00` : 'T23:59:59') : undefined,
-                timezone: eventData.timezone || 'America/New_York',
-                isAllDay: eventData.start_time === null,
-                status: tentative ? 'tentative' : 'confirmed',
-                url: eventData.url
-            });
-        } else {
-            // Multiple events - generate combined ICS file
-            let icsContent = '';
-            for (const eventData of events) {
-                const eventICS = await icsGenerator.generateICS({
-                    summary: eventData.summary,
-                    description: eventData.description || '',
-                    location: eventData.location || '',
-                    dtstart: eventData.start_date + (eventData.start_time ? `T${eventData.start_time}:00` : 'T00:00:00'),
-                    dtend: eventData.end_date ? eventData.end_date + (eventData.end_time ? `T${eventData.end_time}:00` : 'T23:59:59') : undefined,
-                    timezone: eventData.timezone || 'America/New_York',
-                    isAllDay: eventData.start_time === null,
-                    status: tentative ? 'tentative' : 'confirmed',
-                    url: eventData.url
-                });
-                
-                if (icsContent === '') {
-                    icsContent = eventICS;
-                } else {
-                    // Merge multiple events by combining VEVENT blocks
-                    const lines = eventICS.split('\n');
-                    const eventBlock = lines.slice(
-                        lines.findIndex(line => line.includes('BEGIN:VEVENT')),
-                        lines.findIndex(line => line.includes('END:VEVENT')) + 1
-                    );
-                    
-                    // Insert before the END:VCALENDAR line
-                    const contentLines = icsContent.split('\n');
-                    const insertIndex = contentLines.findIndex(line => line.includes('END:VCALENDAR'));
-                    contentLines.splice(insertIndex, 0, ...eventBlock);
-                    icsContent = contentLines.join('\n');
-                }
-            }
-            return icsContent;
-        }
+        // Convert events to EventData format
+        const eventDataArray: EventData[] = events.map(eventData => ({
+            summary: eventData.summary,
+            description: eventData.description || '',
+            location: eventData.location || '',
+            dtstart: eventData.start_date + (eventData.start_time ? `T${eventData.start_time}:00` : 'T00:00:00'),
+            dtend: eventData.end_date ? 
+                eventData.end_date + (eventData.end_time ? `T${eventData.end_time}:00` : 'T23:59:59') : 
+                undefined,
+            timezone: eventData.timezone || 'America/New_York',
+            isAllDay: eventData.start_time === null,
+            status: tentative ? 'tentative' : 'confirmed',
+            url: eventData.url
+        }));
+
+        // Get fromEmail for organizer
+        const settings = await chrome.storage.sync.get(['fromEmail']);
+        
+        // Generate ICS content for all events
+        return icsGenerator.generateIcs(eventDataArray, {}, settings.fromEmail);
     }
 
     async function showReviewSection(events: any[], icsContent: string) {
@@ -983,9 +940,6 @@ ${pageData.html}`;
     if (isInIframe) {
         window.addEventListener('message', (event) => {
             if (event.data.type === 'INIT_FROM_CONTENT') {
-                if (urlInput && event.data.data.url) {
-                    urlInput.value = event.data.data.url;
-                }
                 if (instructionsInput && event.data.data.selectedText) {
                     instructionsInput.value = `Focus on this section exclusively. Use surrounding HTML for context, but this is the event we want:\n\n${event.data.data.selectedText}`;
                 }
