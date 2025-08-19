@@ -359,7 +359,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     async function loadSettingsIntoUI() {
         const settings = await chrome.storage.sync.get([
             'openRouterKey', 'postmarkApiKey', 'fromEmail', 
-            'toTentativeEmail', 'toConfirmedEmail', 'inboundConfirmedEmail', 'defaultModel'
+            'toTentativeEmail', 'toConfirmedEmail', 'defaultModel'
         ]);
         
         openRouterKeyInput.value = settings.openRouterKey || '';
@@ -370,8 +370,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         toTentativeEmailInput.value = settings.toTentativeEmail || '';
         const toConfirmedEmailInput = document.getElementById('toConfirmedEmail') as HTMLInputElement;
         toConfirmedEmailInput.value = settings.toConfirmedEmail || '';
-        const inboundConfirmedEmailInput = document.getElementById('inboundConfirmedEmail') as HTMLInputElement;
-        inboundConfirmedEmailInput.value = settings.inboundConfirmedEmail || '';
         
         await populateDefaultModels(settings.defaultModel);
     }
@@ -429,7 +427,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     async function initializeExtension() {
         const settings = await chrome.storage.sync.get([
             'openRouterKey', 'postmarkApiKey', 'fromEmail', 
-            'toTentativeEmail', 'toConfirmedEmail', 'inboundConfirmedEmail', 'defaultModel'
+            'toTentativeEmail', 'toConfirmedEmail', 'defaultModel'
         ]);
         
         if (!areRequiredSettingsPresent(settings)) {
@@ -620,7 +618,7 @@ ${pageData.html}`;
                                 description: "Event URL or source URL"
                             }
                         },
-                        required: ["summary", "start_date", "timezone"],
+                        required: ["summary", "location", "start_date", "end_date", "start_time", "end_time", "description", "timezone", "url"],
                         additionalProperties: false
                     }
                 }
@@ -881,8 +879,6 @@ ${pageData.html}`;
         const toTentativeEmail = toTentativeEmailInput.value.trim();
         const toConfirmedEmailInput = document.getElementById('toConfirmedEmail') as HTMLInputElement;
         const toConfirmedEmail = toConfirmedEmailInput.value.trim();
-        const inboundConfirmedEmailInput = document.getElementById('inboundConfirmedEmail') as HTMLInputElement;
-        const inboundConfirmedEmail = inboundConfirmedEmailInput.value.trim();
         const defaultModel = defaultModelSelect.value;
 
         if (!openRouterKey) {
@@ -916,7 +912,6 @@ ${pageData.html}`;
             fromEmail,
             toTentativeEmail,
             toConfirmedEmail,
-            inboundConfirmedEmail,
             defaultModel
         });
 
@@ -933,11 +928,12 @@ ${pageData.html}`;
         const postmarkKey = postmarkApiKeyInput.value.trim();
         
         if (!openRouterKey) {
-            showStatus('Please enter an OpenRouter API key first', 'error', true);
+            alert('Please enter an OpenRouter API key first');
             return;
         }
 
-        showStatus('Testing OpenRouter API...', 'loading');
+        testConnectionButton.disabled = true;
+        testConnectionButton.textContent = 'Testing...';
         
         try {
             // Test OpenRouter API via background script
@@ -950,12 +946,10 @@ ${pageData.html}`;
             const modelCount = openRouterResponse.data?.length || 0;
             
             if (!postmarkKey) {
-                showStatus(`✅ OpenRouter API test passed! Found ${modelCount} models. Postmark API Key not provided - email sending will not work.`, 'success');
+                alert(`✅ OpenRouter API test passed! Found ${modelCount} models.\n\nPostmark API Key not provided - email sending will not work.`);
                 await populateDefaultModels(defaultModelSelect.value);
                 return;
             }
-            
-            showStatus('OpenRouter API test passed. Testing Postmark API...', 'loading');
             
             // Test Postmark API
             try {
@@ -970,7 +964,7 @@ ${pageData.html}`;
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 
-                showStatus(`✅ Both APIs tested successfully! Found ${modelCount} models.`, 'success');
+                alert(`✅ Both APIs tested successfully! Found ${modelCount} models.`);
                 await populateDefaultModels(defaultModelSelect.value);
             } catch (postmarkError) {
                 throw new Error(`Postmark API test failed: ${postmarkError.message}`);
@@ -978,7 +972,10 @@ ${pageData.html}`;
             
         } catch (error) {
             console.error('Connection test failed:', error);
-            showStatus(`❌ Connection test failed: ${error.message}`, 'error', true);
+            alert(`❌ Connection test failed: ${error.message}`);
+        } finally {
+            testConnectionButton.disabled = false;
+            testConnectionButton.textContent = 'Test Connection';
         }
     });
 

@@ -9956,7 +9956,6 @@
         "fromEmail",
         "toTentativeEmail",
         "toConfirmedEmail",
-        "inboundConfirmedEmail",
         "defaultModel"
       ]);
       openRouterKeyInput.value = settings.openRouterKey || "";
@@ -9967,8 +9966,6 @@
       toTentativeEmailInput.value = settings.toTentativeEmail || "";
       const toConfirmedEmailInput = document.getElementById("toConfirmedEmail");
       toConfirmedEmailInput.value = settings.toConfirmedEmail || "";
-      const inboundConfirmedEmailInput = document.getElementById("inboundConfirmedEmail");
-      inboundConfirmedEmailInput.value = settings.inboundConfirmedEmail || "";
       await populateDefaultModels(settings.defaultModel);
     }
     async function populateDefaultModels(selectedModel2) {
@@ -10021,7 +10018,6 @@
         "fromEmail",
         "toTentativeEmail",
         "toConfirmedEmail",
-        "inboundConfirmedEmail",
         "defaultModel"
       ]);
       if (!areRequiredSettingsPresent(settings)) {
@@ -10181,7 +10177,7 @@ ${pageData.html}`;
                   description: "Event URL or source URL"
                 }
               },
-              required: ["summary", "start_date", "timezone"],
+              required: ["summary", "location", "start_date", "end_date", "start_time", "end_time", "description", "timezone", "url"],
               additionalProperties: false
             }
           }
@@ -10410,8 +10406,6 @@ ${pageData.html}`;
       const toTentativeEmail = toTentativeEmailInput.value.trim();
       const toConfirmedEmailInput = document.getElementById("toConfirmedEmail");
       const toConfirmedEmail = toConfirmedEmailInput.value.trim();
-      const inboundConfirmedEmailInput = document.getElementById("inboundConfirmedEmail");
-      const inboundConfirmedEmail = inboundConfirmedEmailInput.value.trim();
       const defaultModel = defaultModelSelect.value;
       if (!openRouterKey) {
         showStatus("OpenRouter API key is required", "error", true);
@@ -10439,7 +10433,6 @@ ${pageData.html}`;
         fromEmail,
         toTentativeEmail,
         toConfirmedEmail,
-        inboundConfirmedEmail,
         defaultModel
       });
       showStatus("Settings saved successfully!", "success");
@@ -10452,10 +10445,11 @@ ${pageData.html}`;
       const postmarkApiKeyInput = document.getElementById("postmarkApiKey");
       const postmarkKey = postmarkApiKeyInput.value.trim();
       if (!openRouterKey) {
-        showStatus("Please enter an OpenRouter API key first", "error", true);
+        alert("Please enter an OpenRouter API key first");
         return;
       }
-      showStatus("Testing OpenRouter API...", "loading");
+      testConnectionButton.disabled = true;
+      testConnectionButton.textContent = "Testing...";
       try {
         const openRouterResponse = await chrome.runtime.sendMessage({ action: "listModels" });
         if (!openRouterResponse.success) {
@@ -10463,11 +10457,12 @@ ${pageData.html}`;
         }
         const modelCount = openRouterResponse.data?.length || 0;
         if (!postmarkKey) {
-          showStatus(`\u2705 OpenRouter API test passed! Found ${modelCount} models. Postmark API Key not provided - email sending will not work.`, "success");
+          alert(`\u2705 OpenRouter API test passed! Found ${modelCount} models.
+
+Postmark API Key not provided - email sending will not work.`);
           await populateDefaultModels(defaultModelSelect.value);
           return;
         }
-        showStatus("OpenRouter API test passed. Testing Postmark API...", "loading");
         try {
           const response = await fetch("https://api.postmarkapp.com/server", {
             headers: {
@@ -10478,14 +10473,17 @@ ${pageData.html}`;
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
           }
-          showStatus(`\u2705 Both APIs tested successfully! Found ${modelCount} models.`, "success");
+          alert(`\u2705 Both APIs tested successfully! Found ${modelCount} models.`);
           await populateDefaultModels(defaultModelSelect.value);
         } catch (postmarkError) {
           throw new Error(`Postmark API test failed: ${postmarkError.message}`);
         }
       } catch (error) {
         console.error("Connection test failed:", error);
-        showStatus(`\u274C Connection test failed: ${error.message}`, "error", true);
+        alert(`\u274C Connection test failed: ${error.message}`);
+      } finally {
+        testConnectionButton.disabled = false;
+        testConnectionButton.textContent = "Test Connection";
       }
     });
     if (isInIframe) {
