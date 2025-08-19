@@ -30,13 +30,12 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const settings = await chrome.storage.sync.get([
                 'openRouterKey', 'postmarkApiKey', 'fromEmail', 
-                'inboundConfirmedEmail', 'toTentativeEmail', 'toConfirmedEmail', 'aiModel'
+                'toTentativeEmail', 'toConfirmedEmail', 'aiModel'
             ]);
             
             document.getElementById('openRouterKey').value = settings.openRouterKey || '';
             document.getElementById('postmarkApiKey').value = settings.postmarkApiKey || '';
             document.getElementById('fromEmail').value = settings.fromEmail || '';
-            document.getElementById('inboundConfirmedEmail').value = settings.inboundConfirmedEmail || '';
             document.getElementById('toTentativeEmail').value = settings.toTentativeEmail || '';
             document.getElementById('toConfirmedEmail').value = settings.toConfirmedEmail || '';
             document.getElementById('aiModel').value = settings.aiModel || 'google/gemini-2.5-pro';
@@ -57,7 +56,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 openRouterKey: document.getElementById('openRouterKey').value.trim(),
                 postmarkApiKey: document.getElementById('postmarkApiKey').value.trim(),
                 fromEmail: document.getElementById('fromEmail').value.trim(),
-                inboundConfirmedEmail: document.getElementById('inboundConfirmedEmail').value.trim(),
                 toTentativeEmail: document.getElementById('toTentativeEmail').value.trim(),
                 toConfirmedEmail: document.getElementById('toConfirmedEmail').value.trim(),
                 aiModel: document.getElementById('aiModel').value
@@ -90,9 +88,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             if (!emailRegex.test(settings.toConfirmedEmail)) {
                 throw new Error('Invalid Confirmed Events Recipient email format');
-            }
-            if (settings.inboundConfirmedEmail && !emailRegex.test(settings.inboundConfirmedEmail)) {
-                throw new Error('Invalid Inbound Confirmed Email format');
             }
             
             // Save to storage and notify background script
