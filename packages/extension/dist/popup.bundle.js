@@ -10347,12 +10347,24 @@ ${pageData.html}`;
       reviewSection.style.display = "none";
       formSection.style.display = "block";
     });
-    sendButton?.addEventListener("click", () => {
+    sendButton?.addEventListener("click", async () => {
       if (reviewData) {
-        hideReviewStatus();
-        reviewSection.style.display = "none";
-        formSection.style.display = "block";
-        showStatus("Email sent successfully!", "success");
+        console.log("\u{1F4E7} Send button clicked, sending email...");
+        showReviewStatus("Sending email...", "loading");
+        disableReviewButtons(true);
+        try {
+          await sendEmail(reviewData.eventData, reviewData.icsContent, tentativeToggle.checked);
+          console.log("\u2705 Email sent successfully from review section");
+          hideReviewStatus();
+          reviewSection.style.display = "none";
+          formSection.style.display = "block";
+          showStatus("Email sent successfully!", "success");
+        } catch (error) {
+          console.error("\u{1F4A5} Error sending email from review section:", error);
+          showReviewStatus(`Failed to send email: ${error.message}`, "error");
+        } finally {
+          disableReviewButtons(false);
+        }
       }
     });
     rejectButton?.addEventListener("click", () => {
@@ -10481,14 +10493,32 @@ ${event.data.data.selectedText}`;
       URL.revokeObjectURL(url);
     };
     async function sendEmail(events, icsContent, tentative) {
+      console.log("\u{1F4EC} sendEmail function called:", {
+        eventCount: events.length,
+        icsLength: icsContent.length,
+        tentative
+      });
       try {
+        console.log("\u2699\uFE0F Loading email settings...");
         const settings = await chrome.storage.sync.get([
           "fromEmail",
           "toTentativeEmail",
           "toConfirmedEmail"
         ]);
+        console.log("\u2699\uFE0F Email settings loaded:", {
+          hasFromEmail: !!settings.fromEmail,
+          hasToTentative: !!settings.toTentativeEmail,
+          hasToConfirmed: !!settings.toConfirmedEmail,
+          tentative
+        });
         const recipientEmail = tentative ? settings.toTentativeEmail : settings.toConfirmedEmail;
         const isMultiple = Array.isArray(events) && events.length > 1;
+        console.log("\u{1F4E7} Email details:", {
+          recipientEmail,
+          fromEmail: settings.fromEmail,
+          isMultiple,
+          tentative
+        });
         let subject;
         let emailBody;
         if (isMultiple) {
@@ -10525,27 +10555,40 @@ This invitation was generated automatically.`;
             }
           ]
         };
+        console.log("\u{1F4E4} Sending email payload to background script:", {
+          from: emailPayload.From,
+          to: emailPayload.To,
+          subject: emailPayload.Subject,
+          bodyLength: emailPayload.TextBody.length,
+          attachmentSize: emailPayload.Attachments[0].Content.length
+        });
         const response = await chrome.runtime.sendMessage({
           action: "sendEmail",
           payload: emailPayload
         });
+        console.log("\u{1F4E5} Email send response:", response);
         if (response.success) {
+          console.log("\u2705 Email sent successfully:", response.data);
           return { message: "Calendar invite sent successfully!" };
         } else {
+          console.error("\u274C Email send failed:", response.error);
           throw new Error(response.error);
         }
       } catch (error) {
-        console.error("Email sending error:", error);
+        console.error("\u{1F4A5} Email sending error:", error);
         throw error;
       }
     }
     window.sendEmail = async (eventData, icsContent) => {
+      console.log("\u{1F310} Global sendEmail called from HTML onclick");
       try {
         const events = JSON.parse(decodeURIComponent(eventData));
+        console.log("\u{1F4E7} Calling internal sendEmail function:", { eventCount: events.length });
         await sendEmail(events, icsContent, tentativeToggle.checked);
+        console.log("\u2705 Global sendEmail completed successfully");
         showStatus("Email sent successfully!", "success");
       } catch (error) {
-        console.error("Error sending email:", error);
+        console.error("\u{1F4A5} Global sendEmail error:", error);
         showStatus(`Failed to send email: ${error.message}`, "error", true);
       }
     };

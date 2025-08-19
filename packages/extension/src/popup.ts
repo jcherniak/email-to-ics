@@ -858,13 +858,25 @@ ${pageData.html}`;
         formSection.style.display = 'block';
     });
     
-    sendButton?.addEventListener('click', () => {
+    sendButton?.addEventListener('click', async () => {
         if (reviewData) {
-            // Send email logic here
-            hideReviewStatus();
-            reviewSection.style.display = 'none';
-            formSection.style.display = 'block';
-            showStatus('Email sent successfully!', 'success');
+            console.log('📧 Send button clicked, sending email...');
+            showReviewStatus('Sending email...', 'loading');
+            disableReviewButtons(true);
+            
+            try {
+                await sendEmail(reviewData.eventData, reviewData.icsContent, tentativeToggle.checked);
+                console.log('✅ Email sent successfully from review section');
+                hideReviewStatus();
+                reviewSection.style.display = 'none';
+                formSection.style.display = 'block';
+                showStatus('Email sent successfully!', 'success');
+            } catch (error) {
+                console.error('💥 Error sending email from review section:', error);
+                showReviewStatus(`Failed to send email: ${error.message}`, 'error');
+            } finally {
+                disableReviewButtons(false);
+            }
         }
     });
     
@@ -1021,13 +1033,33 @@ ${pageData.html}`;
 
     // Email sending function using Postmark API via background script
     async function sendEmail(events: any[], icsContent: string, tentative: boolean) {
+        console.log('📬 sendEmail function called:', {
+            eventCount: events.length,
+            icsLength: icsContent.length,
+            tentative
+        });
+        
         try {
+            console.log('⚙️ Loading email settings...');
             const settings = await chrome.storage.sync.get([
                 'fromEmail', 'toTentativeEmail', 'toConfirmedEmail'
             ]);
+            console.log('⚙️ Email settings loaded:', {
+                hasFromEmail: !!settings.fromEmail,
+                hasToTentative: !!settings.toTentativeEmail,
+                hasToConfirmed: !!settings.toConfirmedEmail,
+                tentative
+            });
             
             const recipientEmail = tentative ? settings.toTentativeEmail : settings.toConfirmedEmail;
             const isMultiple = Array.isArray(events) && events.length > 1;
+            
+            console.log('📧 Email details:', {
+                recipientEmail,
+                fromEmail: settings.fromEmail,
+                isMultiple,
+                tentative
+            });
             
             let subject: string;
             let emailBody: string;
@@ -1058,30 +1090,45 @@ ${pageData.html}`;
                 ]
             };
             
+            console.log('📤 Sending email payload to background script:', {
+                from: emailPayload.From,
+                to: emailPayload.To,
+                subject: emailPayload.Subject,
+                bodyLength: emailPayload.TextBody.length,
+                attachmentSize: emailPayload.Attachments[0].Content.length
+            });
+            
             const response = await chrome.runtime.sendMessage({
                 action: 'sendEmail',
                 payload: emailPayload
             });
             
+            console.log('📥 Email send response:', response);
+            
             if (response.success) {
+                console.log('✅ Email sent successfully:', response.data);
                 return { message: 'Calendar invite sent successfully!' };
             } else {
+                console.error('❌ Email send failed:', response.error);
                 throw new Error(response.error);
             }
         } catch (error) {
-            console.error('Email sending error:', error);
+            console.error('💥 Email sending error:', error);
             throw error;
         }
     }
     
     // Global sendEmail function for backward compatibility and review section
     (window as any).sendEmail = async (eventData: string, icsContent: string) => {
+        console.log('🌐 Global sendEmail called from HTML onclick');
         try {
             const events = JSON.parse(decodeURIComponent(eventData));
+            console.log('📧 Calling internal sendEmail function:', { eventCount: events.length });
             await sendEmail(events, icsContent, tentativeToggle.checked);
+            console.log('✅ Global sendEmail completed successfully');
             showStatus('Email sent successfully!', 'success');
         } catch (error) {
-            console.error('Error sending email:', error);
+            console.error('💥 Global sendEmail error:', error);
             showStatus(`Failed to send email: ${error.message}`, 'error', true);
         }
     };
