@@ -434,13 +434,24 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Main ICS generation
     async function generateICS() {
+        console.log('🚀 Generate ICS Started');
+        
         const instructions = instructionsInput.value.trim();
         const model = modelSelect.value;
         const tentative = tentativeToggle.checked;
         const multiday = multidayToggle.checked;
         const reviewFirst = (document.querySelector('input[name="review-option"]:checked') as HTMLInputElement)?.value === 'review';
 
+        console.log('📋 Form values:', {
+            instructions,
+            model,
+            tentative,
+            multiday,
+            reviewFirst
+        });
+
         if (!model) {
+            console.error('❌ No model selected');
             showStatus('Please select an AI model', 'error', true);
             return;
         }
@@ -454,8 +465,11 @@ document.addEventListener('DOMContentLoaded', async function() {
             const statusMessage = document.getElementById('statusMessage')!;
             
             // Get current page content and URL
+            console.log('📄 Getting page content...');
             statusMessage.textContent = 'Getting page content...';
             const tab = await getActiveTab();
+            console.log('🔍 Active tab:', { id: tab.id, url: tab.url });
+            
             const results = await chrome.scripting.executeScript({
                 target: { tabId: tab.id! },
                 func: () => ({
@@ -465,6 +479,11 @@ document.addEventListener('DOMContentLoaded', async function() {
                 })
             });
             const pageContent = results[0].result;
+            console.log('📄 Page content extracted:', {
+                url: pageContent.url,
+                htmlLength: pageContent.html.length,
+                textLength: pageContent.text.length
+            });
             
             // Update request details
             requestData.textContent = JSON.stringify({
@@ -477,16 +496,22 @@ document.addEventListener('DOMContentLoaded', async function() {
             }, null, 2);
             
             // Capture screenshot
+            console.log('📸 Capturing screenshot...');
             statusMessage.textContent = 'Capturing screenshot...';
             const screenshot = await captureVisibleTabScreenshot();
+            console.log('📸 Screenshot captured:', { hasScreenshot: !!screenshot, length: screenshot?.length || 0 });
 
             // Call AI model
+            console.log('🤖 Calling AI model...');
             statusMessage.textContent = 'Analyzing content with AI...';
             const events = await callAIModel(pageContent, instructions, model, tentative, multiday, screenshot);
+            console.log('🎯 AI model returned events:', { eventCount: events.length, events });
             
             // Generate ICS
+            console.log('📅 Generating ICS file...');
             statusMessage.textContent = 'Generating ICS file...';
             const icsContent = await generateICSContent(events, tentative);
+            console.log('📅 ICS content generated:', { length: icsContent.length, preview: icsContent.substring(0, 200) + '...' });
             
             if (reviewFirst) {
                 await showReviewSection(events, icsContent);
@@ -522,15 +547,28 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
             
         } catch (error) {
-            console.error('Error generating ICS:', error);
+            console.error('💥 Error generating ICS:', error);
+            console.error('💥 Error stack:', error.stack);
             showStatus(`Error: ${error.message}`, 'error', true);
             processingView.style.display = 'none';
             formSection.style.display = 'block';
         }
+        
+        console.log('🏁 Generate ICS process completed');
     }
 
     // AI model calling
     async function callAIModel(pageData: any, instructions: string, model: string, tentative: boolean, multiday: boolean, screenshot: string | null): Promise<any> {
+        console.log('🤖 AI Request Starting...', {
+            model,
+            url: pageData.url,
+            htmlLength: pageData.html?.length || 0,
+            hasScreenshot: !!screenshot,
+            instructions: instructions.substring(0, 100) + '...',
+            tentative,
+            multiday
+        });
+        
         const cleanUrl = stripTrackingParameters(pageData.url);
         
         const prompt = `You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
@@ -634,16 +672,36 @@ ${pageData.html}`;
             temperature: 0.1
         };
 
+        console.log('📤 Sending message to background script:', {
+            action: 'callOpenRouter',
+            model,
+            promptLength: prompt.length,
+            payloadSize: JSON.stringify(payload).length
+        });
+
         const response = await chrome.runtime.sendMessage({
             action: 'callOpenRouter',
             payload: payload
         });
 
+        console.log('📥 Background script response:', {
+            success: response.success,
+            hasData: !!response.data,
+            error: response.error,
+            choices: response.data?.choices?.length || 0
+        });
+
         if (!response.success) {
+            console.error('❌ AI Request Failed:', response.error);
             throw new Error(`OpenRouter API error: ${response.error}`);
         }
 
         const aiResponse = response.data.choices[0]?.message?.content || '';
+        console.log('✅ AI Request Completed:', {
+            responseLength: aiResponse.length,
+            responsePreview: aiResponse.substring(0, 200) + '...'
+        });
+        
         return parseAiResponse(aiResponse);
     }
 

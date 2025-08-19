@@ -9985,12 +9985,21 @@
       }
     }
     async function generateICS() {
+      console.log("\u{1F680} Generate ICS Started");
       const instructions = instructionsInput.value.trim();
       const model = modelSelect.value;
       const tentative = tentativeToggle.checked;
       const multiday = multidayToggle.checked;
       const reviewFirst = document.querySelector('input[name="review-option"]:checked')?.value === "review";
+      console.log("\u{1F4CB} Form values:", {
+        instructions,
+        model,
+        tentative,
+        multiday,
+        reviewFirst
+      });
       if (!model) {
+        console.error("\u274C No model selected");
         showStatus("Please select an AI model", "error", true);
         return;
       }
@@ -9999,8 +10008,10 @@
         processingView.style.display = "block";
         const requestData = document.getElementById("requestData");
         const statusMessage = document.getElementById("statusMessage");
+        console.log("\u{1F4C4} Getting page content...");
         statusMessage.textContent = "Getting page content...";
         const tab = await getActiveTab();
+        console.log("\u{1F50D} Active tab:", { id: tab.id, url: tab.url });
         const results = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => ({
@@ -10010,6 +10021,11 @@
           })
         });
         const pageContent = results[0].result;
+        console.log("\u{1F4C4} Page content extracted:", {
+          url: pageContent.url,
+          htmlLength: pageContent.html.length,
+          textLength: pageContent.text.length
+        });
         requestData.textContent = JSON.stringify({
           url: pageContent.url,
           instructions: instructions || "None",
@@ -10018,12 +10034,18 @@
           multiday,
           reviewFirst
         }, null, 2);
+        console.log("\u{1F4F8} Capturing screenshot...");
         statusMessage.textContent = "Capturing screenshot...";
         const screenshot = await captureVisibleTabScreenshot();
+        console.log("\u{1F4F8} Screenshot captured:", { hasScreenshot: !!screenshot, length: screenshot?.length || 0 });
+        console.log("\u{1F916} Calling AI model...");
         statusMessage.textContent = "Analyzing content with AI...";
         const events = await callAIModel(pageContent, instructions, model, tentative, multiday, screenshot);
+        console.log("\u{1F3AF} AI model returned events:", { eventCount: events.length, events });
+        console.log("\u{1F4C5} Generating ICS file...");
         statusMessage.textContent = "Generating ICS file...";
         const icsContent = await generateICSContent(events, tentative);
+        console.log("\u{1F4C5} ICS content generated:", { length: icsContent.length, preview: icsContent.substring(0, 200) + "..." });
         if (reviewFirst) {
           await showReviewSection(events, icsContent);
         } else {
@@ -10048,13 +10070,24 @@
           closeButton.style.display = "block";
         }
       } catch (error) {
-        console.error("Error generating ICS:", error);
+        console.error("\u{1F4A5} Error generating ICS:", error);
+        console.error("\u{1F4A5} Error stack:", error.stack);
         showStatus(`Error: ${error.message}`, "error", true);
         processingView.style.display = "none";
         formSection.style.display = "block";
       }
+      console.log("\u{1F3C1} Generate ICS process completed");
     }
     async function callAIModel(pageData, instructions, model, tentative, multiday, screenshot) {
+      console.log("\u{1F916} AI Request Starting...", {
+        model,
+        url: pageData.url,
+        htmlLength: pageData.html?.length || 0,
+        hasScreenshot: !!screenshot,
+        instructions: instructions.substring(0, 100) + "...",
+        tentative,
+        multiday
+      });
       const cleanUrl = stripTrackingParameters(pageData.url);
       const prompt = `You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
 
@@ -10155,14 +10188,31 @@ ${pageData.html}`;
         max_tokens: 2e4,
         temperature: 0.1
       };
+      console.log("\u{1F4E4} Sending message to background script:", {
+        action: "callOpenRouter",
+        model,
+        promptLength: prompt.length,
+        payloadSize: JSON.stringify(payload).length
+      });
       const response = await chrome.runtime.sendMessage({
         action: "callOpenRouter",
         payload
       });
+      console.log("\u{1F4E5} Background script response:", {
+        success: response.success,
+        hasData: !!response.data,
+        error: response.error,
+        choices: response.data?.choices?.length || 0
+      });
       if (!response.success) {
+        console.error("\u274C AI Request Failed:", response.error);
         throw new Error(`OpenRouter API error: ${response.error}`);
       }
       const aiResponse = response.data.choices[0]?.message?.content || "";
+      console.log("\u2705 AI Request Completed:", {
+        responseLength: aiResponse.length,
+        responsePreview: aiResponse.substring(0, 200) + "..."
+      });
       return parseAiResponse(aiResponse);
     }
     function parseAiResponse(response) {
