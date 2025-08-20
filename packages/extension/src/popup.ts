@@ -580,13 +580,14 @@ Extract event details from the provided content. Pay attention to:
 - For all-day events, set start_time and end_time to null
 - If no end time specified, make reasonable estimate
 - Default timezone is America/New_York unless specified
-- Multi-day events: ${multiday ? 'Expected' : 'Not expected'}
+- Multi-day events: ${multiday ? 'Focus on the PRIMARY event mentioned on the page. Only if there is no clear primary event, extract multiple events' : 'Extract exactly one event'}
 - Event status: ${tentative ? 'Tentative' : 'Confirmed'}
-- If a source URL is provided, include it in the "url" field and add it at the bottom of description
+- CRITICAL: Always include the source URL in the "url" field
+- CRITICAL: Always add the source URL at the end of the description with format: "\\n\\nSource: [URL]"
 
 ${instructions ? `Special instructions: ${instructions}\n` : ''}
 
-${cleanUrl ? `Source URL: ${cleanUrl}\n` : ''}
+Source URL (MUST be included in url field and description): ${cleanUrl}
 
 Content to analyze:
 ${pageData.html}`;
@@ -596,7 +597,7 @@ ${pageData.html}`;
             properties: {
                 events: {
                     type: "array",
-                    description: multiday ? "Array of calendar events (can contain multiple events)" : "Array of calendar events (must contain exactly one event)",
+                    description: multiday ? "Array of calendar events (focus on primary event, multiple only if no clear primary)" : "Array of calendar events (must contain exactly one event)",
                     minItems: 1,
                     maxItems: multiday ? 50 : 1,
                     items: {
