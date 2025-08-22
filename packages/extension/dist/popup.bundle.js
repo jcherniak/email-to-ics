@@ -17568,12 +17568,18 @@ ${pageData.html}`;
         required: ["events"],
         additionalProperties: false
       };
+      const userContent = [
+        { type: "text", text: prompt }
+      ];
+      if (screenshot) {
+        userContent.push({ type: "image_url", image_url: { url: screenshot } });
+      }
       const payload = {
         model,
         messages: [
           {
             role: "user",
-            content: prompt
+            content: userContent
           }
         ],
         response_format: {
@@ -17587,12 +17593,7 @@ ${pageData.html}`;
         max_tokens: 2e4,
         temperature: 0.1
       };
-      console.log("\u{1F4E4} Sending message to background script:", {
-        action: "callOpenRouter",
-        model,
-        promptLength: prompt.length,
-        payloadSize: JSON.stringify(payload).length
-      });
+      console.log("\u{1F4E4} OpenRouter request payload (popup):", payload);
       const response = await chrome.runtime.sendMessage({
         action: "callOpenRouter",
         payload

@@ -672,12 +672,19 @@ ${pageData.html}`;
         };
 
         // Use background script to make API call to avoid CSP issues
+        const userContent: any[] = [
+            { type: 'text', text: prompt }
+        ];
+        if (screenshot) {
+            userContent.push({ type: 'image_url', image_url: { url: screenshot } });
+        }
+
         const payload = {
             model: model,
             messages: [
                 {
                     role: 'user',
-                    content: prompt
+                    content: userContent
                 }
             ],
             response_format: {
@@ -692,12 +699,8 @@ ${pageData.html}`;
             temperature: 0.1
         };
 
-        console.log('📤 Sending message to background script:', {
-            action: 'callOpenRouter',
-            model,
-            promptLength: prompt.length,
-            payloadSize: JSON.stringify(payload).length
-        });
+        // Log full OpenRouter request payload (excluding secrets; header is added in background)
+        console.log('📤 OpenRouter request payload (popup):', payload);
 
         const response = await chrome.runtime.sendMessage({
             action: 'callOpenRouter',
