@@ -232,6 +232,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return;
         }
 
+        // Log the full request payload without sensitive headers
+        try {
+          const hasImage = Array.isArray(request.payload?.messages?.[0]?.content) && request.payload.messages[0].content.some(p => p.type === 'image_url');
+          console.log('📦 OpenRouter request (background):', {
+            model: request.payload?.model,
+            hasImage,
+            messageContentTypes: Array.isArray(request.payload?.messages?.[0]?.content) ? request.payload.messages[0].content.map(p => p.type) : typeof request.payload?.messages?.[0]?.content,
+            payload: request.payload
+          });
+        } catch (logErr) {
+          console.warn('⚠️ Failed to log OpenRouter request payload:', logErr);
+        }
+
         console.log('📤 Background: Making fetch request to OpenRouter...');
         const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
@@ -258,6 +271,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         const data = await response.json();
+        // Log the full OpenRouter response JSON
+        try {
+          console.log('📦 OpenRouter response JSON (background):', data);
+        } catch (respLogErr) {
+          console.warn('⚠️ Failed to log OpenRouter response JSON:', respLogErr);
+        }
         const endTime = Date.now();
         console.log('✅ Background: API call completed successfully:', {
           duration: `${endTime - startTime}ms`,

@@ -17969,9 +17969,7 @@ ${event.data.data.selectedText}`;
           }).join("\n");
           emailBody = `Please find the attached calendar events.
 
-${eventsList}
-
-This invitation was generated automatically.`;
+${eventsList}`;
         } else {
           const event = events[0];
           subject = `Calendar Event: ${event.summary}`;
@@ -17980,9 +17978,7 @@ This invitation was generated automatically.`;
 
 Event: ${event.summary}
 ${event.location ? `Location: ${event.location}
-` : ""}${cleanDesc ? `Description: ${cleanDesc}
-` : ""}
-This invitation was generated automatically.`;
+` : ""}${cleanDesc ? `Description: ${cleanDesc}` : ""}`;
         }
         const emailPayload = {
           From: settings.fromEmail,

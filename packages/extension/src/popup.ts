@@ -1137,12 +1137,12 @@ ${pageData.html}`;
                     const desc = sanitizeDescription(event.description || '');
                     return `${index + 1}. ${event.summary} - ${event.start_date}${event.start_time ? ' at ' + event.start_time : ''}${desc ? `\n   ${desc}` : ''}`;
                 }).join('\n');
-                emailBody = `Please find the attached calendar events.\n\n${eventsList}\n\nThis invitation was generated automatically.`;
+                emailBody = `Please find the attached calendar events.\n\n${eventsList}`;
             } else {
                 const event = events[0];
                 subject = `Calendar Event: ${event.summary}`;
                 const cleanDesc = sanitizeDescription(event.description || '');
-                emailBody = `Please find the calendar invitation attached.\n\nEvent: ${event.summary}\n${event.location ? `Location: ${event.location}\n` : ''}${cleanDesc ? `Description: ${cleanDesc}\n` : ''}\nThis invitation was generated automatically.`;
+                emailBody = `Please find the calendar invitation attached.\n\nEvent: ${event.summary}\n${event.location ? `Location: ${event.location}\n` : ''}${cleanDesc ? `Description: ${cleanDesc}` : ''}`;
             }
             
             const emailPayload = {
