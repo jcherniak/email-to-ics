@@ -56,6 +56,7 @@ class TabStateManager {
                 model: modelSelect?.value || '',
                 tentative: tentativeToggle?.checked || false,
                 multiday: multidayToggle?.checked || false,
+                preextract: preextractToggle?.checked ?? true,
                 reviewOption: (document.querySelector('input[name="review-option"]:checked') as HTMLInputElement)?.value || 'direct'
             },
             processingState: {
@@ -86,11 +87,13 @@ class TabStateManager {
                 const modelSelect = document.getElementById('model-select') as HTMLSelectElement;
                 const tentativeToggle = document.getElementById('tentative-toggle') as HTMLInputElement;
                 const multidayToggle = document.getElementById('multiday-toggle') as HTMLInputElement;
+                const preextractToggle = document.getElementById('preextract-toggle') as HTMLInputElement;
                 
                 if (form.instructions && instructionsInput) instructionsInput.value = form.instructions;
                 if (form.model && modelSelect) modelSelect.value = form.model;
                 if (tentativeToggle) tentativeToggle.checked = form.tentative;
                 if (multidayToggle) multidayToggle.checked = form.multiday;
+                if (preextractToggle && typeof form.preextract === 'boolean') preextractToggle.checked = form.preextract;
                 if (form.reviewOption) {
                     const radio = document.querySelector(`input[name="review-option"][value="${form.reviewOption}"]`) as HTMLInputElement;
                     if (radio) radio.checked = true;
@@ -126,6 +129,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     const processingView = document.getElementById('processingView')!;
     const instructionsInput = document.getElementById('instructions') as HTMLTextAreaElement;
     const modelSelect = document.getElementById('model-select') as HTMLSelectElement;
+    const preextractToggle = document.getElementById('preextract-toggle') as HTMLInputElement;
     const tentativeToggle = document.getElementById('tentative-toggle') as HTMLInputElement;
     const multidayToggle = document.getElementById('multiday-toggle') as HTMLInputElement;
     const convertButton = document.getElementById('convert-button') as HTMLButtonElement;
@@ -184,6 +188,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         modelSelect.disabled = disable;
         refreshModelsButton.disabled = disable;
         tentativeToggle.disabled = disable;
+        if (preextractToggle) preextractToggle.disabled = disable;
         const reviewRadios = document.querySelectorAll('input[name="review-option"]') as NodeListOf<HTMLInputElement>;
         reviewRadios.forEach(radio => radio.disabled = disable);
     }
@@ -489,6 +494,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         const model = modelSelect.value;
         const tentative = tentativeToggle.checked;
         const multiday = multidayToggle.checked;
+        const preextract = preextractToggle?.checked ?? true;
         const reviewFirst = (document.querySelector('input[name="review-option"]:checked') as HTMLInputElement)?.value === 'review';
 
         console.log('📋 Form values:', {
@@ -553,7 +559,34 @@ document.addEventListener('DOMContentLoaded', async function() {
             // Call AI model
             console.log('🤖 Calling AI model...');
             statusMessage.textContent = 'Analyzing content with AI...';
-            const events = await callAIModel(pageContent, instructions, model, tentative, multiday, screenshot);
+            let effectiveHtml = pageContent.html;
+            if (preextract) {
+                console.log('🧼 Pre-extracting main content with gpt-5-nano...');
+                statusMessage.textContent = 'Finding main content...';
+                try {
+                    const extracted = await extractMainContent(pageContent.url, pageContent.html);
+                    if (extracted && extracted.length > 100) {
+                        effectiveHtml = extracted;
+                        console.log('✅ Main content extracted:', { length: effectiveHtml.length });
+                    } else {
+                        console.warn('⚠️ Extraction returned too little content; using full HTML');
+                    }
+                } catch (exErr) {
+                    console.warn('⚠️ Extraction failed; using full HTML', exErr);
+                }
+            }
+
+            let events: any[];
+            try {
+                events = await callAIModel({ ...pageContent, html: effectiveHtml }, instructions, model, tentative, multiday, screenshot);
+            } catch (err) {
+                if (preextract) {
+                    console.warn('⚠️ Parsing failed with extracted content. Retrying with full HTML...');
+                    events = await callAIModel(pageContent, instructions, model, tentative, multiday, screenshot);
+                } else {
+                    throw err;
+                }
+            }
             console.log('🎯 AI model returned events:', { eventCount: events.length, events });
             
             // Generate ICS
@@ -772,6 +805,50 @@ Extract event details from the provided content. Pay attention to:
         });
         
         return parseAiResponse(aiResponse);
+    }
+
+    // First-pass content extraction using gpt-5-nano
+    async function extractMainContent(url: string, html: string): Promise<string> {
+        const system = 'You extract the MAIN CONTENT region from raw HTML of a web page. Return only the main article/body content as plain text, removing navigation, ads, footers, and unrelated sections.';
+        const user = `URL: ${url}\n\nHTML:\n${html}`;
+
+        const payload = {
+            model: 'openai/gpt-5-nano',
+            messages: [
+                { role: 'system', content: system },
+                { role: 'user', content: [{ type: 'text', text: user }] }
+            ],
+            response_format: {
+                type: 'json_schema',
+                json_schema: {
+                    name: 'main_content',
+                    schema: {
+                        type: 'object',
+                        properties: { content: { type: 'string' } },
+                        required: ['content'],
+                        additionalProperties: false
+                    },
+                    strict: true
+                }
+            },
+            max_tokens: 8000,
+            temperature: 0.0
+        } as any;
+
+        console.log('🔎 Pre-extract request payload:', payload);
+        const response = await chrome.runtime.sendMessage({ action: 'callOpenRouter', payload });
+        if (!response.success) {
+            throw new Error(`Pre-extract failed: ${response.error}`);
+        }
+        const content = (() => {
+            const txt = response.data?.choices?.[0]?.message?.content || '';
+            try {
+                return JSON.parse(txt)?.content || '';
+            } catch {
+                return txt;
+            }
+        })();
+        return content;
     }
 
     function parseAiResponse(response: string): any[] {

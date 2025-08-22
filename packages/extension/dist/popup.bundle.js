@@ -17045,6 +17045,7 @@
           model: modelSelect?.value || "",
           tentative: tentativeToggle?.checked || false,
           multiday: multidayToggle?.checked || false,
+          preextract: preextractToggle?.checked ?? true,
           reviewOption: document.querySelector('input[name="review-option"]:checked')?.value || "direct"
         },
         processingState: {
@@ -17072,6 +17073,7 @@
           const modelSelect = document.getElementById("model-select");
           const tentativeToggle = document.getElementById("tentative-toggle");
           const multidayToggle = document.getElementById("multiday-toggle");
+          const preextractToggle2 = document.getElementById("preextract-toggle");
           if (form.instructions && instructionsInput)
             instructionsInput.value = form.instructions;
           if (form.model && modelSelect)
@@ -17080,6 +17082,8 @@
             tentativeToggle.checked = form.tentative;
           if (multidayToggle)
             multidayToggle.checked = form.multiday;
+          if (preextractToggle2 && typeof form.preextract === "boolean")
+            preextractToggle2.checked = form.preextract;
           if (form.reviewOption) {
             const radio = document.querySelector(`input[name="review-option"][value="${form.reviewOption}"]`);
             if (radio)
@@ -17106,6 +17110,7 @@
     const processingView = document.getElementById("processingView");
     const instructionsInput = document.getElementById("instructions");
     const modelSelect = document.getElementById("model-select");
+    const preextractToggle2 = document.getElementById("preextract-toggle");
     const tentativeToggle = document.getElementById("tentative-toggle");
     const multidayToggle = document.getElementById("multiday-toggle");
     const convertButton = document.getElementById("convert-button");
@@ -17154,6 +17159,8 @@
       modelSelect.disabled = disable;
       refreshModelsButton.disabled = disable;
       tentativeToggle.disabled = disable;
+      if (preextractToggle2)
+        preextractToggle2.disabled = disable;
       const reviewRadios = document.querySelectorAll('input[name="review-option"]');
       reviewRadios.forEach((radio) => radio.disabled = disable);
     }
@@ -17417,6 +17424,7 @@
       const model = modelSelect.value;
       const tentative = tentativeToggle.checked;
       const multiday = multidayToggle.checked;
+      const preextract = preextractToggle2?.checked ?? true;
       const reviewFirst = document.querySelector('input[name="review-option"]:checked')?.value === "review";
       console.log("\u{1F4CB} Form values:", {
         instructions,
@@ -17467,7 +17475,33 @@
         console.log("\u{1F4F8} Screenshot captured:", { hasScreenshot: !!screenshot, length: screenshot?.length || 0 });
         console.log("\u{1F916} Calling AI model...");
         statusMessage.textContent = "Analyzing content with AI...";
-        const events = await callAIModel(pageContent, instructions, model, tentative, multiday, screenshot);
+        let effectiveHtml = pageContent.html;
+        if (preextract) {
+          console.log("\u{1F9FC} Pre-extracting main content with gpt-5-nano...");
+          statusMessage.textContent = "Finding main content...";
+          try {
+            const extracted = await extractMainContent(pageContent.url, pageContent.html);
+            if (extracted && extracted.length > 100) {
+              effectiveHtml = extracted;
+              console.log("\u2705 Main content extracted:", { length: effectiveHtml.length });
+            } else {
+              console.warn("\u26A0\uFE0F Extraction returned too little content; using full HTML");
+            }
+          } catch (exErr) {
+            console.warn("\u26A0\uFE0F Extraction failed; using full HTML", exErr);
+          }
+        }
+        let events;
+        try {
+          events = await callAIModel({ ...pageContent, html: effectiveHtml }, instructions, model, tentative, multiday, screenshot);
+        } catch (err) {
+          if (preextract) {
+            console.warn("\u26A0\uFE0F Parsing failed with extracted content. Retrying with full HTML...");
+            events = await callAIModel(pageContent, instructions, model, tentative, multiday, screenshot);
+          } else {
+            throw err;
+          }
+        }
         console.log("\u{1F3AF} AI model returned events:", { eventCount: events.length, events });
         console.log("\u{1F4C5} Generating ICS file...");
         statusMessage.textContent = "Generating ICS file...";
@@ -17659,6 +17693,49 @@ ${pageData.html}`;
         responsePreview: aiResponse.substring(0, 200) + "..."
       });
       return parseAiResponse(aiResponse);
+    }
+    async function extractMainContent(url, html) {
+      const system = "You extract the MAIN CONTENT region from raw HTML of a web page. Return only the main article/body content as plain text, removing navigation, ads, footers, and unrelated sections.";
+      const user = `URL: ${url}
+
+HTML:
+${html}`;
+      const payload = {
+        model: "openai/gpt-5-nano",
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: [{ type: "text", text: user }] }
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "main_content",
+            schema: {
+              type: "object",
+              properties: { content: { type: "string" } },
+              required: ["content"],
+              additionalProperties: false
+            },
+            strict: true
+          }
+        },
+        max_tokens: 8e3,
+        temperature: 0
+      };
+      console.log("\u{1F50E} Pre-extract request payload:", payload);
+      const response = await chrome.runtime.sendMessage({ action: "callOpenRouter", payload });
+      if (!response.success) {
+        throw new Error(`Pre-extract failed: ${response.error}`);
+      }
+      const content = (() => {
+        const txt = response.data?.choices?.[0]?.message?.content || "";
+        try {
+          return JSON.parse(txt)?.content || "";
+        } catch {
+          return txt;
+        }
+      })();
+      return content;
     }
     function parseAiResponse(response) {
       try {
