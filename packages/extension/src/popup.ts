@@ -494,7 +494,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         const model = modelSelect.value;
         const tentative = tentativeToggle.checked;
         const multiday = multidayToggle.checked;
-        const preextract = preextractToggle?.checked ?? true;
         const reviewFirst = (document.querySelector('input[name="review-option"]:checked') as HTMLInputElement)?.value === 'review';
 
         console.log('📋 Form values:', {
@@ -539,6 +538,16 @@ document.addEventListener('DOMContentLoaded', async function() {
                 htmlLength: pageContent.html.length,
                 textLength: pageContent.text.length
             });
+
+            // Auto-check pre-extract if HTML > 200 KB; otherwise leave user's toggle
+            const overThreshold = pageContent.html.length > 200 * 1024;
+            const preextract = overThreshold ? true : (preextractToggle?.checked ?? false);
+            if (preextractToggle && preextractToggle.checked !== preextract) {
+                preextractToggle.checked = preextract;
+            }
+            if (overThreshold) {
+                console.log('🧼 Large HTML detected (>200KB). Enabling pre-extraction.');
+            }
             
             // Update request details
             requestData.textContent = JSON.stringify({

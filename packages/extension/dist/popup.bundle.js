@@ -17424,7 +17424,6 @@
       const model = modelSelect.value;
       const tentative = tentativeToggle.checked;
       const multiday = multidayToggle.checked;
-      const preextract = preextractToggle2?.checked ?? true;
       const reviewFirst = document.querySelector('input[name="review-option"]:checked')?.value === "review";
       console.log("\u{1F4CB} Form values:", {
         instructions,
@@ -17461,6 +17460,14 @@
           htmlLength: pageContent.html.length,
           textLength: pageContent.text.length
         });
+        const overThreshold = pageContent.html.length > 200 * 1024;
+        const preextract = overThreshold ? true : preextractToggle2?.checked ?? false;
+        if (preextractToggle2 && preextractToggle2.checked !== preextract) {
+          preextractToggle2.checked = preextract;
+        }
+        if (overThreshold) {
+          console.log("\u{1F9FC} Large HTML detected (>200KB). Enabling pre-extraction.");
+        }
         requestData.textContent = JSON.stringify({
           url: pageContent.url,
           instructions: instructions || "None",
