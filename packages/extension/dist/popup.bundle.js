@@ -17494,7 +17494,7 @@ Extract event details from the provided content. Pay attention to:
 - If no end time specified, make reasonable estimate
 - Default timezone is America/New_York unless specified
 - Multi-day events: ${multiday ? "Focus on the PRIMARY event mentioned on the page. Only if there is no clear primary event, extract multiple events" : "Extract exactly one event"}
-- Event status: ${tentative ? "Tentative" : "Confirmed"}
+- Event status: ${tentative ? "Tentative" : "Confirmed"} (set status field only; do NOT include a "Status:" line in the description)
 - Concerts: Include the complete program as listed on the page in the description under a section titled "Program:". Preserve the order, include composer names and full work titles (and movements if listed).
 - Location selection: If both streaming and in-person options are present, ALWAYS use the in-person option. Set the location to the physical venue name AND address (street, city, state) if available. You may include a URL as the location only if no physical venue/address is available anywhere on the page; otherwise, never use a URL for the location. You may mention streaming details in the description, but the location must prefer the physical address.
 - CRITICAL: Always include the source URL in the "url" field
@@ -17645,9 +17645,14 @@ ${pageData.html}`;
       }
     }
     async function generateICSContent(events, tentative) {
+      const sanitizeDescription = (text) => {
+        if (!text)
+          return "";
+        return text.replace(/(^|\n)\s*Status:\s*(Tentative|Confirmed)\s*(?=\n|$)/gi, "$1").trim();
+      };
       const eventDataArray = events.map((eventData) => ({
         summary: eventData.summary,
-        description: eventData.description || "",
+        description: sanitizeDescription(eventData.description || ""),
         location: eventData.location || "",
         dtstart: eventData.start_date + (eventData.start_time ? `T${eventData.start_time}:00` : "T00:00:00"),
         dtend: eventData.end_date ? eventData.end_date + (eventData.end_time ? `T${eventData.end_time}:00` : "T23:59:59") : void 0,
@@ -17950,11 +17955,18 @@ ${event.data.data.selectedText}`;
         });
         let subject;
         let emailBody;
+        const sanitizeDescription = (text) => {
+          if (!text)
+            return "";
+          return text.replace(/(^|\n)\s*Status:\s*(Tentative|Confirmed)\s*(?=\n|$)/gi, "$1").trim();
+        };
         if (isMultiple) {
           subject = `Calendar Events: ${events.length} Events`;
-          const eventsList = events.map(
-            (event, index) => `${index + 1}. ${event.summary} - ${event.start_date}${event.start_time ? " at " + event.start_time : ""}`
-          ).join("\n");
+          const eventsList = events.map((event, index) => {
+            const desc = sanitizeDescription(event.description || "");
+            return `${index + 1}. ${event.summary} - ${event.start_date}${event.start_time ? " at " + event.start_time : ""}${desc ? `
+   ${desc}` : ""}`;
+          }).join("\n");
           emailBody = `Please find the attached calendar events.
 
 ${eventsList}
@@ -17963,11 +17975,12 @@ This invitation was generated automatically.`;
         } else {
           const event = events[0];
           subject = `Calendar Event: ${event.summary}`;
+          const cleanDesc = sanitizeDescription(event.description || "");
           emailBody = `Please find the calendar invitation attached.
 
 Event: ${event.summary}
 ${event.location ? `Location: ${event.location}
-` : ""}${event.description ? `Description: ${event.description}
+` : ""}${cleanDesc ? `Description: ${cleanDesc}
 ` : ""}
 This invitation was generated automatically.`;
         }
