@@ -9,6 +9,7 @@ import {
   EventData
 } from '@email-to-ics/shared-core';
 import 'bootstrap';
+import ICAL from 'ical.js';
 
 // Global state
 let adapters: ReturnType<typeof createBrowserAdapters>;
@@ -794,6 +795,58 @@ ${pageData.html}`;
         const reviewRecipient = document.getElementById('review-recipient')!;
         const reviewSubject = document.getElementById('review-subject')!;
         
+        function escapeHtml(s: string) {
+            return s
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function linkifyAndBreaks(text: string) {
+            const escaped = escapeHtml(text || '');
+            const linked = escaped.replace(/(https?:\/\/[^\s<]+)/g, (url) => {
+                return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+            });
+            return linked.replace(/\n/g, '<br>');
+        }
+
+        function parseIcsDescriptions(ics: string) {
+            try {
+                const jcal = ICAL.parse(ics);
+                const comp = new ICAL.Component(jcal);
+                const vevents = comp.getAllSubcomponents('vevent') || [];
+                const blocks = vevents.map((ve: any, idx: number) => {
+                    const ev = new (ICAL as any).Event(ve);
+                    const desc = (ev.description || '').toString();
+                    const summary = (ev.summary || `Event ${idx + 1}`).toString();
+                    const dtstart = ev.startDate?.toJSDate?.() as Date | undefined;
+                    const dtend = ev.endDate?.toJSDate?.() as Date | undefined;
+                    const loc = ev.location ? ev.location.toString() : undefined;
+                    const fmt = (d?: Date) => d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : '';
+                    const dateStr = dtstart ? `${fmt(dtstart)}${dtend ? ` – ${fmt(dtend)}` : ''}` : '';
+                    return {
+                        title: summary,
+                        descriptionHtml: linkifyAndBreaks(desc),
+                        date: dateStr,
+                        location: loc
+                    };
+                });
+                const subject = vevents.length === 1 ? (new (ICAL as any).Event(vevents[0])).summary?.toString() || 'Calendar Event' : `Calendar Events: ${vevents.length} Events`;
+                return { subject, blocks };
+            } catch (e) {
+                const subject = events.length === 1 ? `Calendar Event: ${events[0].summary}` : `Calendar Events: ${events.length} Events`;
+                const blocks = events.map((eventData: any, idx: number) => ({
+                    title: eventData.summary || `Event ${idx + 1}`,
+                    descriptionHtml: linkifyAndBreaks(eventData.description || ''),
+                    date: `${eventData.start_date}${eventData.start_time ? ' ' + eventData.start_time : ''}`,
+                    location: eventData.location
+                }));
+                return { subject, blocks };
+            }
+        }
+        
         // Load stored email settings to show correct recipient
         const settings = await chrome.storage.sync.get(['toTentativeEmail', 'toConfirmedEmail']);
         const recipientEmail = tentativeToggle.checked ? 
@@ -801,32 +854,16 @@ ${pageData.html}`;
             (settings.toConfirmedEmail || 'confirmed@example.com');
         reviewRecipient.textContent = recipientEmail;
         
-        if (events.length === 1) {
-            const eventData = events[0];
-            reviewSubject.textContent = `Calendar Event: ${eventData.summary}`;
-            
-            reviewContent.innerHTML = `
-                <div class=\"ics-details\">
-                    <h6>${eventData.summary}</h6>
-                    <p><strong>Date:</strong> ${eventData.start_date}${eventData.start_time ? ' at ' + eventData.start_time : ' (All day)'}</p>
-                    ${eventData.location ? `<p><strong>Location:</strong> ${eventData.location}</p>` : ''}
-                    ${eventData.description ? `<p><strong>Description:</strong> ${eventData.description.substring(0, 200)}...</p>` : ''}
-                </div>
-            `;
-        } else {
-            reviewSubject.textContent = `Calendar Events: ${events.length} Events`;
-            
-            const eventsHtml = events.map((eventData, index) => `
-                <div class=\"ics-details mb-3\">
-                    <h6>Event ${index + 1}: ${eventData.summary}</h6>
-                    <p><strong>Date:</strong> ${eventData.start_date}${eventData.start_time ? ' at ' + eventData.start_time : ' (All day)'}</p>
-                    ${eventData.location ? `<p><strong>Location:</strong> ${eventData.location}</p>` : ''}
-                    ${eventData.description ? `<p><strong>Description:</strong> ${eventData.description.substring(0, 100)}...</p>` : ''}
-                </div>
-            `).join('');
-            
-            reviewContent.innerHTML = eventsHtml;
-        }
+        const parsed = parseIcsDescriptions(icsContent);
+        reviewSubject.textContent = parsed.subject;
+        reviewContent.innerHTML = parsed.blocks.map((b: any, idx: number) => `
+            <div class="ics-details mb-3">
+                <h6>${parsed.blocks.length > 1 ? `Event ${idx + 1}: ` : ''}${escapeHtml(b.title)}</h6>
+                ${b.date ? `<p><strong>Date:</strong> ${escapeHtml(b.date)}</p>` : ''}
+                ${b.location ? `<p><strong>Location:</strong> ${escapeHtml(b.location)}</p>` : ''}
+                <div><strong>Description:</strong><br>${b.descriptionHtml || '<em>(none)</em>'}</div>
+            </div>
+        `).join('');
     }
 
     function stripTrackingParameters(url: string): string {
