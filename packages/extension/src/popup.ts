@@ -597,7 +597,7 @@ Extract event details from the provided content. Pay attention to:
 - Multi-day events: ${multiday ? 'Focus on the PRIMARY event mentioned on the page. Only if there is no clear primary event, extract multiple events' : 'Extract exactly one event'}
 - Event status: ${tentative ? 'Tentative' : 'Confirmed'}
 - Concerts: Include the complete program as listed on the page in the description under a section titled "Program:". Preserve the order, include composer names and full work titles (and movements if listed).
-- Location selection: If both streaming and in-person options are present, ALWAYS use the in-person option. Set the location to the physical venue name AND address (street, city, state) if available. Never use a URL as the location. You may mention streaming details in the description, but the location must be the physical address.
+- Location selection: If both streaming and in-person options are present, ALWAYS use the in-person option. Set the location to the physical venue name AND address (street, city, state) if available. You may include a URL as the location only if no physical venue/address is available anywhere on the page; otherwise, never use a URL for the location. You may mention streaming details in the description, but the location must prefer the physical address.
 - CRITICAL: Always include the source URL in the "url" field
 - CRITICAL: Always add the source URL at the end of the description with format: "\\n\\nSource: [URL]"
 
@@ -625,7 +625,7 @@ ${pageData.html}`;
                             },
                             location: {
                                 type: "string",
-                                description: "Physical venue name and address (never a URL). If both streaming and in-person exist, choose the in-person venue address."
+                                description: "Physical venue name and address (preferred). If no physical venue/address is available, use a URL. If both streaming and in-person exist, choose the in-person venue address."
                             },
                             start_date: {
                                 type: "string",
