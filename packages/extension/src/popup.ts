@@ -813,7 +813,7 @@ Extract event details from the provided content. Pay attention to:
         const user = `URL: ${url}\n\nHTML:\n${html}`;
 
         const payload = {
-            model: 'openai/gpt-5-nano',
+            model: 'google/gemini-2.5-flash-lite',
             messages: [
                 { role: 'system', content: system },
                 { role: 'user', content: [{ type: 'text', text: user }] }

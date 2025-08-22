@@ -17701,7 +17701,7 @@ ${pageData.html}`;
 HTML:
 ${html}`;
       const payload = {
-        model: "openai/gpt-5-nano",
+        model: "google/gemini-2.5-flash-lite",
         messages: [
           { role: "system", content: system },
           { role: "user", content: [{ type: "text", text: user }] }
