@@ -518,8 +518,15 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (reviewFirst) {
                 await showReviewSection(events, icsContent);
             } else {
-                // Direct send - show completion
-                statusMessage.textContent = 'Complete! ICS file generated.';
+                // Direct send - auto-send email, then show completion
+                try {
+                    statusMessage.textContent = 'Sending email...';
+                    await sendEmail(events, icsContent, tentative);
+                    statusMessage.textContent = 'Email sent. ICS ready to download.';
+                } catch (sendErr: any) {
+                    console.error('💥 Auto-send failed:', sendErr);
+                    statusMessage.textContent = `Email failed: ${sendErr?.message || sendErr}`;
+                }
                 const responseAccordion = document.getElementById('responseAccordion')!;
                 const responseData = document.getElementById('responseData')!;
                 
@@ -534,15 +541,22 @@ document.addEventListener('DOMContentLoaded', async function() {
                 responseAccordion.classList.remove('d-none');
                 responseData.innerHTML = `
                     <div class=\"alert alert-success\">
-                        <h4>✅ ${events.length === 1 ? 'Event' : 'Events'} Created Successfully</h4>
+                        <h4>✅ ${events.length === 1 ? 'Event' : 'Events'} Created & Email Sent</h4>
                         <h5>${eventSummary}</h5>
                         <p>${eventDetails}</p>
                         <div class=\"mt-3\">
-                            <button class=\"btn btn-primary me-2\" onclick=\"downloadICS('${encodeURIComponent(icsContent)}', '${events[0].summary}')\">💾 Download ICS</button>
-                            <button class=\"btn btn-success\" onclick=\"sendEmail('${encodeURIComponent(JSON.stringify(events))}', '${encodeURIComponent(icsContent)}')\">📧 Send Email</button>
+                            <button id=\"download-ics-btn\" class=\"btn btn-primary me-2\">💾 Download ICS</button>
                         </div>
                     </div>
                 `;
+
+                // Attach event listeners to comply with MV3 CSP (no inline handlers)
+                const downloadBtn = document.getElementById('download-ics-btn');
+                if (downloadBtn) {
+                    downloadBtn.addEventListener('click', () => {
+                        (window as any).downloadICS('${encodeURIComponent(icsContent)}', '${events[0].summary}');
+                    });
+                }
                 
                 const closeButton = document.getElementById('closeButton')!;
                 closeButton.style.display = 'block';

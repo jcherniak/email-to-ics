@@ -4211,7 +4211,7 @@
      * Escape text for ICS format
      */
     escapeText(text) {
-      return text.replace(/\\\\/g, "\\\\\\\\").replace(/;/g, "\\\\;").replace(/,/g, "\\\\,").replace(/\\n/g, "\\\\n").replace(/\\r/g, "").trim();
+      return text.replace(/\\\\/g, "\\\\\\\\").replace(/;/g, "\\\\;").replace(/\\n/g, "\\\\n").replace(/\\r/g, "").trim();
     }
     /**
      * Parse existing ICS content (basic parser)
@@ -10051,7 +10051,14 @@
         if (reviewFirst) {
           await showReviewSection(events, icsContent);
         } else {
-          statusMessage.textContent = "Complete! ICS file generated.";
+          try {
+            statusMessage.textContent = "Sending email...";
+            await sendEmail(events, icsContent, tentative);
+            statusMessage.textContent = "Email sent. ICS ready to download.";
+          } catch (sendErr) {
+            console.error("\u{1F4A5} Auto-send failed:", sendErr);
+            statusMessage.textContent = `Email failed: ${sendErr?.message || sendErr}`;
+          }
           const responseAccordion = document.getElementById("responseAccordion");
           const responseData = document.getElementById("responseData");
           const eventSummary = events.length === 1 ? `${events[0].summary}` : `${events.length} Events`;
@@ -10059,15 +10066,20 @@
           responseAccordion.classList.remove("d-none");
           responseData.innerHTML = `
                     <div class="alert alert-success">
-                        <h4>\u2705 ${events.length === 1 ? "Event" : "Events"} Created Successfully</h4>
+                        <h4>\u2705 ${events.length === 1 ? "Event" : "Events"} Created & Email Sent</h4>
                         <h5>${eventSummary}</h5>
                         <p>${eventDetails}</p>
                         <div class="mt-3">
-                            <button class="btn btn-primary me-2" onclick="downloadICS('${encodeURIComponent(icsContent)}', '${events[0].summary}')">\u{1F4BE} Download ICS</button>
-                            <button class="btn btn-success" onclick="sendEmail('${encodeURIComponent(JSON.stringify(events))}', '${encodeURIComponent(icsContent)}')">\u{1F4E7} Send Email</button>
+                            <button id="download-ics-btn" class="btn btn-primary me-2">\u{1F4BE} Download ICS</button>
                         </div>
                     </div>
                 `;
+          const downloadBtn = document.getElementById("download-ics-btn");
+          if (downloadBtn) {
+            downloadBtn.addEventListener("click", () => {
+              window.downloadICS("${encodeURIComponent(icsContent)}", "${events[0].summary}");
+            });
+          }
           const closeButton = document.getElementById("closeButton");
           closeButton.style.display = "block";
         }
@@ -10098,15 +10110,15 @@ Extract event details from the provided content. Pay attention to:
 - For all-day events, set start_time and end_time to null
 - If no end time specified, make reasonable estimate
 - Default timezone is America/New_York unless specified
-- Multi-day events: ${multiday ? "Expected" : "Not expected"}
+- Multi-day events: ${multiday ? "Focus on the PRIMARY event mentioned on the page. Only if there is no clear primary event, extract multiple events" : "Extract exactly one event"}
 - Event status: ${tentative ? "Tentative" : "Confirmed"}
-- If a source URL is provided, include it in the "url" field and add it at the bottom of description
+- CRITICAL: Always include the source URL in the "url" field
+- CRITICAL: Always add the source URL at the end of the description with format: "\\n\\nSource: [URL]"
 
 ${instructions ? `Special instructions: ${instructions}
 ` : ""}
 
-${cleanUrl ? `Source URL: ${cleanUrl}
-` : ""}
+Source URL (MUST be included in url field and description): ${cleanUrl}
 
 Content to analyze:
 ${pageData.html}`;
@@ -10115,7 +10127,7 @@ ${pageData.html}`;
         properties: {
           events: {
             type: "array",
-            description: multiday ? "Array of calendar events (can contain multiple events)" : "Array of calendar events (must contain exactly one event)",
+            description: multiday ? "Array of calendar events (focus on primary event, multiple only if no clear primary)" : "Array of calendar events (must contain exactly one event)",
             minItems: 1,
             maxItems: multiday ? 50 : 1,
             items: {
