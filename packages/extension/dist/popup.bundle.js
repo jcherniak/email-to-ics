@@ -17477,7 +17477,7 @@
         statusMessage.textContent = "Analyzing content with AI...";
         let effectiveHtml = pageContent.html;
         if (preextract) {
-          console.log("\u{1F9FC} Pre-extracting main content with gpt-5-nano...");
+          console.log("\u{1F9FC} Pre-extracting main content...");
           statusMessage.textContent = "Finding main content...";
           try {
             const extracted = await extractMainContent(pageContent.url, pageContent.html);
@@ -17493,10 +17493,12 @@
         }
         let events;
         try {
+          statusMessage.textContent = "Analyzing content with AI...";
           events = await callAIModel({ ...pageContent, html: effectiveHtml }, instructions, model, tentative, multiday, screenshot);
         } catch (err) {
           if (preextract) {
             console.warn("\u26A0\uFE0F Parsing failed with extracted content. Retrying with full HTML...");
+            statusMessage.textContent = "Analyzing content with AI (full HTML fallback)...";
             events = await callAIModel(pageContent, instructions, model, tentative, multiday, screenshot);
           } else {
             throw err;
@@ -17695,7 +17697,7 @@ ${pageData.html}`;
       return parseAiResponse(aiResponse);
     }
     async function extractMainContent(url, html) {
-      const system = "You extract the MAIN CONTENT region from raw HTML of a web page. Return only the main article/body content as plain text, removing navigation, ads, footers, and unrelated sections.";
+      const system = "You extract the MAIN CONTENT region from raw HTML of a web page. Return only the main article/body content as FULL HTML (not plain text), preserving tags and structure, while removing navigation, ads, footers, and unrelated sections.";
       const user = `URL: ${url}
 
 HTML:

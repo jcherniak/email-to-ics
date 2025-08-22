@@ -561,7 +561,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             statusMessage.textContent = 'Analyzing content with AI...';
             let effectiveHtml = pageContent.html;
             if (preextract) {
-                console.log('🧼 Pre-extracting main content with gpt-5-nano...');
+                console.log('🧼 Pre-extracting main content...');
                 statusMessage.textContent = 'Finding main content...';
                 try {
                     const extracted = await extractMainContent(pageContent.url, pageContent.html);
@@ -578,10 +578,12 @@ document.addEventListener('DOMContentLoaded', async function() {
 
             let events: any[];
             try {
+                statusMessage.textContent = 'Analyzing content with AI...';
                 events = await callAIModel({ ...pageContent, html: effectiveHtml }, instructions, model, tentative, multiday, screenshot);
             } catch (err) {
                 if (preextract) {
                     console.warn('⚠️ Parsing failed with extracted content. Retrying with full HTML...');
+                    statusMessage.textContent = 'Analyzing content with AI (full HTML fallback)...';
                     events = await callAIModel(pageContent, instructions, model, tentative, multiday, screenshot);
                 } else {
                     throw err;
@@ -809,7 +811,7 @@ Extract event details from the provided content. Pay attention to:
 
     // First-pass content extraction using gpt-5-nano
     async function extractMainContent(url: string, html: string): Promise<string> {
-        const system = 'You extract the MAIN CONTENT region from raw HTML of a web page. Return only the main article/body content as plain text, removing navigation, ads, footers, and unrelated sections.';
+        const system = 'You extract the MAIN CONTENT region from raw HTML of a web page. Return only the main article/body content as FULL HTML (not plain text), preserving tags and structure, while removing navigation, ads, footers, and unrelated sections.';
         const user = `URL: ${url}\n\nHTML:\n${html}`;
 
         const payload = {
