@@ -215,7 +215,21 @@ document.addEventListener('DOMContentLoaded', async function() {
                     }
                     
                     if (response && response.success && response.screenshot) {
-                        resolve('data:image/jpeg;base64,' + response.screenshot);
+                        const original = 'data:image/jpeg;base64,' + response.screenshot;
+                        // Compress to 50% dimensions, JPEG quality 0.75 before sending to model
+                        compressImage(original, 0.5, 0.75)
+                          .then((compressed) => {
+                              try {
+                                  const origBytes = Math.round((response.screenshot.length * 3) / 4);
+                                  const compBytes = Math.round((compressed.length - 'data:image/jpeg;base64,'.length) * 3 / 4);
+                                  console.log('📉 Screenshot compressed', { originalBytes: origBytes, compressedBytes: compBytes });
+                              } catch {}
+                              resolve(compressed);
+                          })
+                          .catch(err => {
+                              console.warn('Compression failed, using original screenshot:', err);
+                              resolve(original);
+                          });
                     } else {
                         console.error('Screenshot request failed:', response?.error || 'Unknown error');
                         resolve(null);
@@ -226,6 +240,38 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         // Original popup logic (not used in iframe mode)
         return null;
+    }
+
+    // Compress a data URL image by a scale factor and JPEG quality
+    function compressImage(dataUrl: string, scale: number, quality: number): Promise<string> {
+        return new Promise((resolve, reject) => {
+            try {
+                const img = new Image();
+                img.onload = () => {
+                    try {
+                        const targetW = Math.max(1, Math.floor(img.width * scale));
+                        const targetH = Math.max(1, Math.floor(img.height * scale));
+                        const canvas = document.createElement('canvas');
+                        canvas.width = targetW;
+                        canvas.height = targetH;
+                        const ctx = canvas.getContext('2d');
+                        if (!ctx) {
+                            reject(new Error('Canvas 2D context not available'));
+                            return;
+                        }
+                        ctx.drawImage(img, 0, 0, targetW, targetH);
+                        const out = canvas.toDataURL('image/jpeg', quality);
+                        resolve(out);
+                    } catch (e) {
+                        reject(e);
+                    }
+                };
+                img.onerror = (e) => reject(new Error('Image load failed'));
+                img.src = dataUrl;
+            } catch (err) {
+                reject(err);
+            }
+        });
     }
 
     // Model management
