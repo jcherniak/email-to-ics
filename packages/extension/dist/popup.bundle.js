@@ -17499,6 +17499,7 @@ Extract event details from the provided content. Pay attention to:
 - Location selection: If both streaming and in-person options are present, ALWAYS use the in-person option. Set the location to the physical venue name AND address (street, city, state) if available. You may include a URL as the location only if no physical venue/address is available anywhere on the page; otherwise, never use a URL for the location. You may mention streaming details in the description, but the location must prefer the physical address.
 - CRITICAL: Always include the source URL in the "url" field
 - CRITICAL: Always add the source URL at the end of the description with format: "\\n\\nSource: [URL]"
+ - Important: Do NOT fetch or browse the Source URL or any external resources. Only use the provided HTML under "Content to analyze" and the optional screenshot image. The Source URL is for attribution/reference only.
 
 ${instructions ? `Special instructions: ${instructions}
 ` : ""}
