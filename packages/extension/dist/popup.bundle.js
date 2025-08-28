@@ -17059,6 +17059,10 @@
         await chrome.storage.local.set({ [this.stateKey]: state });
         console.log("Saved state for tab", this.tabId);
       } catch (error) {
+        const msg = error && (error.message || String(error)) || "";
+        if (msg === "Extension context invalidated.") {
+          return;
+        }
         console.error("Error saving tab state:", error);
       }
     }
