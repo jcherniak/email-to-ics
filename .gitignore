@@ -7,3 +7,10 @@ confirm_cache
 .claude/
 .claude-sessions/
 packages/full-chrome-extension-view/
+**/.DS_Store
+# Xcode user data
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
