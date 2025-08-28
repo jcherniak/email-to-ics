@@ -49,6 +49,7 @@ class TabStateManager {
         const modelSelect = document.getElementById('model-select') as HTMLSelectElement;
         const tentativeToggle = document.getElementById('tentative-toggle') as HTMLInputElement;
         const multidayToggle = document.getElementById('multiday-toggle') as HTMLInputElement;
+        const preextractToggle = document.getElementById('preextract-toggle') as HTMLInputElement;
         
         const state = {
             formData: {

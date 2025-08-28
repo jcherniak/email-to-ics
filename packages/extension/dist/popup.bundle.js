@@ -17039,6 +17039,7 @@
       const modelSelect = document.getElementById("model-select");
       const tentativeToggle = document.getElementById("tentative-toggle");
       const multidayToggle = document.getElementById("multiday-toggle");
+      const preextractToggle = document.getElementById("preextract-toggle");
       const state = {
         formData: {
           instructions: instructionsInput?.value || "",
@@ -17073,7 +17074,7 @@
           const modelSelect = document.getElementById("model-select");
           const tentativeToggle = document.getElementById("tentative-toggle");
           const multidayToggle = document.getElementById("multiday-toggle");
-          const preextractToggle2 = document.getElementById("preextract-toggle");
+          const preextractToggle = document.getElementById("preextract-toggle");
           if (form.instructions && instructionsInput)
             instructionsInput.value = form.instructions;
           if (form.model && modelSelect)
@@ -17082,8 +17083,8 @@
             tentativeToggle.checked = form.tentative;
           if (multidayToggle)
             multidayToggle.checked = form.multiday;
-          if (preextractToggle2 && typeof form.preextract === "boolean")
-            preextractToggle2.checked = form.preextract;
+          if (preextractToggle && typeof form.preextract === "boolean")
+            preextractToggle.checked = form.preextract;
           if (form.reviewOption) {
             const radio = document.querySelector(`input[name="review-option"][value="${form.reviewOption}"]`);
             if (radio)
@@ -17110,7 +17111,7 @@
     const processingView = document.getElementById("processingView");
     const instructionsInput = document.getElementById("instructions");
     const modelSelect = document.getElementById("model-select");
-    const preextractToggle2 = document.getElementById("preextract-toggle");
+    const preextractToggle = document.getElementById("preextract-toggle");
     const tentativeToggle = document.getElementById("tentative-toggle");
     const multidayToggle = document.getElementById("multiday-toggle");
     const convertButton = document.getElementById("convert-button");
@@ -17159,8 +17160,8 @@
       modelSelect.disabled = disable;
       refreshModelsButton.disabled = disable;
       tentativeToggle.disabled = disable;
-      if (preextractToggle2)
-        preextractToggle2.disabled = disable;
+      if (preextractToggle)
+        preextractToggle.disabled = disable;
       const reviewRadios = document.querySelectorAll('input[name="review-option"]');
       reviewRadios.forEach((radio) => radio.disabled = disable);
     }
@@ -17461,9 +17462,9 @@
           textLength: pageContent.text.length
         });
         const overThreshold = pageContent.html.length > 200 * 1024;
-        const preextract = overThreshold ? true : preextractToggle2?.checked ?? false;
-        if (preextractToggle2 && preextractToggle2.checked !== preextract) {
-          preextractToggle2.checked = preextract;
+        const preextract = overThreshold ? true : preextractToggle?.checked ?? false;
+        if (preextractToggle && preextractToggle.checked !== preextract) {
+          preextractToggle.checked = preextract;
         }
         if (overThreshold) {
           console.log("\u{1F9FC} Large HTML detected (>200KB). Enabling pre-extraction.");
