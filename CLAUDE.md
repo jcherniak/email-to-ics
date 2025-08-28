@@ -309,3 +309,4 @@ class ChromeStorageAdapter implements StorageAdapter {
 - **Selected text**: Select text on page before opening extension
 - **Multi-event extraction**: Enable multiday checkbox for conference schedules, etc.
 - **Review workflow**: Test both direct send and review-first modes
+- AFTER EACH TODO IS COMPLETE: BUILD AND COMMIT

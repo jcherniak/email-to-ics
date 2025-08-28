@@ -176,7 +176,6 @@ export class BrowserIcsGenerator {
     return text
       .replace(/\\\\/g, '\\\\\\\\')  // Escape backslashes
       .replace(/;/g, '\\\\;')    // Escape semicolons
-      .replace(/,/g, '\\\\,')    // Escape commas
       .replace(/\\n/g, '\\\\n')   // Escape newlines
       .replace(/\\r/g, '')      // Remove carriage returns
       .trim();

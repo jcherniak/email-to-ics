@@ -3,3 +3,7 @@ vendor
 .models_cache.json
 confirm_cache
 **/node_modules/
+# Local agent/cache
+.claude/
+.claude-sessions/
+packages/full-chrome-extension-view/
