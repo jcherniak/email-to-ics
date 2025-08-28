@@ -1,0 +1,723 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 70;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		067DFBF59DBD474A10B07112 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74974741DBD65A826CCB4EE9 /* ContentView.swift */; };
+		0C1F11AF48EC29E11078C521 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5E60E9ECBFBB8F9AF9BC109 /* AppGroup.swift */; };
+		2DFAB687C077867238FDB941 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 93FD3B5B4B5F7A277D2C01AD /* Info.plist */; };
+		329B76939A91F12C82288F06 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74974741DBD65A826CCB4EE9 /* ContentView.swift */; };
+		3D703855E5B08BECE0906B66 /* EmailToICSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7873EB8BDEA8472B4FA213 /* EmailToICSApp.swift */; };
+		472A7B595CDC9EA1A286ED61 /* WebLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 690E5607701BE34C791B12AB /* WebLoader.swift */; };
+		48FB6BB24172FC9F9AA9A908 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5E60E9ECBFBB8F9AF9BC109 /* AppGroup.swift */; };
+		4BEFA40D577DA506169D8D0C /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 275956B049F90BFDC134C600 /* Keychain.swift */; };
+		5D9A22E4E86B60A681604B6B /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5E60E9ECBFBB8F9AF9BC109 /* AppGroup.swift */; };
+		6183C4079210A75901A21A85 /* CreateCalendarEventShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 05DCD2C9D849DC60E2649051 /* CreateCalendarEventShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		646040EBDB302E6195841B97 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 275956B049F90BFDC134C600 /* Keychain.swift */; };
+		7F31F05F91BAA2D424D68CF9 /* OpenRouterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3C01C28DDB16B4E3843AB73 /* OpenRouterClient.swift */; };
+		840B96A556D2E2142F18BC75 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BCB252C54BE2A086B9185F1 /* Models.swift */; };
+		886E4DD7B4688CBF3E8D7F77 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5E60E9ECBFBB8F9AF9BC109 /* AppGroup.swift */; };
+		89793DF06D5FC865134E25A7 /* EmailToICSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7873EB8BDEA8472B4FA213 /* EmailToICSApp.swift */; };
+		8CC6D78B5F76390F68D78C00 /* PostmarkClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD99232B81FB3F45BFB6F98 /* PostmarkClient.swift */; };
+		8FF79E2A99A56036D5018640 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB7FD4CE1CE91FA849607942 /* SettingsView.swift */; };
+		910732EDA1CE4A9FBC9BD565 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB7FD4CE1CE91FA849607942 /* SettingsView.swift */; };
+		94C669B8BC02CBAD1A5989D3 /* CreateCalendarEventShareExtensionMac.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B900836B6122195C3DA8530E /* CreateCalendarEventShareExtensionMac.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		954776BFDCF4C288DF09422F /* AppMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8C9C06C8579024425A56C53 /* AppMain.swift */; };
+		A157138615AC22C91E50A9A5 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17EA5D26A3E6117BED8511CA /* ShareViewController.swift */; };
+		A904EC6F1EBA573D9FB1B485 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BCB252C54BE2A086B9185F1 /* Models.swift */; };
+		B1969F3B14A4085713CADA9D /* ICSBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9AA7FD853ACE423759B67AA /* ICSBuilder.swift */; };
+		B22858D18C2DDC75FA97B252 /* MacShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 780D899127E63B3EC0EE515E /* MacShareViewController.swift */; };
+		B515246EA9BA49EED77EBC21 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BCB252C54BE2A086B9185F1 /* Models.swift */; };
+		BF11D0DB9C7CBC250C5522FA /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BCB252C54BE2A086B9185F1 /* Models.swift */; };
+		C49DB53B5D6AF02813AC8738 /* WebLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 690E5607701BE34C791B12AB /* WebLoader.swift */; };
+		C70F40D1DBDCFB4118046A74 /* MainInterface.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 384262EEBD7A3FA623179250 /* MainInterface.storyboard */; };
+		CC63F3F3CE0EB32FE39E72AC /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 275956B049F90BFDC134C600 /* Keychain.swift */; };
+		D3EEACC1E5EAA7BDF337B664 /* PostmarkClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD99232B81FB3F45BFB6F98 /* PostmarkClient.swift */; };
+		E9056642987EC22B3DDFF058 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 275956B049F90BFDC134C600 /* Keychain.swift */; };
+		EF583E06FDD48EDA8E5D6246 /* ICSBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9AA7FD853ACE423759B67AA /* ICSBuilder.swift */; };
+		F821CA8583F49AECBDFBE2A9 /* OpenRouterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3C01C28DDB16B4E3843AB73 /* OpenRouterClient.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		D4E2E9519E5D79EFEE9852E3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 23888DBA47549C720B31F67C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B2DA3364924B9472C466AD5A;
+			remoteInfo = CreateCalendarEventShareExtension;
+		};
+		FC6598FB27576ABE8982AC80 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 23888DBA47549C720B31F67C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8D084F1C9DB2B185C8FE6AC4;
+			remoteInfo = CreateCalendarEventShareExtensionMac;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		09177CB2283C83400230CC9C /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				94C669B8BC02CBAD1A5989D3 /* CreateCalendarEventShareExtensionMac.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4EFDA69B9336A1FB66142D4E /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				6183C4079210A75901A21A85 /* CreateCalendarEventShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		05DCD2C9D849DC60E2649051 /* CreateCalendarEventShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CreateCalendarEventShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		0BCB252C54BE2A086B9185F1 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		17EA5D26A3E6117BED8511CA /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		275956B049F90BFDC134C600 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
+		38460946A258747294FDA4BF /* EmailToICS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EmailToICS.entitlements; sourceTree = "<group>"; };
+		4E439F7F267D49D9B88FE076 /* EmailToICSAppMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EmailToICSAppMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		690E5607701BE34C791B12AB /* WebLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebLoader.swift; sourceTree = "<group>"; };
+		74974741DBD65A826CCB4EE9 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		780D899127E63B3EC0EE515E /* MacShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacShareViewController.swift; sourceTree = "<group>"; };
+		866E4DEE7DF7DFCCE0187992 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		8FD99232B81FB3F45BFB6F98 /* PostmarkClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostmarkClient.swift; sourceTree = "<group>"; };
+		93FD3B5B4B5F7A277D2C01AD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		A3C01C28DDB16B4E3843AB73 /* OpenRouterClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterClient.swift; sourceTree = "<group>"; };
+		A459E63CA1098B21A5361178 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/MainInterface.storyboard; sourceTree = "<group>"; };
+		A77C9A2DA80D18B7A37F6927 /* EmailToICSMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EmailToICSMac.entitlements; sourceTree = "<group>"; };
+		A9EABEB97C6A39D433F62408 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		AE7873EB8BDEA8472B4FA213 /* EmailToICSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailToICSApp.swift; sourceTree = "<group>"; };
+		B5E60E9ECBFBB8F9AF9BC109 /* AppGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroup.swift; sourceTree = "<group>"; };
+		B900836B6122195C3DA8530E /* CreateCalendarEventShareExtensionMac.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CreateCalendarEventShareExtensionMac.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		BDBE83B410983B4C5628A30A /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
+		C5DAE9910E3205630C375150 /* EmailToICSApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = EmailToICSApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C7E3447831099B053F765082 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		DA92BE9CBF99D73FA5BCE920 /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
+		E8C9C06C8579024425A56C53 /* AppMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMain.swift; sourceTree = "<group>"; };
+		E9AA7FD853ACE423759B67AA /* ICSBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ICSBuilder.swift; sourceTree = "<group>"; };
+		FB7FD4CE1CE91FA849607942 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		11D1F1C1A199A8F673C0A97A = {
+			isa = PBXGroup;
+			children = (
+				2873FA4CCE97A1FFDD466D0F /* App */,
+				E950507AB1050AAA38AA2067 /* MacApp */,
+				7A67D9D89361B1E3110E3890 /* MacShareExtension */,
+				521D91E834D556748F44FCDB /* Shared */,
+				2FF0A0F11172D29412663DBA /* ShareExtension */,
+				1DFAADFADCCFEE0AAEFEDB2C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		1DFAADFADCCFEE0AAEFEDB2C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				05DCD2C9D849DC60E2649051 /* CreateCalendarEventShareExtension.appex */,
+				B900836B6122195C3DA8530E /* CreateCalendarEventShareExtensionMac.appex */,
+				C5DAE9910E3205630C375150 /* EmailToICSApp.app */,
+				4E439F7F267D49D9B88FE076 /* EmailToICSAppMac.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		2873FA4CCE97A1FFDD466D0F /* App */ = {
+			isa = PBXGroup;
+			children = (
+				74974741DBD65A826CCB4EE9 /* ContentView.swift */,
+				38460946A258747294FDA4BF /* EmailToICS.entitlements */,
+				AE7873EB8BDEA8472B4FA213 /* EmailToICSApp.swift */,
+				E9AA7FD853ACE423759B67AA /* ICSBuilder.swift */,
+				93FD3B5B4B5F7A277D2C01AD /* Info.plist */,
+				A3C01C28DDB16B4E3843AB73 /* OpenRouterClient.swift */,
+				8FD99232B81FB3F45BFB6F98 /* PostmarkClient.swift */,
+				FB7FD4CE1CE91FA849607942 /* SettingsView.swift */,
+				690E5607701BE34C791B12AB /* WebLoader.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		2FF0A0F11172D29412663DBA /* ShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				A9EABEB97C6A39D433F62408 /* Info.plist */,
+				384262EEBD7A3FA623179250 /* MainInterface.storyboard */,
+				DA92BE9CBF99D73FA5BCE920 /* ShareExtension.entitlements */,
+				17EA5D26A3E6117BED8511CA /* ShareViewController.swift */,
+			);
+			path = ShareExtension;
+			sourceTree = "<group>";
+		};
+		521D91E834D556748F44FCDB /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				B5E60E9ECBFBB8F9AF9BC109 /* AppGroup.swift */,
+				275956B049F90BFDC134C600 /* Keychain.swift */,
+				0BCB252C54BE2A086B9185F1 /* Models.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		7A67D9D89361B1E3110E3890 /* MacShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				866E4DEE7DF7DFCCE0187992 /* Info.plist */,
+				780D899127E63B3EC0EE515E /* MacShareViewController.swift */,
+				BDBE83B410983B4C5628A30A /* ShareExtension.entitlements */,
+			);
+			path = MacShareExtension;
+			sourceTree = "<group>";
+		};
+		E950507AB1050AAA38AA2067 /* MacApp */ = {
+			isa = PBXGroup;
+			children = (
+				E8C9C06C8579024425A56C53 /* AppMain.swift */,
+				A77C9A2DA80D18B7A37F6927 /* EmailToICSMac.entitlements */,
+				C7E3447831099B053F765082 /* Info.plist */,
+			);
+			path = MacApp;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		8D084F1C9DB2B185C8FE6AC4 /* CreateCalendarEventShareExtensionMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 10D01FAB5A8C0DA8681FB40C /* Build configuration list for PBXNativeTarget "CreateCalendarEventShareExtensionMac" */;
+			buildPhases = (
+				061286BBA71DB349A3858FE3 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CreateCalendarEventShareExtensionMac;
+			packageProductDependencies = (
+			);
+			productName = CreateCalendarEventShareExtensionMac;
+			productReference = B900836B6122195C3DA8530E /* CreateCalendarEventShareExtensionMac.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		998FC611F926F9EDD6A1E317 /* EmailToICSAppMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FB0BC4A0DFC2591571196F76 /* Build configuration list for PBXNativeTarget "EmailToICSAppMac" */;
+			buildPhases = (
+				2C5485FC76F0B1BEB424EEFD /* Sources */,
+				4D8A1876A0E38DF8E00CF08F /* Resources */,
+				09177CB2283C83400230CC9C /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D5885D20D40CC07D2621693A /* PBXTargetDependency */,
+			);
+			name = EmailToICSAppMac;
+			packageProductDependencies = (
+			);
+			productName = EmailToICSAppMac;
+			productReference = 4E439F7F267D49D9B88FE076 /* EmailToICSAppMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B2DA3364924B9472C466AD5A /* CreateCalendarEventShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9127EC41756D819D0491A9D1 /* Build configuration list for PBXNativeTarget "CreateCalendarEventShareExtension" */;
+			buildPhases = (
+				0B51BAB5130AD27D9F713C71 /* Sources */,
+				BDC8B21C90617E46507B4765 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CreateCalendarEventShareExtension;
+			packageProductDependencies = (
+			);
+			productName = CreateCalendarEventShareExtension;
+			productReference = 05DCD2C9D849DC60E2649051 /* CreateCalendarEventShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		CDB510BDDB17DB4C953E8C2F /* EmailToICSApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AD8C9B9BB49EDC2CD66B9176 /* Build configuration list for PBXNativeTarget "EmailToICSApp" */;
+			buildPhases = (
+				868F4CB46A122D99CE53B9C5 /* Sources */,
+				4EFDA69B9336A1FB66142D4E /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				129F0F86D76D1DC95A4315B5 /* PBXTargetDependency */,
+			);
+			name = EmailToICSApp;
+			packageProductDependencies = (
+			);
+			productName = EmailToICSApp;
+			productReference = C5DAE9910E3205630C375150 /* EmailToICSApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		23888DBA47549C720B31F67C /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+			};
+			buildConfigurationList = 7A11BA62A7E574B04AFCC433 /* Build configuration list for PBXProject "EmailToICS" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 11D1F1C1A199A8F673C0A97A;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 70;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B2DA3364924B9472C466AD5A /* CreateCalendarEventShareExtension */,
+				8D084F1C9DB2B185C8FE6AC4 /* CreateCalendarEventShareExtensionMac */,
+				CDB510BDDB17DB4C953E8C2F /* EmailToICSApp */,
+				998FC611F926F9EDD6A1E317 /* EmailToICSAppMac */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		4D8A1876A0E38DF8E00CF08F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2DFAB687C077867238FDB941 /* Info.plist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BDC8B21C90617E46507B4765 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C70F40D1DBDCFB4118046A74 /* MainInterface.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		061286BBA71DB349A3858FE3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				48FB6BB24172FC9F9AA9A908 /* AppGroup.swift in Sources */,
+				4BEFA40D577DA506169D8D0C /* Keychain.swift in Sources */,
+				B22858D18C2DDC75FA97B252 /* MacShareViewController.swift in Sources */,
+				B515246EA9BA49EED77EBC21 /* Models.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0B51BAB5130AD27D9F713C71 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5D9A22E4E86B60A681604B6B /* AppGroup.swift in Sources */,
+				646040EBDB302E6195841B97 /* Keychain.swift in Sources */,
+				A904EC6F1EBA573D9FB1B485 /* Models.swift in Sources */,
+				A157138615AC22C91E50A9A5 /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2C5485FC76F0B1BEB424EEFD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				886E4DD7B4688CBF3E8D7F77 /* AppGroup.swift in Sources */,
+				954776BFDCF4C288DF09422F /* AppMain.swift in Sources */,
+				329B76939A91F12C82288F06 /* ContentView.swift in Sources */,
+				3D703855E5B08BECE0906B66 /* EmailToICSApp.swift in Sources */,
+				EF583E06FDD48EDA8E5D6246 /* ICSBuilder.swift in Sources */,
+				CC63F3F3CE0EB32FE39E72AC /* Keychain.swift in Sources */,
+				840B96A556D2E2142F18BC75 /* Models.swift in Sources */,
+				F821CA8583F49AECBDFBE2A9 /* OpenRouterClient.swift in Sources */,
+				8CC6D78B5F76390F68D78C00 /* PostmarkClient.swift in Sources */,
+				8FF79E2A99A56036D5018640 /* SettingsView.swift in Sources */,
+				C49DB53B5D6AF02813AC8738 /* WebLoader.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		868F4CB46A122D99CE53B9C5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C1F11AF48EC29E11078C521 /* AppGroup.swift in Sources */,
+				067DFBF59DBD474A10B07112 /* ContentView.swift in Sources */,
+				89793DF06D5FC865134E25A7 /* EmailToICSApp.swift in Sources */,
+				B1969F3B14A4085713CADA9D /* ICSBuilder.swift in Sources */,
+				E9056642987EC22B3DDFF058 /* Keychain.swift in Sources */,
+				BF11D0DB9C7CBC250C5522FA /* Models.swift in Sources */,
+				7F31F05F91BAA2D424D68CF9 /* OpenRouterClient.swift in Sources */,
+				D3EEACC1E5EAA7BDF337B664 /* PostmarkClient.swift in Sources */,
+				910732EDA1CE4A9FBC9BD565 /* SettingsView.swift in Sources */,
+				472A7B595CDC9EA1A286ED61 /* WebLoader.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		129F0F86D76D1DC95A4315B5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B2DA3364924B9472C466AD5A /* CreateCalendarEventShareExtension */;
+			targetProxy = D4E2E9519E5D79EFEE9852E3 /* PBXContainerItemProxy */;
+		};
+		D5885D20D40CC07D2621693A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8D084F1C9DB2B185C8FE6AC4 /* CreateCalendarEventShareExtensionMac */;
+			targetProxy = FC6598FB27576ABE8982AC80 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		384262EEBD7A3FA623179250 /* MainInterface.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				A459E63CA1098B21A5361178 /* Base */,
+			);
+			name = MainInterface.storyboard;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		2E3E65BF716D571E6E0A8C8B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/EmailToICS.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = YES;
+				INFOPLIST_FILE = App/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = YES;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		30881654285DC224711A5790 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		629ECAFB67B1D821A395EDFC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/EmailToICS.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = YES;
+				INFOPLIST_FILE = App/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = YES;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		698DF2A3CB2D99E4F13198E4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics.shareext;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		9227C242DFB0464B896F9EDF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MacApp/EmailToICSMac.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = MacApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics.mac;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		A5E009585D16D18550827B3B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		AEE8E1A9C6ED9928EADA2C5A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = MacShareExtension/ShareExtension.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = MacShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics.mac.shareext;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		AF30341BCD227F2C1AB36364 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics.shareext;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		D5D61DCD7DE6B17C440AE0CE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MacApp/EmailToICSMac.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = MacApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics.mac;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		F30AC245C84A0A2C10B8A9A1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = MacShareExtension/ShareExtension.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = MacShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics.mac.shareext;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		10D01FAB5A8C0DA8681FB40C /* Build configuration list for PBXNativeTarget "CreateCalendarEventShareExtensionMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F30AC245C84A0A2C10B8A9A1 /* Debug */,
+				AEE8E1A9C6ED9928EADA2C5A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7A11BA62A7E574B04AFCC433 /* Build configuration list for PBXProject "EmailToICS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A5E009585D16D18550827B3B /* Debug */,
+				30881654285DC224711A5790 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9127EC41756D819D0491A9D1 /* Build configuration list for PBXNativeTarget "CreateCalendarEventShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AF30341BCD227F2C1AB36364 /* Debug */,
+				698DF2A3CB2D99E4F13198E4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		AD8C9B9BB49EDC2CD66B9176 /* Build configuration list for PBXNativeTarget "EmailToICSApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2E3E65BF716D571E6E0A8C8B /* Debug */,
+				629ECAFB67B1D821A395EDFC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		FB0BC4A0DFC2591571196F76 /* Build configuration list for PBXNativeTarget "EmailToICSAppMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D5D61DCD7DE6B17C440AE0CE /* Debug */,
+				9227C242DFB0464B896F9EDF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 23888DBA47549C720B31F67C /* Project object */;
+}

@@ -1,0 +1,66 @@
+name: EmailToICS
+options:
+  minimumXcodeGenVersion: 2.31.0
+  deploymentTarget:
+    iOS: '15.0'
+targets:
+  EmailToICSApp:
+    type: application
+    platform: iOS
+    deploymentTarget: '15.0'
+    sources:
+      - path: App
+      - path: Shared
+    settings:
+      INFOPLIST_FILE: App/Info.plist
+      CODE_SIGN_ENTITLEMENTS: App/EmailToICS.entitlements
+      PRODUCT_BUNDLE_IDENTIFIER: com.example.emailtoics
+      SWIFT_VERSION: 5.9
+      SUPPORTS_MACCATALYST: YES
+      DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: YES
+    scheme:
+      gatherCoverageData: false
+    dependencies:
+      - target: CreateCalendarEventShareExtension
+        embed: true
+
+  CreateCalendarEventShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ShareExtension
+      - path: Shared
+    settings:
+      INFOPLIST_FILE: ShareExtension/Info.plist
+      CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements
+      PRODUCT_BUNDLE_IDENTIFIER: com.example.emailtoics.shareext
+      SWIFT_VERSION: 5.9
+
+  EmailToICSAppMac:
+    type: application
+    platform: macOS
+    deploymentTarget: '12.0'
+    sources:
+      - path: MacApp
+      - path: Shared
+      - path: App
+    settings:
+      INFOPLIST_FILE: MacApp/Info.plist
+      CODE_SIGN_ENTITLEMENTS: MacApp/EmailToICSMac.entitlements
+      PRODUCT_BUNDLE_IDENTIFIER: com.example.emailtoics.mac
+      SWIFT_VERSION: 5.9
+    dependencies:
+      - target: CreateCalendarEventShareExtensionMac
+        embed: true
+
+  CreateCalendarEventShareExtensionMac:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: MacShareExtension
+      - path: Shared
+    settings:
+      INFOPLIST_FILE: MacShareExtension/Info.plist
+      CODE_SIGN_ENTITLEMENTS: MacShareExtension/ShareExtension.entitlements
+      PRODUCT_BUNDLE_IDENTIFIER: com.example.emailtoics.mac.shareext
+      SWIFT_VERSION: 5.9
