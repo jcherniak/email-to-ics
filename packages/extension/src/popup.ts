@@ -688,6 +688,9 @@ Extract event details from the provided content. Pay attention to:
 - Default timezone is America/New_York unless specified
 - Multi-day events: ${multiday ? 'Focus on the PRIMARY event mentioned on the page. Only if there is no clear primary event, extract multiple events' : 'Extract exactly one event'}
 - Event status: ${tentative ? 'Tentative' : 'Confirmed'} (set status field only; do NOT include a "Status:" line in the description)
+- Title prefix (group/host): Determine the presenting organization from the page/site (prefer <meta property="og:site_name">, the site header/brand, or phrases like "X presents ..."). Set the event summary to "[Group]: [Event Title]". Avoid duplicating the prefix if already present.
+  - Examples: "KQED Live presents …" -> summary "KQED Live: …". If the site is sfsymphony.org or sanfranciscosymphony.org, use "SF Symphony: …".
+  - IMPORTANT: Never use a ticketing/platform brand (e.g., Eventbrite, Ticketmaster) as the group. If the domain is eventbrite.com, identify the organizer from the page (e.g., the Organizer/By section or organizer profile) and use that as the group. If no organizer can be found, omit the prefix rather than using the platform name.
 - Concerts: Include the complete program as listed on the page in the description under a section titled "Program:". Preserve the order, include composer names and full work titles (and movements if listed).
 - Location selection: If both streaming and in-person options are present, ALWAYS use the in-person option. Set the location to the physical venue name AND address (street, city, state) if available. You may include a URL as the location only if no physical venue/address is available anywhere on the page; otherwise, never use a URL for the location. You may mention streaming details in the description, but the location must prefer the physical address.
 - CRITICAL: Always include the source URL in the "url" field
