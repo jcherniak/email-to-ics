@@ -8,6 +8,9 @@
   <array>
     <string>group.com.example.emailtoics</string>
   </array>
+  <key>keychain-access-groups</key>
+  <array>
+    <string>$(AppIdentifierPrefix)com.tls.email-to-ics.shared</string>
+  </array>
 </dict>
 </plist>
-
