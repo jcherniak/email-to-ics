@@ -56,6 +56,7 @@
         F0POST111111222233334444 /* PostmarkClient.swift in Sources (iOS Share) */ = {isa = PBXBuildFile; fileRef = 8FD99232B81FB3F45BFB6F98 /* PostmarkClient.swift */; };
 		F0ICSB111111222233334444 /* ICSBuilder.swift in Sources (iOS Share) */ = {isa = PBXBuildFile; fileRef = E9AA7FD853ACE423759B67AA /* ICSBuilder.swift */; };
 		F0CURB111111222233334444 /* CurrentItemView.swift in Sources (iOS App) */ = {isa = PBXBuildFile; fileRef = F0CURV111111222233334444 /* CurrentItemView.swift */; };
+		F0NOTB111111222233334444 /* Notifications.swift in Sources (iOS App) */ = {isa = PBXBuildFile; fileRef = F0NOTF111111222233334444 /* Notifications.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -132,6 +133,7 @@
 		F0ACTF111111222233334444 /* AddToCalendarActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddToCalendarActivity.swift; sourceTree = "<group>"; };
         F0CALF111111222233334444 /* CalendarHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarHelper.swift; sourceTree = "<group>"; };
 		F0CURV111111222233334444 /* CurrentItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrentItemView.swift; sourceTree = "<group>"; };
+		F0NOTF111111222233334444 /* Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifications.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -173,6 +175,7 @@
 				F0CALF111111222233334444 /* CalendarHelper.swift */,
 				F0ACTF111111222233334444 /* AddToCalendarActivity.swift */,
 				F0CURV111111222233334444 /* CurrentItemView.swift */,
+				F0NOTF111111222233334444 /* Notifications.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -417,6 +420,7 @@
 				F0ACTA111111222233334444 /* AddToCalendarActivity.swift in Sources */,
 				F0QUEU111111222233334446 /* Queue.swift in Sources (iOS App) */,
 				F0CURB111111222233334444 /* CurrentItemView.swift in Sources (iOS App) */,
+				F0NOTB111111222233334444 /* Notifications.swift in Sources (iOS App) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

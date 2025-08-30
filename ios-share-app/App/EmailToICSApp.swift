@@ -22,6 +22,7 @@ struct EmailToICSApp: App {
             .task {
                 // Load settings on launch
                 Log.general.info("iOS App: launching, loading settings & shared payload")
+                NotificationManager.configure()
                 await appState.loadSettings()
                 appState.loadSharedPayload()
                 appState.startQueueWorker()
@@ -133,6 +134,7 @@ final class AppState: ObservableObject {
         )
         QueueStore.append(item)
         queue = QueueStore.load()
+        NotificationManager.queued(itemID: item.id, url: item.payload.url)
         startQueueWorker()
     }
 
@@ -166,6 +168,7 @@ final class AppState: ObservableObject {
             self.showCurrentDialog = true
         }
         markQueueItem(item.id, status: .processing)
+        NotificationManager.processing(itemID: item.id, url: item.payload.url)
         do {
             try await runPipelineInternal(sourceURLString: item.payload.url,
                                           tentative: item.tentative,
@@ -187,17 +190,20 @@ final class AppState: ObservableObject {
                 )
                 await MainActor.run { self.status = "Email sent." }
                 removeQueueItem(id: item.id)
+                NotificationManager.success(itemID: item.id)
                 // Continue worker for next item
                 startQueueWorker()
             } else {
                 // Wait for user action (Send/Dismiss) to clear
                 markQueueItem(item.id, status: .pending)
+                NotificationManager.needsReview(itemID: item.id)
                 // Pause worker until user resolves
             }
         } catch {
             Log.general.error("Queue: processing failed: \(error.localizedDescription)")
             await MainActor.run { self.status = "Error: \(error.localizedDescription)" }
             markQueueItem(item.id, status: .failed, error: error.localizedDescription)
+            NotificationManager.failure(itemID: item.id, message: error.localizedDescription)
             // Continue worker with next item
             startQueueWorker()
         }
@@ -216,6 +222,7 @@ final class AppState: ObservableObject {
         multiday = false
         reviewFirst = true
         showCurrentDialog = false
+        NotificationManager.success(itemID: id)
         // Continue worker for next item
         startQueueWorker()
     }
