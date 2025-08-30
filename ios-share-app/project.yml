@@ -14,7 +14,7 @@ targets:
     settings:
       INFOPLIST_FILE: App/Info.plist
       CODE_SIGN_ENTITLEMENTS: App/EmailToICS.entitlements
-      PRODUCT_BUNDLE_IDENTIFIER: com.example.emailtoics
+      PRODUCT_BUNDLE_IDENTIFIER: com.tls.email-to-ics
       SWIFT_VERSION: 5.9
       SUPPORTS_MACCATALYST: YES
       DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: YES
@@ -33,7 +33,7 @@ targets:
     settings:
       INFOPLIST_FILE: ShareExtension/Info.plist
       CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements
-      PRODUCT_BUNDLE_IDENTIFIER: com.example.emailtoics.shareext
+      PRODUCT_BUNDLE_IDENTIFIER: com.tls.email-to-ics.shareext
       SWIFT_VERSION: 5.9
 
   EmailToICSAppMac:
@@ -47,7 +47,7 @@ targets:
     settings:
       INFOPLIST_FILE: MacApp/Info.plist
       CODE_SIGN_ENTITLEMENTS: MacApp/EmailToICSMac.entitlements
-      PRODUCT_BUNDLE_IDENTIFIER: com.example.emailtoics.mac
+      PRODUCT_BUNDLE_IDENTIFIER: com.tls.email-to-ics.mac
       SWIFT_VERSION: 5.9
     dependencies:
       - target: CreateCalendarEventShareExtensionMac
@@ -62,5 +62,5 @@ targets:
     settings:
       INFOPLIST_FILE: MacShareExtension/Info.plist
       CODE_SIGN_ENTITLEMENTS: MacShareExtension/ShareExtension.entitlements
-      PRODUCT_BUNDLE_IDENTIFIER: com.example.emailtoics.mac.shareext
+      PRODUCT_BUNDLE_IDENTIFIER: com.tls.email-to-ics.mac.shareext
       SWIFT_VERSION: 5.9

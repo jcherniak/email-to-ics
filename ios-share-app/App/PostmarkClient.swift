@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct PostmarkClient {
     let apiKey: String
@@ -6,45 +7,49 @@ struct PostmarkClient {
     struct PostmarkError: Error { let message: String }
 
     func send(from: String, to: String, subject: String, body: String, icsData: Data) async throws {
-        guard !apiKey.isEmpty else { throw PostmarkError(message: "Missing Postmark API key") }
-        guard !from.isEmpty && !to.isEmpty else { throw PostmarkError(message: "Missing from/to emails") }
+        Log.network.info("Postmark: send from=\(from, privacy: .public) to=\(to, privacy: .public) subj=\(subject, privacy: .public) ics_bytes=\(icsData.count)")
+        guard !apiKey.isEmpty else {
+            Log.network.error("Postmark: missing API key")
+            throw PostmarkError(message: "Missing Postmark API key")
+        }
+        guard !from.isEmpty && !to.isEmpty else {
+            Log.network.error("Postmark: missing from/to emails")
+            throw PostmarkError(message: "Missing from/to emails")
+        }
 
-        // Build multipart/form-data with ICS attachment
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var req = URLRequest(url: URL(string: "https://api.postmarkapp.com/email")!)
+        // JSON API with base64 attachment per Postmark spec
+        let endpoint = URL(string: "https://api.postmarkapp.com/email")!
+        var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        req.setValue(apiKey, forHTTPHeaderField: "X-Postmark-Server-Token")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        var bodyData = Data()
-        func add(_ name: String, _ value: String) {
-            bodyData.append("--\(boundary)\r\n".data(using: .utf8)!)
-            bodyData.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
-            bodyData.append("\(value)\r\n".data(using: .utf8)!)
-        }
-        func addFile(_ name: String, filename: String, mime: String, data: Data) {
-            bodyData.append("--\(boundary)\r\n".data(using: .utf8)!)
-            bodyData.append("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
-            bodyData.append("Content-Type: \(mime)\r\n\r\n".data(using: .utf8)!)
-            bodyData.append(data)
-            bodyData.append("\r\n".data(using: .utf8)!)
-        }
+        let attachment: [String: Any] = [
+            "Name": "event.ics",
+            "Content": icsData.base64EncodedString(),
+            "ContentType": "text/calendar; charset=utf-8"
+        ]
+        let payload: [String: Any] = [
+            "From": from,
+            "To": to,
+            "Subject": subject,
+            "TextBody": body,
+            "Attachments": [attachment]
+        ]
+        let json = try JSONSerialization.data(withJSONObject: payload)
+        req.httpBody = json
+        Log.network.debug("Postmark: JSON length=\(json.count) bytes (~\(json.count/1024) KB)")
 
-        add("From", from)
-        add("To", to)
-        add("Subject", subject)
-        add("TextBody", body)
-        addFile("Attachments", filename: "event.ics", mime: "text/calendar", data: icsData)
-        bodyData.append("--\(boundary)--\r\n".data(using: .utf8)!)
-        req.httpBody = bodyData
-
+        let t0 = Date()
         let (data, resp) = try await URLSession.shared.data(for: req)
+        let dt = Date().timeIntervalSince(t0)
         guard let http = resp as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
             let message = String(data: data, encoding: .utf8) ?? "HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)"
+            Log.network.error("Postmark: HTTP error \((resp as? HTTPURLResponse)?.statusCode ?? -1) in \(String(format: "%.2f", dt))s body=\(Log.truncate(message))")
             throw PostmarkError(message: message)
         }
+        Log.network.info("Postmark: status=\(http.statusCode) in \(String(format: "%.2f", dt))s")
     }
 }
 
-private extension Data { mutating func append(_ data: Data) { self.append(data) } }
-
+// Remove shadowing append to avoid recursion; use stdlib Data.append

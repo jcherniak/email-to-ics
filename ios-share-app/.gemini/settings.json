@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "iossim-sys": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "simctl-mcp"
+      ]
+    },
+    "iossim-ui": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "ios-simulator-mcp"
+      ]
+    }
+  }
+}

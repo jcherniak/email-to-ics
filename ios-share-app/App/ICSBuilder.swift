@@ -1,7 +1,9 @@
 import Foundation
+import os
 
 enum ICSBuilder {
     static func build(events: [ExtractedEvent], organizerEmail: String?, tentative: Bool) -> Data {
+        Log.general.info("ICSBuilder: building ICS for events=\(events.count) tentative=\(tentative) organizer=\(organizerEmail ?? "", privacy: .public)")
         var lines: [String] = []
         func add(_ l: String) { lines.append(fold(l)) }
 
@@ -9,7 +11,8 @@ enum ICSBuilder {
         add("VERSION:2.0")
         add("PRODID:-//EmailToICS iOS//EN")
 
-        for e in events {
+        for (idx, e) in events.enumerated() {
+            Log.general.debug("ICSBuilder: event#\(idx+1) summary=\(e.summary, privacy: .public) loc=\(e.location, privacy: .public) tz=\(e.timezone, privacy: .public) start=\(e.start_date)T\(e.start_time ?? "") end=\(e.end_date ?? "")T\(e.end_time ?? "") url=\(e.url, privacy: .public)")
             add("BEGIN:VEVENT")
             let uid = UUID().uuidString + "@email-to-ics-ios"
             add("UID:\(uid)")
@@ -43,6 +46,8 @@ enum ICSBuilder {
 
         add("END:VCALENDAR")
         let ics = lines.joined(separator: "\r\n") + "\r\n"
+        Log.general.info("ICSBuilder: built ICS bytes=\(ics.utf8.count) lines=\(lines.count)")
+        Log.parsing.debug("ICSBuilder preview:\n\(Log.truncate(ics, max: 1200))")
         return Data(ics.utf8)
     }
 
@@ -68,4 +73,3 @@ enum ICSBuilder {
         return out.enumerated().map { idx, chunk in idx == 0 ? chunk : " " + chunk }.joined(separator: "\r\n")
     }
 }
-

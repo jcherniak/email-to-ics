@@ -1,6 +1,6 @@
 import Foundation
 
-struct SharedPayload: Codable {
+struct SharedPayload: Codable, Equatable {
     var url: String
     var title: String?
     var selectedText: String?
@@ -26,5 +26,21 @@ struct Settings: Codable {
     var toTentativeEmail: String = ""
     var toConfirmedEmail: String = ""
     var defaultModel: String = "openai/gpt-5"
+    var reasoningEffort: ReasoningEffort = .medium
 }
 
+enum ReasoningEffort: String, Codable, CaseIterable, Identifiable {
+    case none
+    case low
+    case medium
+    case high
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .none: return "None"
+        case .low: return "Low"
+        case .medium: return "Medium"
+        case .high: return "High"
+        }
+    }
+}

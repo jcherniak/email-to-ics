@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 70;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -38,8 +38,19 @@
 		CC63F3F3CE0EB32FE39E72AC /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 275956B049F90BFDC134C600 /* Keychain.swift */; };
 		D3EEACC1E5EAA7BDF337B664 /* PostmarkClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD99232B81FB3F45BFB6F98 /* PostmarkClient.swift */; };
 		E9056642987EC22B3DDFF058 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 275956B049F90BFDC134C600 /* Keychain.swift */; };
-		EF583E06FDD48EDA8E5D6246 /* ICSBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9AA7FD853ACE423759B67AA /* ICSBuilder.swift */; };
-		F821CA8583F49AECBDFBE2A9 /* OpenRouterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3C01C28DDB16B4E3843AB73 /* OpenRouterClient.swift */; };
+        EF583E06FDD48EDA8E5D6246 /* ICSBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9AA7FD853ACE423759B67AA /* ICSBuilder.swift */; };
+        F821CA8583F49AECBDFBE2A9 /* OpenRouterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3C01C28DDB16B4E3843AB73 /* OpenRouterClient.swift */; };
+        F0AAA1112222333344445555 /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB12CD34EF56AB78CD90EF12 /* Log.swift */; };
+        F0AAA1112222333344445556 /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB12CD34EF56AB78CD90EF12 /* Log.swift */; };
+        F0AAA1112222333344445557 /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB12CD34EF56AB78CD90EF12 /* Log.swift */; };
+		F0AAA1112222333344445558 /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB12CD34EF56AB78CD90EF12 /* Log.swift */; };
+		F0CALA111111222233334444 /* CalendarHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0CALF111111222233334444 /* CalendarHelper.swift */; };
+		F0CALB111111222233334444 /* CalendarHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0CALF111111222233334444 /* CalendarHelper.swift */; };
+		F0ACTA111111222233334444 /* AddToCalendarActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0ACTF111111222233334444 /* AddToCalendarActivity.swift */; };
+		F0ACTB111111222233334444 /* AddToCalendarActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0ACTF111111222233334444 /* AddToCalendarActivity.swift */; };
+		F0QUEU111111222233334444 /* Queue.swift in Sources (iOS Share) */ = {isa = PBXBuildFile; fileRef = D1E2F3A4B5C6D7E8F9A0B1C2 /* Queue.swift */; };
+		F0QUEU111111222233334445 /* Queue.swift in Sources (macOS App) */ = {isa = PBXBuildFile; fileRef = D1E2F3A4B5C6D7E8F9A0B1C2 /* Queue.swift */; };
+		F0QUEU111111222233334446 /* Queue.swift in Sources (iOS App) */ = {isa = PBXBuildFile; fileRef = D1E2F3A4B5C6D7E8F9A0B1C2 /* Queue.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -85,7 +96,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		05DCD2C9D849DC60E2649051 /* CreateCalendarEventShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CreateCalendarEventShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		05DCD2C9D849DC60E2649051 /* CreateCalendarEventShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CreateCalendarEventShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		0BCB252C54BE2A086B9185F1 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		17EA5D26A3E6117BED8511CA /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		275956B049F90BFDC134C600 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
@@ -105,12 +116,16 @@
 		B5E60E9ECBFBB8F9AF9BC109 /* AppGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroup.swift; sourceTree = "<group>"; };
 		B900836B6122195C3DA8530E /* CreateCalendarEventShareExtensionMac.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CreateCalendarEventShareExtensionMac.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		BDBE83B410983B4C5628A30A /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
-		C5DAE9910E3205630C375150 /* EmailToICSApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = EmailToICSApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C5DAE9910E3205630C375150 /* EmailToICSApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EmailToICSApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C7E3447831099B053F765082 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DA92BE9CBF99D73FA5BCE920 /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
 		E8C9C06C8579024425A56C53 /* AppMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMain.swift; sourceTree = "<group>"; };
 		E9AA7FD853ACE423759B67AA /* ICSBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ICSBuilder.swift; sourceTree = "<group>"; };
 		FB7FD4CE1CE91FA849607942 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		AB12CD34EF56AB78CD90EF12 /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
+		D1E2F3A4B5C6D7E8F9A0B1C2 /* Queue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Queue.swift; sourceTree = "<group>"; };
+		F0ACTF111111222233334444 /* AddToCalendarActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddToCalendarActivity.swift; sourceTree = "<group>"; };
+        F0CALF111111222233334444 /* CalendarHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarHelper.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -149,6 +164,8 @@
 				8FD99232B81FB3F45BFB6F98 /* PostmarkClient.swift */,
 				FB7FD4CE1CE91FA849607942 /* SettingsView.swift */,
 				690E5607701BE34C791B12AB /* WebLoader.swift */,
+				F0CALF111111222233334444 /* CalendarHelper.swift */,
+				F0ACTF111111222233334444 /* AddToCalendarActivity.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -170,6 +187,8 @@
 				B5E60E9ECBFBB8F9AF9BC109 /* AppGroup.swift */,
 				275956B049F90BFDC134C600 /* Keychain.swift */,
 				0BCB252C54BE2A086B9185F1 /* Models.swift */,
+				AB12CD34EF56AB78CD90EF12 /* Log.swift */,
+				D1E2F3A4B5C6D7E8F9A0B1C2 /* Queue.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -290,7 +309,6 @@
 			);
 			mainGroup = 11D1F1C1A199A8F673C0A97A;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 70;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -330,6 +348,7 @@
 				4BEFA40D577DA506169D8D0C /* Keychain.swift in Sources */,
 				B22858D18C2DDC75FA97B252 /* MacShareViewController.swift in Sources */,
 				B515246EA9BA49EED77EBC21 /* Models.swift in Sources */,
+				F0AAA1112222333344445558 /* Log.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -341,6 +360,8 @@
 				646040EBDB302E6195841B97 /* Keychain.swift in Sources */,
 				A904EC6F1EBA573D9FB1B485 /* Models.swift in Sources */,
 				A157138615AC22C91E50A9A5 /* ShareViewController.swift in Sources */,
+				F0AAA1112222333344445557 /* Log.swift in Sources */,
+				F0QUEU111111222233334444 /* Queue.swift in Sources (iOS Share) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -359,6 +380,10 @@
 				8CC6D78B5F76390F68D78C00 /* PostmarkClient.swift in Sources */,
 				8FF79E2A99A56036D5018640 /* SettingsView.swift in Sources */,
 				C49DB53B5D6AF02813AC8738 /* WebLoader.swift in Sources */,
+				F0AAA1112222333344445556 /* Log.swift in Sources */,
+				F0CALB111111222233334444 /* CalendarHelper.swift in Sources */,
+				F0ACTB111111222233334444 /* AddToCalendarActivity.swift in Sources */,
+				F0QUEU111111222233334445 /* Queue.swift in Sources (macOS App) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -376,6 +401,10 @@
 				D3EEACC1E5EAA7BDF337B664 /* PostmarkClient.swift in Sources */,
 				910732EDA1CE4A9FBC9BD565 /* SettingsView.swift in Sources */,
 				472A7B595CDC9EA1A286ED61 /* WebLoader.swift in Sources */,
+				F0AAA1112222333344445555 /* Log.swift in Sources */,
+                F0CALA111111222233334444 /* CalendarHelper.swift in Sources */,
+				F0ACTA111111222233334444 /* AddToCalendarActivity.swift in Sources */,
+				F0QUEU111111222233334446 /* Queue.swift in Sources (iOS App) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -413,17 +442,21 @@
 				CODE_SIGN_ENTITLEMENTS = App/EmailToICS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = YES;
+				DEVELOPMENT_TEAM = RV54K9ZH64;
 				INFOPLIST_FILE = App/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.tls.email-to-ics";
 				SDKROOT = iphoneos;
-				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				OTHER_LDFLAGS = (
+				);
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 			};
 			name = Debug;
 		};
@@ -489,17 +522,21 @@
 				CODE_SIGN_ENTITLEMENTS = App/EmailToICS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = YES;
+				DEVELOPMENT_TEAM = RV54K9ZH64;
 				INFOPLIST_FILE = App/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.tls.email-to-ics";
 				SDKROOT = iphoneos;
-				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				OTHER_LDFLAGS = (
+				);
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 			};
 			name = Release;
 		};
@@ -507,13 +544,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				DEVELOPMENT_TEAM = RV54K9ZH64;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics.shareext;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.tls.email-to-ics.shareext";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -525,14 +563,18 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = MacApp/EmailToICSMac.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = RV54K9ZH64;
 				INFOPLIST_FILE = MacApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics.mac;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.tls.email-to-ics.mac";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.9;
 			};
@@ -604,14 +646,18 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = MacShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = RV54K9ZH64;
 				INFOPLIST_FILE = MacShareExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics.mac.shareext;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.tls.email-to-ics.mac.shareext";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.9;
 			};
@@ -621,13 +667,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				DEVELOPMENT_TEAM = RV54K9ZH64;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics.shareext;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.tls.email-to-ics.shareext";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -639,14 +686,18 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = MacApp/EmailToICSMac.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = RV54K9ZH64;
 				INFOPLIST_FILE = MacApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics.mac;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.tls.email-to-ics.mac";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.9;
 			};
@@ -656,14 +707,18 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = MacShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = RV54K9ZH64;
 				INFOPLIST_FILE = MacShareExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.emailtoics.mac.shareext;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.tls.email-to-ics.mac.shareext";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.9;
 			};

@@ -1,12 +1,35 @@
 import Foundation
 
-enum OpenRouterError: Error { case badResponse, invalidJSON }
+enum OpenRouterError: Error {
+    case missingAPIKey
+    case encodeFailed(underlying: Error)
+    case badResponse(status: Int, body: String)
+    case emptyBody
+    case invalidJSON(reason: String, contentSample: String)
+}
+
+extension OpenRouterError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .missingAPIKey:
+            return "Missing OpenRouter API key"
+        case .encodeFailed(let underlying):
+            return "Failed to encode request: \(underlying.localizedDescription)"
+        case .badResponse(let status, let body):
+            return "OpenRouter HTTP \(status): \(body)"
+        case .emptyBody:
+            return "OpenRouter returned empty body"
+        case .invalidJSON(let reason, let sample):
+            return "Invalid JSON from OpenRouter (\(reason)). Sample: \(sample)"
+        }
+    }
+}
 
 final class OpenRouterClient {
     private let apiKey: String
     init(apiKey: String) { self.apiKey = apiKey }
 
-    func extract(pageHTML: String, sourceURL: String, instructions: String, tentative: Bool, multiday: Bool, model: String, jpegBase64: String?) async throws -> [ExtractedEvent] {
+    func extract(pageHTML: String, sourceURL: String, instructions: String, tentative: Bool, multiday: Bool, model: String, reasoning: ReasoningEffort, jpegBase64: String?) async throws -> [ExtractedEvent] {
         let systemPrompt = Self.systemPrompt(tentative: tentative, multiday: multiday)
         let userText = "\(instructions.isEmpty ? "" : "Special instructions: \(instructions)\n")\nSource URL (MUST be included in url field and description): \(sourceURL)\n\nContent to analyze:\n\(pageHTML)"
 
@@ -26,15 +49,17 @@ final class OpenRouterClient {
                         "properties": [
                             "summary": ["type": "string"],
                             "location": ["type": "string"],
-                            "start_date": ["type": "string", "pattern": "^\\\d{4}-\\\d{2}-\\\d{2}$"],
-                            "start_time": ["type": ["string","null"], "pattern": "^\\\d{2}:\\\d{2}$"],
-                            "end_date": ["type": ["string","null"], "pattern": "^\\\d{4}-\\\d{2}-\\\d{2}$"],
-                            "end_time": ["type": ["string","null"], "pattern": "^\\\d{2}:\\\d{2}$"],
+                            "start_date": ["type": "string", "pattern": #"^\d{4}-\d{2}-\d{2}$"#],
+                            "start_time": ["type": ["string","null"], "pattern": #"^\d{2}:\d{2}$"#],
+                            "end_date": ["type": ["string","null"], "pattern": #"^\d{4}-\d{2}-\d{2}$"#],
+                            "end_time": ["type": ["string","null"], "pattern": #"^\d{2}:\d{2}$"#],
                             "description": ["type": "string"],
                             "timezone": ["type": "string", "default": "America/New_York"],
                             "url": ["type": "string"]
                         ],
-                        "required": ["summary","location","start_date","description","timezone","url"],
+                        // OpenAI strict json_schema currently requires required[] to include every defined key
+                        // Optionality is represented via nullable types (string|null).
+                        "required": ["summary","location","start_date","start_time","end_date","end_time","description","timezone","url"],
                         "additionalProperties": false
                     ]
                 ]
@@ -43,7 +68,7 @@ final class OpenRouterClient {
             "additionalProperties": false
         ]
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "model": model,
             "messages": [
                 ["role": "system", "content": systemPrompt],
@@ -61,23 +86,71 @@ final class OpenRouterClient {
             "temperature": 0.1
         ]
 
+        // Set reasoning effort for GPT-5 variants if supported by provider
+        if model.contains("gpt-5") {
+            if reasoning != .none { payload["reasoning"] = ["effort": reasoning.rawValue] }
+        }
+
+        guard !apiKey.isEmpty else {
+            Log.network.error("OpenRouter: missing API key")
+            throw OpenRouterError.missingAPIKey
+        }
+
         var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        } catch {
+            Log.network.error("OpenRouter: JSON encode failed: \(error.localizedDescription)")
+            throw OpenRouterError.encodeFailed(underlying: error)
+        }
 
+        let htmlLen = pageHTML.count
+        let jpegInfo = jpegBase64 != nil ? "yes (b64 len: \(jpegBase64!.count))" : "no"
+        let reasoningEffort = (payload["reasoning"] as? [String: Any])?["effort"] as? String
+        if let re = reasoningEffort {
+            Log.network.info("OpenRouter: POST /chat/completions model=\(model, privacy: .public) reasoning=\(re, privacy: .public) html_len=\(htmlLen) image=\(jpegInfo, privacy: .public) instructions_len=\(instructions.count)")
+        } else {
+            Log.network.info("OpenRouter: POST /chat/completions model=\(model, privacy: .public) html_len=\(htmlLen) image=\(jpegInfo, privacy: .public) instructions_len=\(instructions.count)")
+        }
+        if let body = request.httpBody {
+            Log.network.debug("OpenRouter: request size=\(body.count) bytes (~\(body.count/1024) KB)")
+        }
+
+        let t0 = Date()
         let (data, resp) = try await URLSession.shared.data(for: request)
-        guard let http = resp as? HTTPURLResponse, 200..<300 ~= http.statusCode else { throw OpenRouterError.badResponse }
+        let dt = Date().timeIntervalSince(t0)
+
+        guard let http = resp as? HTTPURLResponse else {
+            Log.network.error("OpenRouter: non-HTTP response in \(String(format: "%.2f", dt))s")
+            throw OpenRouterError.badResponse(status: -1, body: "Non-HTTP response")
+        }
+        Log.network.info("OpenRouter: status=\(http.statusCode) in \(String(format: "%.2f", dt))s")
+        let responseStr = String(data: data, encoding: .utf8) ?? "(non-UTF8 body, len=\(data.count))"
+        Log.network.debug("OpenRouter: raw body: \(Log.truncate(responseStr))")
+
+        guard 200..<300 ~= http.statusCode else {
+            throw OpenRouterError.badResponse(status: http.statusCode, body: Log.truncate(responseStr))
+        }
+
+        guard !data.isEmpty else { throw OpenRouterError.emptyBody }
 
         // Parse OpenRouter JSON
         let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let choices = root?["choices"] as? [[String: Any]]
         let content = (choices?.first?["message"] as? [String: Any])?["content"] as? String ?? ""
         let clean = Self.cleanJSONContent(content)
-        guard let json = clean.data(using: .utf8),
-              let obj = try JSONSerialization.jsonObject(with: json) as? [String: Any],
-              let events = obj["events"] as? [[String: Any]] else { throw OpenRouterError.invalidJSON }
+        guard let json = clean.data(using: .utf8) else {
+            Log.parsing.error("OpenRouter: empty or non-UTF8 content")
+            throw OpenRouterError.invalidJSON(reason: "empty content", contentSample: "")
+        }
+        Log.parsing.debug("OpenRouter: cleaned JSON candidate len=\(json.count) bytes; preview=\(Log.truncate(clean))")
+        guard let obj = try JSONSerialization.jsonObject(with: json) as? [String: Any],
+              let events = obj["events"] as? [[String: Any]] else {
+            throw OpenRouterError.invalidJSON(reason: "missing 'events' array", contentSample: Log.truncate(clean))
+        }
 
         return events.compactMap { e in
             guard let summary = e["summary"] as? String,
@@ -130,4 +203,3 @@ final class OpenRouterClient {
         return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-
