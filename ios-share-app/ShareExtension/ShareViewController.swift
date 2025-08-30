@@ -7,6 +7,7 @@ final class ShareViewController: UIViewController {
     private let statusLabel = UILabel()
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let openButton = UIButton(type: .system)
+    private let processHereButton = UIButton(type: .system)
     private let addToQueueButton = UIButton(type: .system)
     private let tentativeSwitch = UISwitch()
     private let multidaySwitch = UISwitch()
@@ -31,6 +32,10 @@ final class ShareViewController: UIViewController {
         addToQueueButton.setTitle("Add To Queue", for: .normal)
         addToQueueButton.isHidden = true
         addToQueueButton.addTarget(self, action: #selector(addToQueueTapped), for: .touchUpInside)
+
+        processHereButton.setTitle("Process Here", for: .normal)
+        processHereButton.isHidden = true
+        processHereButton.addTarget(self, action: #selector(processHereTapped), for: .touchUpInside)
 
         let grid = UIStackView()
         grid.axis = .vertical
@@ -60,7 +65,7 @@ final class ShareViewController: UIViewController {
         grid.addArrangedSubview(instrLabel)
         grid.addArrangedSubview(instructionsView)
 
-        let buttons = UIStackView(arrangedSubviews: [openButton, addToQueueButton])
+        let buttons = UIStackView(arrangedSubviews: [processHereButton, openButton, addToQueueButton])
         buttons.axis = .horizontal
         buttons.alignment = .center
         buttons.spacing = 20
@@ -128,6 +133,7 @@ final class ShareViewController: UIViewController {
                 self.spinner.stopAnimating()
                 self.openButton.isHidden = false
                 self.addToQueueButton.isHidden = false
+                self.processHereButton.isHidden = false
             } catch {
                 Log.general.error("ShareExt(iOS): payload write error: \(error.localizedDescription)")
                 self.statusLabel.text = "Couldn’t save content (\(error.localizedDescription))."
@@ -200,6 +206,84 @@ final class ShareViewController: UIViewController {
         didCommitAction = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             self.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
+        }
+    }
+
+    @objc private func processHereTapped() {
+        guard let p = capturedPayload else { return }
+        // Process within the extension. Use same pipeline parts as app.
+        // Minimal status updates via statusLabel.
+        statusLabel.text = "Loading page…"
+        spinner.startAnimating()
+        processHere(payload: p,
+                    tentative: tentativeSwitch.isOn,
+                    multiday: multidaySwitch.isOn,
+                    reviewFirst: reviewFirstSwitch.isOn,
+                    instructions: instructionsView.text ?? "")
+    }
+
+    private func processHere(payload: SharedPayload,
+                              tentative: Bool,
+                              multiday: Bool,
+                              reviewFirst: Bool,
+                              instructions: String) {
+        guard let url = URL(string: payload.url) else { return }
+        let loader = WebLoader()
+        Task {
+            do {
+                let page = try await loader.load(url: url)
+                self.statusLabel.text = "Analyzing with AI…"
+                let ai = OpenRouterClient(apiKey: Keychain.get("openRouterKey") ?? "")
+                let events = try await ai.extract(
+                    pageHTML: page.html,
+                    sourceURL: payload.url,
+                    instructions: instructions,
+                    tentative: tentative,
+                    multiday: multiday,
+                    model: "openai/gpt-5",
+                    reasoning: .medium,
+                    jpegBase64: page.jpegBase64
+                )
+                let ics = ICSBuilder.build(events: events, organizerEmail: Keychain.get("fromEmail") ?? "", tentative: tentative)
+                self.statusLabel.text = "Ready"
+                self.spinner.stopAnimating()
+                // If reviewFirst is off, attempt Postmark send; otherwise hand off to app
+                if !reviewFirst {
+                    let postKey = Keychain.get("postmarkKey") ?? ""
+                    let fromEmail = Keychain.get("fromEmail") ?? ""
+                    let toTent = Keychain.get("toTentativeEmail") ?? ""
+                    let toConf = Keychain.get("toConfirmedEmail") ?? ""
+                    let to = tentative ? toTent : toConf
+                    if !postKey.isEmpty && !fromEmail.isEmpty && !to.isEmpty {
+                        let postmark = PostmarkClient(apiKey: postKey)
+                        try await postmark.send(
+                            from: fromEmail,
+                            to: to,
+                            subject: events.count == 1 ? events[0].summary : "Calendar Events: \(events.count)",
+                            body: "See attached ICS.",
+                            icsData: ics
+                        )
+                        self.statusLabel.text = "Email sent."
+                        // No queue entry needed; dismiss.
+                        self.didCommitAction = true
+                        self.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
+                    } else {
+                        self.statusLabel.text = "Postmark not configured. Opening app…"
+                        self.enqueue(payload)
+                        self.openInApp()
+                    }
+                } else {
+                    // In review-first mode inside extension, just open the main app for richer UI, but include queue entry.
+                    self.enqueue(payload)
+                    self.openInApp()
+                }
+            } catch {
+                self.spinner.stopAnimating()
+                self.statusLabel.text = "Error: \(error.localizedDescription)"
+                // Keep buttons so user can add to queue or open app
+                self.addToQueueButton.isHidden = false
+                self.openButton.isHidden = false
+            }
         }
     }
 

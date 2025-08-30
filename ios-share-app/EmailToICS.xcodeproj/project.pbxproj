@@ -51,6 +51,11 @@
 		F0QUEU111111222233334444 /* Queue.swift in Sources (iOS Share) */ = {isa = PBXBuildFile; fileRef = D1E2F3A4B5C6D7E8F9A0B1C2 /* Queue.swift */; };
 		F0QUEU111111222233334445 /* Queue.swift in Sources (macOS App) */ = {isa = PBXBuildFile; fileRef = D1E2F3A4B5C6D7E8F9A0B1C2 /* Queue.swift */; };
 		F0QUEU111111222233334446 /* Queue.swift in Sources (iOS App) */ = {isa = PBXBuildFile; fileRef = D1E2F3A4B5C6D7E8F9A0B1C2 /* Queue.swift */; };
+        F0WEBX111111222233334444 /* WebLoader.swift in Sources (iOS Share) */ = {isa = PBXBuildFile; fileRef = 690E5607701BE34C791B12AB /* WebLoader.swift */; };
+        F0OPEN111111222233334444 /* OpenRouterClient.swift in Sources (iOS Share) */ = {isa = PBXBuildFile; fileRef = A3C01C28DDB16B4E3843AB73 /* OpenRouterClient.swift */; };
+        F0POST111111222233334444 /* PostmarkClient.swift in Sources (iOS Share) */ = {isa = PBXBuildFile; fileRef = 8FD99232B81FB3F45BFB6F98 /* PostmarkClient.swift */; };
+		F0ICSB111111222233334444 /* ICSBuilder.swift in Sources (iOS Share) */ = {isa = PBXBuildFile; fileRef = E9AA7FD853ACE423759B67AA /* ICSBuilder.swift */; };
+		F0CURB111111222233334444 /* CurrentItemView.swift in Sources (iOS App) */ = {isa = PBXBuildFile; fileRef = F0CURV111111222233334444 /* CurrentItemView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -126,6 +131,7 @@
 		D1E2F3A4B5C6D7E8F9A0B1C2 /* Queue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Queue.swift; sourceTree = "<group>"; };
 		F0ACTF111111222233334444 /* AddToCalendarActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddToCalendarActivity.swift; sourceTree = "<group>"; };
         F0CALF111111222233334444 /* CalendarHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarHelper.swift; sourceTree = "<group>"; };
+		F0CURV111111222233334444 /* CurrentItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrentItemView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -166,6 +172,7 @@
 				690E5607701BE34C791B12AB /* WebLoader.swift */,
 				F0CALF111111222233334444 /* CalendarHelper.swift */,
 				F0ACTF111111222233334444 /* AddToCalendarActivity.swift */,
+				F0CURV111111222233334444 /* CurrentItemView.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -362,6 +369,10 @@
 				A157138615AC22C91E50A9A5 /* ShareViewController.swift in Sources */,
 				F0AAA1112222333344445557 /* Log.swift in Sources */,
 				F0QUEU111111222233334444 /* Queue.swift in Sources (iOS Share) */,
+				F0WEBX111111222233334444 /* WebLoader.swift in Sources (iOS Share) */,
+				F0OPEN111111222233334444 /* OpenRouterClient.swift in Sources (iOS Share) */,
+				F0POST111111222233334444 /* PostmarkClient.swift in Sources (iOS Share) */,
+				F0ICSB111111222233334444 /* ICSBuilder.swift in Sources (iOS Share) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -405,6 +416,7 @@
                 F0CALA111111222233334444 /* CalendarHelper.swift in Sources */,
 				F0ACTA111111222233334444 /* AddToCalendarActivity.swift in Sources */,
 				F0QUEU111111222233334446 /* Queue.swift in Sources (iOS App) */,
+				F0CURB111111222233334444 /* CurrentItemView.swift in Sources (iOS App) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

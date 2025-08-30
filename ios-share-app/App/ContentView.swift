@@ -88,10 +88,21 @@ struct ContentView: View {
             SettingsSection()
         }
         .navigationTitle("Email to ICS")
+        #if canImport(UIKit)
+        .sheet(isPresented: $app.showCurrentDialog) {
+            CurrentItemView()
+                .environmentObject(app)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        #else
+        .sheet(isPresented: $app.showCurrentDialog) { CurrentItemView().environmentObject(app) }
+        #endif
     }
 
     private func process() {
         Log.general.info("UI: Process Now tapped")
+        app.showCurrentDialog = true
         Task { await runPipeline() }
     }
 

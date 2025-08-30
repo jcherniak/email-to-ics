@@ -24,6 +24,7 @@ struct EmailToICSApp: App {
                 Log.general.info("iOS App: launching, loading settings & shared payload")
                 await appState.loadSettings()
                 appState.loadSharedPayload()
+                appState.startQueueWorker()
                 Log.general.info("iOS App: ready")
             }
             .onChange(of: scenePhase) { _ , newPhase in
@@ -49,6 +50,8 @@ final class AppState: ObservableObject {
     // Queue management
     @Published var queue: [QueueItem] = []
     @Published var currentQueueItemID: UUID? = nil
+    @Published var showCurrentDialog: Bool = false
+    private var isQueueWorkerRunning = false
 
     func loadSharedPayload() {
         Log.general.info("AppState: loading shared payload from \(AppGroup.sharedPayloadURL.path, privacy: .public)")
@@ -130,6 +133,7 @@ final class AppState: ObservableObject {
         )
         QueueStore.append(item)
         queue = QueueStore.load()
+        startQueueWorker()
     }
 
     func removeQueueItem(id: UUID) {
@@ -159,6 +163,7 @@ final class AppState: ObservableObject {
             self.multiday = item.multiday
             self.reviewFirst = item.reviewFirst
             self.instructions = item.instructions
+            self.showCurrentDialog = true
         }
         markQueueItem(item.id, status: .processing)
         do {
@@ -182,14 +187,19 @@ final class AppState: ObservableObject {
                 )
                 await MainActor.run { self.status = "Email sent." }
                 removeQueueItem(id: item.id)
+                // Continue worker for next item
+                startQueueWorker()
             } else {
                 // Wait for user action (Send/Dismiss) to clear
                 markQueueItem(item.id, status: .pending)
+                // Pause worker until user resolves
             }
         } catch {
             Log.general.error("Queue: processing failed: \(error.localizedDescription)")
             await MainActor.run { self.status = "Error: \(error.localizedDescription)" }
             markQueueItem(item.id, status: .failed, error: error.localizedDescription)
+            // Continue worker with next item
+            startQueueWorker()
         }
     }
 
@@ -205,6 +215,9 @@ final class AppState: ObservableObject {
         tentative = true
         multiday = false
         reviewFirst = true
+        showCurrentDialog = false
+        // Continue worker for next item
+        startQueueWorker()
     }
 
     // MARK: - Pipeline (refactor to allow queued processing)
@@ -264,6 +277,21 @@ final class AppState: ObservableObject {
         await MainActor.run {
             self.icsData = ics
             self.status = "Ready"
+        }
+    }
+
+    // MARK: - Background queue worker
+    func startQueueWorker() {
+        if isQueueWorkerRunning { return }
+        // If a review-first item is showing, do not auto-advance until user dismisses/sends
+        if showCurrentDialog { return }
+        let pending = queue.first { $0.status == .pending }
+        guard let next = pending else { return }
+        isQueueWorkerRunning = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isQueueWorkerRunning = false }
+            await self.processQueueItem(next)
         }
     }
 }
