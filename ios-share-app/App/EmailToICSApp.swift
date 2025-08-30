@@ -24,20 +24,11 @@ struct EmailToICSApp: App {
                 Log.general.info("iOS App: launching, loading settings & shared payload")
                 await appState.loadSettings()
                 appState.loadSharedPayload()
-                #if canImport(UIKit)
-                BackgroundQueueManager.shared.register()
-                BackgroundQueueManager.shared.schedule()
-                #endif
                 appState.startQueueWorker()
                 Log.general.info("iOS App: ready")
             }
             .onChange(of: scenePhase) { _ , newPhase in
                 Log.general.info("iOS App: scene phase=\(String(describing: newPhase))")
-                #if canImport(UIKit)
-                if newPhase == .background {
-                    BackgroundQueueManager.shared.schedule()
-                }
-                #endif
             }
         }
     }
