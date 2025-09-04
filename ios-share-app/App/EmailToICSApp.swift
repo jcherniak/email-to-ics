@@ -36,6 +36,7 @@ struct EmailToICSApp: App {
 }
 #endif
 
+@MainActor
 final class AppState: ObservableObject {
     @Published var payload: SharedPayload?
     @Published var settings = Settings()
@@ -252,18 +253,25 @@ final class AppState: ObservableObject {
                                      model: String) async throws {
         guard let url = URL(string: sourceURLString) else { return }
         await MainActor.run { self.isProcessing = true }
-        defer { DispatchQueue.main.async { self.isProcessing = false } }
 
         Log.general.info("Pipeline: start url=\(sourceURLString, privacy: .public) tentative=\(tentative) multiday=\(multiday) reviewFirst=\(reviewFirst)")
         Log.general.info("Pipeline: model=\(model, privacy: .public) openrouterKey=\(Log.redactKey(self.settings.openRouterKey), privacy: .public)")
         await MainActor.run { self.status = "Loading page..." }
         let loader = WebLoader()
-        let page = try await loader.load(url: url)
+        let page: LoadedPage
+        do {
+            page = try await loader.load(url: url)
+        } catch {
+            await MainActor.run { self.isProcessing = false }
+            throw error
+        }
         Log.general.info("Pipeline: page html_len=\(page.html.count) image_present=\(page.jpegBase64 != nil)")
 
         await MainActor.run { self.status = "Analyzing content with AI..." }
         let ai = OpenRouterClient(apiKey: self.settings.openRouterKey)
-        let extracted = try await ai.extract(
+        let extracted: [ExtractedEvent]
+        do {
+            extracted = try await ai.extract(
             pageHTML: page.html,
             sourceURL: sourceURLString,
             instructions: instructions,
@@ -273,6 +281,10 @@ final class AppState: ObservableObject {
             reasoning: self.settings.reasoningEffort,
             jpegBase64: page.jpegBase64
         )
+        } catch {
+            await MainActor.run { self.isProcessing = false }
+            throw error
+        }
         Log.general.info("Pipeline: extracted events=\(extracted.count)")
         await MainActor.run {
             self.events = extracted
@@ -284,6 +296,7 @@ final class AppState: ObservableObject {
         await MainActor.run {
             self.icsData = ics
             self.status = "Ready"
+            self.isProcessing = false
         }
     }
 

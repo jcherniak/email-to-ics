@@ -51,4 +51,3 @@ enum NotificationManager {
         deliver(title: "Failed to process", body: message, userInfo: ["itemID": itemID.uuidString])
     }
 }
-
