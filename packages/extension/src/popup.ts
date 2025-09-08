@@ -651,7 +651,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 const downloadBtn = document.getElementById('download-ics-btn');
                 if (downloadBtn) {
                     downloadBtn.addEventListener('click', () => {
-                        (window as any).downloadICS('${encodeURIComponent(icsContent)}', '${events[0].summary}');
+                        (window as any).downloadICS(encodeURIComponent(icsContent), events[0].summary);
                     });
                 }
                 

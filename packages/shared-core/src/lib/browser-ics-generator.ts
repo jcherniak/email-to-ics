@@ -151,6 +151,20 @@ export class BrowserIcsGenerator {
       return date.toISOString().split('T')[0].replace(/-/g, '');
     }
     
+    // If timezone is specified, format as local time without 'Z' suffix
+    // We need to format the time as it is, not convert to UTC
+    if (timezone && timezone !== 'UTC') {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+      
+      return `${year}${month}${day}T${hours}${minutes}${seconds}`;
+    }
+    
+    // For UTC times, include 'Z' suffix
     return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
   }
 
