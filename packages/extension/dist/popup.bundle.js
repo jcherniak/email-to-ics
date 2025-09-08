@@ -17748,7 +17748,7 @@ ${cleanedHtml}`;
             strict: true
           }
         },
-        max_tokens: 8e3,
+        max_tokens: 2e4,
         temperature: 0
       };
       console.log("\u{1F50E} Pre-extract request payload:", payload);

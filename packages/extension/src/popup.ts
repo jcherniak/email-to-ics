@@ -860,7 +860,7 @@ Extract event details from the provided content. Pay attention to:
                     strict: true
                 }
             },
-            max_tokens: 8000,
+            max_tokens: 20000,
             temperature: 0.0
         } as any;
 
