@@ -796,8 +796,13 @@ Extract event details from the provided content. Pay attention to:
                     strict: true
                 }
             },
-            max_tokens: 20000,
-            temperature: 0.1
+            max_tokens: multiday ? 50000 : 20000,
+            temperature: 0.1,
+            reasoning: {
+                effort: "medium",
+                max_tokens: 5000,
+                exclude: true
+            }
         };
 
         // Log full OpenRouter request payload (excluding secrets; header is added in background)

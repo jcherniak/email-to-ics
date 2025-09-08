@@ -17697,8 +17697,13 @@ ${pageData.html}`;
             strict: true
           }
         },
-        max_tokens: 2e4,
-        temperature: 0.1
+        max_tokens: multiday ? 5e4 : 2e4,
+        temperature: 0.1,
+        reasoning: {
+          effort: "medium",
+          max_tokens: 5e3,
+          exclude: true
+        }
       };
       console.log("\u{1F4E4} OpenRouter request payload (popup):", payload);
       const response = await chrome.runtime.sendMessage({
