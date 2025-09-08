@@ -686,12 +686,14 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         const systemPrompt = `You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
 
+Today's date is 2025-09-07. If a date is not a full date with month, day and year, assume it is in the future past today (2025-09-07). If a date has explicit parameters (month/day/year), then it is ok to be in the past.
+
 Extract event details from the provided content. Pay attention to:
 - Use ISO 8601 date format (YYYY-MM-DD) and 24-hour time format (HH:MM)
 - For all-day events, set start_time and end_time to null
 - If no end time specified, make reasonable estimate
 - Default timezone is America/New_York unless specified
-- Multi-day events: ${multiday ? 'Focus on the PRIMARY event mentioned on the page. Only if there is no clear primary event, extract multiple events' : 'Extract exactly one event'}
+- ${multiday ? 'MULTI-EVENT MODE: The user has checked the multi-event flag, indicating they want multiple separate calendar events extracted. Extract ALL distinct event times/sessions mentioned on the page as separate events. Each different time slot should be a separate event in the events array. Do NOT combine multiple times into a single event.' : 'SINGLE EVENT MODE: Extract exactly one event. If multiple times are mentioned, choose the primary/first one or create a single event that encompasses the main timeframe.'}
 - Event status: ${tentative ? 'Tentative' : 'Confirmed'} (set status field only; do NOT include a "Status:" line in the description)
 - Title prefix (group/host): Determine the presenting organization from the page/site (prefer <meta property="og:site_name">, the site header/brand, or phrases like "X presents ..."). Set the event summary to "[Group]: [Event Title]". Avoid duplicating the prefix if already present.
   - Examples: "KQED Live presents …" -> summary "KQED Live: …". If the site is sfsymphony.org or sanfranciscosymphony.org, use "SF Symphony: …".
@@ -709,8 +711,8 @@ Extract event details from the provided content. Pay attention to:
             properties: {
                 events: {
                     type: "array",
-                    description: multiday ? "Array of calendar events (focus on primary event, multiple only if no clear primary)" : "Array of calendar events (must contain exactly one event)",
-                    minItems: 1,
+                    description: multiday ? "Array of calendar events (extract ALL distinct event times/sessions as separate events)" : "Array of calendar events (must contain exactly one event)",
+                    minItems: multiday ? 2 : 1,
                     maxItems: multiday ? 50 : 1,
                     items: {
                         type: "object",
