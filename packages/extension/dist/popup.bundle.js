@@ -4193,6 +4193,15 @@
       if (isAllDay) {
         return date.toISOString().split("T")[0].replace(/-/g, "");
       }
+      if (timezone && timezone !== "UTC") {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        const hours = String(date.getHours()).padStart(2, "0");
+        const minutes = String(date.getMinutes()).padStart(2, "0");
+        const seconds = String(date.getSeconds()).padStart(2, "0");
+        return `${year}${month}${day}T${hours}${minutes}${seconds}`;
+      }
       return date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
     }
     /**
@@ -17550,7 +17559,7 @@
           const downloadBtn = document.getElementById("download-ics-btn");
           if (downloadBtn) {
             downloadBtn.addEventListener("click", () => {
-              window.downloadICS("${encodeURIComponent(icsContent)}", "${events[0].summary}");
+              window.downloadICS(encodeURIComponent(icsContent), events[0].summary);
             });
           }
           const closeButton = document.getElementById("closeButton");
@@ -17578,12 +17587,14 @@
       const cleanUrl = stripTrackingParameters(pageData.url);
       const systemPrompt = `You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
 
+Today's date is 2025-09-07. If a date is not a full date with month, day and year, assume it is in the future past today (2025-09-07). If a date has explicit parameters (month/day/year), then it is ok to be in the past.
+
 Extract event details from the provided content. Pay attention to:
 - Use ISO 8601 date format (YYYY-MM-DD) and 24-hour time format (HH:MM)
 - For all-day events, set start_time and end_time to null
 - If no end time specified, make reasonable estimate
 - Default timezone is America/New_York unless specified
-- Multi-day events: ${multiday ? "Focus on the PRIMARY event mentioned on the page. Only if there is no clear primary event, extract multiple events" : "Extract exactly one event"}
+- ${multiday ? "MULTI-EVENT MODE: The user has checked the multi-event flag, indicating they want multiple separate calendar events extracted. Extract ALL distinct event times/sessions mentioned on the page as separate events. Each different time slot should be a separate event in the events array. Do NOT combine multiple times into a single event." : "SINGLE EVENT MODE: Extract exactly one event. If multiple times are mentioned, choose the primary/first one or create a single event that encompasses the main timeframe."}
 - Event status: ${tentative ? "Tentative" : "Confirmed"} (set status field only; do NOT include a "Status:" line in the description)
 - Title prefix (group/host): Determine the presenting organization from the page/site (prefer <meta property="og:site_name">, the site header/brand, or phrases like "X presents ..."). Set the event summary to "[Group]: [Event Title]". Avoid duplicating the prefix if already present.
   - Examples: "KQED Live presents \u2026" -> summary "KQED Live: \u2026". If the site is sfsymphony.org or sanfranciscosymphony.org, use "SF Symphony: \u2026".
@@ -17604,8 +17615,8 @@ ${pageData.html}`;
         properties: {
           events: {
             type: "array",
-            description: multiday ? "Array of calendar events (focus on primary event, multiple only if no clear primary)" : "Array of calendar events (must contain exactly one event)",
-            minItems: 1,
+            description: multiday ? "Array of calendar events (extract ALL distinct event times/sessions as separate events)" : "Array of calendar events (must contain exactly one event)",
+            minItems: multiday ? 2 : 1,
             maxItems: multiday ? 50 : 1,
             items: {
               type: "object",
@@ -17712,11 +17723,12 @@ ${pageData.html}`;
       return parseAiResponse(aiResponse);
     }
     async function extractMainContent(url, html) {
-      const system = "You extract the MAIN CONTENT region from raw HTML of a web page. Return only the main article/body content as FULL HTML (not plain text), preserving tags and structure, while removing navigation, ads, footers, and unrelated sections.";
+      const system = "You extract the MAIN CONTENT region from rendered HTML of a web page. Return only the main article/body content as FULL HTML (not plain text), preserving tags and structure, while removing navigation, headers, menus, ads, footers, and unrelated sections. NEVER include <script> tags or JavaScript. Focus on the actual content - articles, event details, descriptions, etc.";
+      const cleanedHtml = html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<!--[\s\S]*?-->/gi, "");
       const user = `URL: ${url}
 
-HTML:
-${html}`;
+Rendered HTML (scripts removed):
+${cleanedHtml}`;
       const payload = {
         model: "google/gemini-2.5-flash-lite",
         messages: [

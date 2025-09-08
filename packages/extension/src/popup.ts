@@ -831,8 +831,15 @@ Extract event details from the provided content. Pay attention to:
 
     // First-pass content extraction using gpt-5-nano
     async function extractMainContent(url: string, html: string): Promise<string> {
-        const system = 'You extract the MAIN CONTENT region from raw HTML of a web page. Return only the main article/body content as FULL HTML (not plain text), preserving tags and structure, while removing navigation, ads, footers, and unrelated sections.';
-        const user = `URL: ${url}\n\nHTML:\n${html}`;
+        const system = 'You extract the MAIN CONTENT region from rendered HTML of a web page. Return only the main article/body content as FULL HTML (not plain text), preserving tags and structure, while removing navigation, headers, menus, ads, footers, and unrelated sections. NEVER include <script> tags or JavaScript. Focus on the actual content - articles, event details, descriptions, etc.';
+        
+        // Strip out script tags and get currently rendered content
+        const cleanedHtml = html
+            .replace(/<script[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[\s\S]*?<\/style>/gi, '')
+            .replace(/<!--[\s\S]*?-->/gi, '');
+            
+        const user = `URL: ${url}\n\nRendered HTML (scripts removed):\n${cleanedHtml}`;
 
         const payload = {
             model: 'google/gemini-2.5-flash-lite',

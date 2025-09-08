@@ -270,14 +270,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
         }
 
-        // Log raw response before parsing
+        // Log raw response and try to decode
         const responseText = await response.text();
-        console.debug('📦 Raw OpenRouter response (background):', responseText);
         
         let data;
         try {
           data = JSON.parse(responseText);
           console.log('📦 OpenRouter response JSON (background):', data);
+          console.debug('📦 Raw OpenRouter response (background):', responseText);
         } catch (parseError) {
           console.error('💥 Failed to parse JSON response:', parseError);
           console.error('Raw response length:', responseText.length);
