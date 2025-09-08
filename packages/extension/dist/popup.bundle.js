@@ -17701,7 +17701,6 @@ ${pageData.html}`;
         temperature: 0.1,
         reasoning: {
           effort: "medium",
-          max_tokens: 5e3,
           exclude: true
         }
       };

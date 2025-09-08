@@ -800,7 +800,6 @@ Extract event details from the provided content. Pay attention to:
             temperature: 0.1,
             reasoning: {
                 effort: "medium",
-                max_tokens: 5000,
                 exclude: true
             }
         };
