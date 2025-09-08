@@ -146,6 +146,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     const cancelRequestButton = document.getElementById('cancelRequestButton') as HTMLButtonElement;
     const closePopupButton = document.getElementById('close-popup') as HTMLButtonElement;
     
+    // Success alert elements
+    const successAlert = document.getElementById('success-alert') as HTMLDivElement;
+    const successMessage = document.getElementById('success-message') as HTMLSpanElement;
+    
     // Settings elements
     const openSettingsButton = document.getElementById('open-settings') as HTMLButtonElement;
     const saveSettingsButton = document.getElementById('save-settings') as HTMLButtonElement;
@@ -186,6 +190,22 @@ document.addEventListener('DOMContentLoaded', async function() {
     function hideReviewStatus() {
         reviewStatusDiv.style.display = 'none';
         reviewStatusDiv.textContent = '';
+    }
+
+    function showSuccessAlert(message: string) {
+        successMessage.textContent = message;
+        successAlert.style.display = 'block';
+        
+        // Auto-hide after 5 seconds
+        setTimeout(() => {
+            hideSuccessAlert();
+        }, 5000);
+    }
+
+    function hideSuccessAlert() {
+        if (successAlert) {
+            successAlert.style.display = 'none';
+        }
     }
 
     function disableForm(disable = true) {
@@ -476,6 +496,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         formSection.style.display = 'block';
         reviewSection.style.display = 'none';
         processingView.style.display = 'none';
+        hideSuccessAlert();
         await loadModels();
     }
 
@@ -1089,7 +1110,7 @@ Extract event details from the provided content. Pay attention to:
                 hideReviewStatus();
                 reviewSection.style.display = 'none';
                 formSection.style.display = 'block';
-                showStatus('Email sent successfully!', 'success');
+                showSuccessAlert('Email sent successfully!');
             } catch (error) {
                 console.error('💥 Error sending email from review section:', error);
                 showReviewStatus(`Failed to send email: ${error.message}`, 'error');
@@ -1351,7 +1372,7 @@ Extract event details from the provided content. Pay attention to:
             console.log('📧 Calling internal sendEmail function:', { eventCount: events.length });
             await sendEmail(events, icsContent, tentativeToggle.checked);
             console.log('✅ Global sendEmail completed successfully');
-            showStatus('Email sent successfully!', 'success');
+            showSuccessAlert('Email sent successfully!');
         } catch (error) {
             console.error('💥 Global sendEmail error:', error);
             showStatus(`Failed to send email: ${error.message}`, 'error', true);

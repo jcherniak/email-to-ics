@@ -17134,6 +17134,8 @@
     const backToFormButton = document.getElementById("backToFormButton");
     const cancelRequestButton = document.getElementById("cancelRequestButton");
     const closePopupButton = document.getElementById("close-popup");
+    const successAlert = document.getElementById("success-alert");
+    const successMessage = document.getElementById("success-message");
     const openSettingsButton = document.getElementById("open-settings");
     const saveSettingsButton = document.getElementById("save-settings");
     const testConnectionButton = document.getElementById("test-connection");
@@ -17166,6 +17168,18 @@
     function hideReviewStatus() {
       reviewStatusDiv.style.display = "none";
       reviewStatusDiv.textContent = "";
+    }
+    function showSuccessAlert(message) {
+      successMessage.textContent = message;
+      successAlert.style.display = "block";
+      setTimeout(() => {
+        hideSuccessAlert();
+      }, 5e3);
+    }
+    function hideSuccessAlert() {
+      if (successAlert) {
+        successAlert.style.display = "none";
+      }
     }
     function disableForm(disable = true) {
       instructionsInput.disabled = disable;
@@ -17415,6 +17429,7 @@
       formSection.style.display = "block";
       reviewSection.style.display = "none";
       processingView.style.display = "none";
+      hideSuccessAlert();
       await loadModels();
     }
     async function initializeExtension() {
@@ -17947,7 +17962,7 @@ ${cleanedHtml}`;
           hideReviewStatus();
           reviewSection.style.display = "none";
           formSection.style.display = "block";
-          showStatus("Email sent successfully!", "success");
+          showSuccessAlert("Email sent successfully!");
         } catch (error) {
           console.error("\u{1F4A5} Error sending email from review section:", error);
           showReviewStatus(`Failed to send email: ${error.message}`, "error");
@@ -18179,7 +18194,7 @@ ${event.location ? `Location: ${event.location}
         console.log("\u{1F4E7} Calling internal sendEmail function:", { eventCount: events.length });
         await sendEmail(events, icsContent, tentativeToggle.checked);
         console.log("\u2705 Global sendEmail completed successfully");
-        showStatus("Email sent successfully!", "success");
+        showSuccessAlert("Email sent successfully!");
       } catch (error) {
         console.error("\u{1F4A5} Global sendEmail error:", error);
         showStatus(`Failed to send email: ${error.message}`, "error", true);
