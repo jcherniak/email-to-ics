@@ -227,8 +227,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                     
                     if (response && response.success && response.screenshot) {
                         const original = 'data:image/jpeg;base64,' + response.screenshot;
-                        // Compress to 50% dimensions, JPEG quality 0.75 before sending to model
-                        compressImage(original, 0.5, 0.75)
+                        // Compress to 25% dimensions, JPEG quality 0.75 before sending to model
+                        compressImage(original, 0.25, 0.75)
                           .then((compressed) => {
                               try {
                                   const origBytes = Math.round((response.screenshot.length * 3) / 4);

@@ -17201,7 +17201,7 @@
             }
             if (response && response.success && response.screenshot) {
               const original = "data:image/jpeg;base64," + response.screenshot;
-              compressImage(original, 0.5, 0.75).then((compressed) => {
+              compressImage(original, 0.25, 0.75).then((compressed) => {
                 try {
                   const origBytes = Math.round(response.screenshot.length * 3 / 4);
                   const compBytes = Math.round((compressed.length - "data:image/jpeg;base64,".length) * 3 / 4);
