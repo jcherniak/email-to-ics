@@ -71,6 +71,22 @@ use App\IcalGenerator; // Use the generator from its namespace
 define('MODEL_CACHE_FILE', sys_get_temp_dir() . '/.models_cache.json');
 define('MODEL_CACHE_DURATION', 7 * 24 * 60 * 60); // 7 days in seconds
 
+// Log helper
+enum LogLevel: string {
+	case DEBUG = 'debug';
+	case INFO = 'info';
+	case WARNING = 'warning';
+	case ERROR = 'error';
+}
+
+match (strtolower($_ENV['LOG_LEVEL'] ?? 'info')) {
+	'debug' => define('LOG_LEVEL', LogLevel::DEBUG),
+	'info' => define('LOG_LEVEL', LogLevel::INFO),
+	'warning' => define('LOG_LEVEL', LogLevel::WARNING),
+	'error' => define('LOG_LEVEL', LogLevel::ERROR),
+	default => define('LOG_LEVEL', LogLevel::INFO),
+};
+
 // --- Helper: Detect CLI ---
 function is_cli() {
     return php_sapi_name() === 'cli';
@@ -979,6 +995,10 @@ HasBody:
 
     public function processPostmarkRequest($body, $outputJsonOnly = false, $cliDebug = false)
 	{
+		if (LOG_LEVEL == LogLevel::DEBUG) {
+			errlog(json_encode($body, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+		}
+
 		errlog("Received email with subject of " . $body['Subject']);
 
 		if (
