@@ -367,13 +367,18 @@ class EmailProcessor
 			$downloadedText = $this->fetch_url($url);
             if ($downloadedText === false) {
                 errlog('Failed to fetch URL: ' . $url);
-                if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
-                    // echo "Error: Failed to fetch URL: {$url}\n"; // Replaced by exception
+
+                // For Postmark webhooks, continue processing instead of failing
+                if (defined('IS_POSTMARK_WEBHOOK') && IS_POSTMARK_WEBHOOK) {
+                    errlog('Continuing processing for Postmark webhook despite URL fetch failure');
+                    $downloadedText = ''; // Set empty content and continue
+                } elseif (defined('IS_CLI_RUN') && IS_CLI_RUN) {
                     throw new \RuntimeException("Failed to fetch URL: {$url}");
                 } else {
+                    // For regular web requests, return appropriate error
                     http_response_code(500);
-                    echo 'Failed to fetch URL.';
-                    die; 
+                    echo json_encode(['error' => 'Failed to fetch URL: ' . $url]);
+                    die;
                 }
             }
 		} elseif (substr($downloadedText, 0, 1) === '\'' &&
@@ -843,6 +848,11 @@ HasBody:
 
     public function processPostmarkRequest($body, $outputJsonOnly = false, $cliDebug = false)
 	{
+		// Define constant to track we're in Postmark webhook context
+		if (!defined('IS_POSTMARK_WEBHOOK')) {
+			define('IS_POSTMARK_WEBHOOK', true);
+		}
+
 		errlog("Received email with subject of " . $body['Subject']);
 
 		if (
@@ -1056,35 +1066,176 @@ HasBody:
 	private function fetch_url($url) {
 		// Validate URL before attempting to fetch the content
 		if (!filter_var($url, FILTER_VALIDATE_URL)) {
+			errlog("Invalid URL provided: {$url}");
 			return false;
 		}
 
-		// Use Guzzle to get the HTML content, adding appropriate headers to make
-		// it look like the request is coming from a browser
+		// Try different methods in order: direct, proxy, Scrapefly
+		$methods = [
+			'direct' => 'fetchUrlDirect',
+			'proxy' => 'fetchUrlWithProxy',
+			'scrapefly' => 'fetchUrlWithScrapefly'
+		];
+
+		foreach ($methods as $method => $functionName) {
+			errlog("Attempting to fetch URL using {$method} method: {$url}");
+
+			try {
+				$result = $this->$functionName($url);
+				if ($result !== false) {
+					errlog("Successfully fetched URL using {$method} method");
+					return $result;
+				}
+			} catch (\Exception $e) {
+				$statusCode = 0;
+				if ($e instanceof \GuzzleHttp\Exception\RequestException && $e->hasResponse()) {
+					$statusCode = $e->getResponse()->getStatusCode();
+				}
+				errlog("Failed to fetch URL using {$method} method. Status: {$statusCode}, Error: " . $e->getMessage());
+
+				// Only continue to next method if we got a 4xx or 5xx error
+				if ($statusCode >= 400 && $statusCode < 600) {
+					continue;
+				}
+
+				// For other errors (network issues, etc), continue trying
+				continue;
+			}
+		}
+
+		errlog("All fetch methods failed for URL: {$url}");
+		return false;
+	}
+
+	private function fetchUrlDirect($url) {
 		$client = new Client();
 		$requestOptions = [
 			'headers' => [
-				'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
+				'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+				'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+				'Accept-Language' => 'en-US,en;q=0.5',
+				'Accept-Encoding' => 'gzip, deflate, br',
+				'DNT' => '1',
+				'Connection' => 'keep-alive',
+				'Upgrade-Insecure-Requests' => '1',
 			],
+			'timeout' => 30,
+			'connect_timeout' => 10,
+			'http_errors' => true, // Throw exception on 4xx/5xx
 		];
-
-		// Add proxy configuration if available
-		if (!empty($_ENV['OXYLABS_PROXY']) && !empty($_ENV['OXYLABS_USERNAME']) && !empty($_ENV['OXYLABS_PASSWORD'])) {
-			$requestOptions['proxy'] = [
-				'http' => 'http://' . $_ENV['OXYLABS_USERNAME'] . ':' . $_ENV['OXYLABS_PASSWORD'] . '@' . $_ENV['OXYLABS_PROXY'],
-				'https' => 'http://' . $_ENV['OXYLABS_USERNAME'] . ':' . $_ENV['OXYLABS_PASSWORD'] . '@' . $_ENV['OXYLABS_PROXY'],
-			];
-			errlog("Using proxy for URL fetch: " . $_ENV['OXYLABS_PROXY']);
-		}
 
 		$response = $client->get($url, $requestOptions);
 		$htmlContent = $response->getBody()->getContents();
 
-		// Check if the fetching was successful
-		if ($htmlContent === FALSE) {
+		if (empty($htmlContent)) {
 			return false;
 		}
 
+		return $htmlContent;
+	}
+
+	private function fetchUrlWithProxy($url) {
+		// Skip if proxy credentials not configured
+		if (empty($_ENV['OXYLABS_PROXY']) || empty($_ENV['OXYLABS_USERNAME']) || empty($_ENV['OXYLABS_PASSWORD'])) {
+			errlog("Oxylabs proxy not configured, skipping proxy method");
+			return false;
+		}
+
+		$client = new Client();
+		$requestOptions = [
+			'headers' => [
+				'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+				'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+			],
+			'proxy' => [
+				'http' => 'http://' . $_ENV['OXYLABS_USERNAME'] . ':' . $_ENV['OXYLABS_PASSWORD'] . '@' . $_ENV['OXYLABS_PROXY'],
+				'https' => 'http://' . $_ENV['OXYLABS_USERNAME'] . ':' . $_ENV['OXYLABS_PASSWORD'] . '@' . $_ENV['OXYLABS_PROXY'],
+			],
+			'timeout' => 30,
+			'connect_timeout' => 10,
+			'http_errors' => true,
+		];
+
+		errlog("Using Oxylabs proxy: " . $_ENV['OXYLABS_PROXY']);
+
+		$response = $client->get($url, $requestOptions);
+		$htmlContent = $response->getBody()->getContents();
+
+		if (empty($htmlContent)) {
+			return false;
+		}
+
+		return $htmlContent;
+	}
+
+	private function fetchUrlWithScrapefly($url) {
+		// Skip if Scrapefly API key not configured
+		if (empty($_ENV['SCRAPEFLY_API_KEY'])) {
+			errlog("Scrapefly API key not configured, skipping Scrapefly method");
+			return false;
+		}
+
+		// Build Scrapefly API URL with parameters
+		$scrapeflyUrl = 'https://api.scrapfly.io/scrape?' . http_build_query([
+			'key' => $_ENV['SCRAPEFLY_API_KEY'],
+			'url' => $url,
+			'format' => 'clean_html',
+			'render_js' => 'true',
+			'rendering_wait' => 3000,
+			'screenshots[full]' => 'fullpage',
+			'screenshot_flags' => 'load_images',
+			'tags' => 'player,project:email-to-ics',
+		]);
+
+		$curl = curl_init();
+		curl_setopt_array($curl, [
+			CURLOPT_URL => $scrapeflyUrl,
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_ENCODING => '',
+			CURLOPT_MAXREDIRS => 10,
+			CURLOPT_TIMEOUT => 60,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+			CURLOPT_CUSTOMREQUEST => 'GET',
+		]);
+
+		errlog("Using Scrapefly API to fetch URL");
+
+		$response = curl_exec($curl);
+		$httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+		$error = curl_error($curl);
+		curl_close($curl);
+
+		if ($error) {
+			errlog("Scrapefly CURL error: " . $error);
+			throw new \RuntimeException("Scrapefly request failed: " . $error);
+		}
+
+		if ($httpCode >= 400) {
+			errlog("Scrapefly returned HTTP status: " . $httpCode);
+			throw new \RuntimeException("Scrapefly returned HTTP error: " . $httpCode);
+		}
+
+		if (empty($response)) {
+			return false;
+		}
+
+		// Scrapefly returns a JSON response with the scraped content
+		$result = json_decode($response, true);
+		if (json_last_error() !== JSON_ERROR_NONE) {
+			errlog("Failed to decode Scrapefly JSON response");
+			return false;
+		}
+
+		// Extract the HTML content from Scrapefly response
+		$htmlContent = $result['result']['content'] ?? '';
+
+		if (empty($htmlContent)) {
+			errlog("Scrapefly returned empty content");
+			return false;
+		}
+
+		errlog("Successfully fetched content via Scrapefly (" . strlen($htmlContent) . " bytes)");
 		return $htmlContent;
 	}
 
@@ -1821,6 +1972,40 @@ BODY;
 		return $ics;
 	}
 
+	public function sendErrorEmail($subject, $errorDetails, $originalEmailData = null)
+	{
+		if (empty($_ENV['ERROR_EMAIL'])) {
+			errlog("ERROR_EMAIL not configured, cannot send error notification");
+			return false;
+		}
+
+		$htmlBody = '<h2>Email-to-ICS Processing Error</h2>';
+		$htmlBody .= '<pre>' . htmlspecialchars($errorDetails) . '</pre>';
+
+		if ($originalEmailData) {
+			$htmlBody .= '<hr><h3>Original Email Data:</h3>';
+			$htmlBody .= '<p><strong>Subject:</strong> ' . htmlspecialchars($originalEmailData['Subject'] ?? 'N/A') . '</p>';
+			$htmlBody .= '<p><strong>From:</strong> ' . htmlspecialchars($originalEmailData['From'] ?? 'N/A') . '</p>';
+
+			if (!empty($originalEmailData['TextBody'])) {
+				$htmlBody .= '<h4>Text Body:</h4>';
+				$htmlBody .= '<pre>' . htmlspecialchars(substr($originalEmailData['TextBody'], 0, 5000)) . '</pre>';
+			}
+
+			if (!empty($originalEmailData['HtmlBody'])) {
+				$htmlBody .= '<h4>HTML Body (first 5000 chars):</h4>';
+				$htmlBody .= '<pre>' . htmlspecialchars(substr($originalEmailData['HtmlBody'], 0, 5000)) . '</pre>';
+			}
+		}
+
+		try {
+			return $this->sendEmail(null, $_ENV['ERROR_EMAIL'], $subject, $htmlBody);
+		} catch (\Exception $e) {
+			errlog("Failed to send error email: " . $e->getMessage());
+			return false;
+		}
+	}
+
 	public function sendEmail($ics, $toEmail, $subject, $htmlBody, array $otherAttachments = []) {
 		$attachments = [];
 		if (!empty($ics)) {
@@ -2512,8 +2697,47 @@ HTML;
 
     private function processPostmarkInbound($json_data)
     {
-		$processor = new EmailProcessor();
-		$processor->processPostmarkRequest($json_data);
+		// CRITICAL: Always return 2xx to Postmark to prevent retry loops
+		// Any errors will be sent via email to admin instead
+		try {
+			$processor = new EmailProcessor();
+			$processor->processPostmarkRequest($json_data);
+		} catch (\Exception $e) {
+			// Log the error but still return success to Postmark
+			errlog("POSTMARK WEBHOOK ERROR: " . $e->getMessage());
+			errlog("Stack trace: " . $e->getTraceAsString());
+
+			// Try to send error notification to admin
+			$this->sendPostmarkErrorNotification($json_data, $e);
+		}
+
+		// ALWAYS return 200 OK to Postmark, regardless of processing outcome
+		http_response_code(200);
+		echo json_encode(['status' => 'success', 'message' => 'Webhook received']);
+	}
+
+	private function sendPostmarkErrorNotification($json_data, $exception)
+	{
+		try {
+			if (empty($_ENV['ERROR_EMAIL'])) {
+				errlog("ERROR_EMAIL not configured, cannot send error notification");
+				return;
+			}
+
+			$subject = 'Email-to-ICS Processing Failed: ' . ($json_data['Subject'] ?? 'Unknown Subject');
+			$errorDetails = "Error: " . $exception->getMessage() . "\n\n";
+			$errorDetails .= "Original Email Subject: " . ($json_data['Subject'] ?? 'N/A') . "\n";
+			$errorDetails .= "From: " . ($json_data['From'] ?? 'N/A') . "\n";
+			$errorDetails .= "Date: " . date('Y-m-d H:i:s') . "\n\n";
+			$errorDetails .= "Stack Trace:\n" . $exception->getTraceAsString();
+
+			// Use existing email sending mechanism
+			$processor = new EmailProcessor();
+			$processor->sendErrorEmail($subject, $errorDetails, $json_data);
+		} catch (\Exception $e) {
+			// If we can't even send the error email, just log it
+			errlog("Failed to send error notification email: " . $e->getMessage());
+		}
 	}
 
     private function handleCli()
