@@ -1327,7 +1327,7 @@ HasBody:
 			'url' => $url,
 			'format' => 'clean_html',
 			'render_js' => 'true',
-			'rendering_wait' => 3000,
+			'rendering_wait' => 5000,
 			'screenshots[full]' => 'fullpage',
 			'screenshot_flags' => 'load_images',
 			'tags' => 'player,project:email-to-ics',
@@ -1433,8 +1433,8 @@ HasBody:
                 'url' => ['type' => 'string', 'description' => 'URL related to the event (e.g., event page, ticket link).'],
                 'isAllDay' => ['type' => 'boolean', 'description' => 'True if this is an all-day event (dtstart/dtend should be date only: YYYY-MM-DD).', 'default' => false],
             ],
-            // Only require the essential fields that must always be present
-            'required' => ['summary', 'description', 'dtstart', 'timezone'],
+            // GPT-5 requires ALL properties to be in the required array for structured output
+            'required' => ['summary', 'description', 'htmlDescription', 'dtstart', 'dtend', 'timezone', 'location', 'url', 'isAllDay'],
             'additionalProperties' => false
         ];
 
@@ -1554,7 +1554,7 @@ The JSON object MUST conform EXACTLY to the following schema:
         "url": { "type": "string", "description": "Related URL." },
         "isAllDay": { "type": "boolean", "description": "True for all-day events.", "default": false }
       },
-      "required": ["summary", "description", "dtstart", "timezone"]
+      "required": ["summary", "description", "htmlDescription", "dtstart", "dtend", "timezone", "location", "url", "isAllDay"]
     },
     "emailSubject": { "type": "string", "description": "Use the generated summary here." },
     "locationLookup": { "type": "string", "description": "Location string for Google Maps lookup." }
