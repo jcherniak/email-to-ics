@@ -1134,19 +1134,32 @@ HasBody:
                 'timezone' => ['type' => 'string', 'description' => 'PHP Timezone identifier (e.g., America/Los_Angeles, America/New_York, UTC).'],
                 'location' => ['type' => 'string', 'description' => 'Physical location or address of the event.'],
                 'url' => ['type' => 'string', 'description' => 'URL related to the event (e.g., event page, ticket link).'],
-                'isAllDay' => ['type' => 'boolean', 'description' => 'True if this is an all-day event (dtstart/dtend should be date only: YYYY-MM-DD).'],
-                // Add other relevant fields like ORGANIZER, ATTENDEE, UID if needed, but keep it simple initially
+                'isAllDay' => ['type' => 'boolean', 'description' => 'True if this is an all-day event (dtstart/dtend should be date only: YYYY-MM-DD).', 'default' => false],
             ],
-            'required' => ['summary', 'description', 'htmlDescription', 'dtstart', 'dtend', 'timezone', 'location', 'url', 'isAllDay'],
+            // Only require the essential fields that must always be present
+            'required' => ['summary', 'description', 'dtstart', 'timezone'],
             'additionalProperties' => false
         ];
+
+        // For multi-day mode, eventData can be either a single object or an array of objects
+        $eventDataSchema = $allowMultiDay ? [
+            'oneOf' => [
+                $eventSchema,  // Single event object
+                [
+                    'type' => 'array',  // Array of event objects
+                    'items' => $eventSchema,
+                    'minItems' => 1,
+                    'maxItems' => 50
+                ]
+            ]
+        ] : $eventSchema;
 
         $responseSchema = [
             'type' => 'object',
             'properties' => [
                 'success' => ['type' => 'boolean'],
                 'errorMessage' => ['type' => 'string'],
-                'eventData' => $eventSchema,
+                'eventData' => $eventDataSchema,
                 'emailSubject' => ['type' => 'string', 'description' => 'The generated summary, used for the email subject line.'],
                 'locationLookup' => ['type' => 'string', 'description' => 'Location string for Google Maps lookup.'],
             ],
@@ -1159,12 +1172,36 @@ HasBody:
         $nextYear = $curYear + 1;
 
         // Determine multi-day handling instructions
-        $multiDayInstructions = $allowMultiDay ? 
-            "MULTI-DAY MODE ENABLED: If you find multiple related events (like conference sessions, multi-day trips, festival schedules), extract ALL events as separate entries. Each event should have its own summary, dates, and details." :
-            "SINGLE EVENT MODE: Focus on extracting ONLY the main/primary event. Ignore secondary or related events.";
+        $multiDayInstructions = $allowMultiDay ?
+            "## Multi-Day Mode (ENABLED):
+CRITICAL: Extract ALL related performances/sessions as SEPARATE events.
+
+When you see multiple performances like:
+- \"Friday, October 3, 2025 at 7:30PM\"
+- \"Saturday, October 4, 2025 at 7:30PM\"
+- \"Sunday, October 5, 2025 at 2:00PM\"
+
+Create SEPARATE events for each performance, each with:
+- Same summary/title (e.g., \"Davies Symphony Hall - Gimeno Conducts Tchaikovsky 5\")
+- Same location and description
+- Different start_date, start_time, end_date, end_time for each performance
+- Same timezone
+
+RETURN FORMAT FOR MULTI-DAY MODE:
+When multiple events are found, return eventData as an ARRAY of event objects.
+
+This applies to:
+- Multiple concert performances
+- Conference sessions across days
+- Festival events on different dates
+- Any scheduled performances of the same show" :
+            "## Single Event Mode (DEFAULT):
+Focus on extracting ONLY the main/primary event. Ignore secondary or related events.";
 
         $system = <<<PROMPT
-Create calendar event data from the following email text or downloaded HTML.
+You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
+
+CRITICAL: You must respond with valid JSON only. No markdown, no explanations, just pure JSON.
 
 # PRIMARY EVENT IDENTIFICATION - READ THIS FIRST
 Your primary task is to identify and extract ONLY the MAIN event described in the content.
@@ -1186,7 +1223,8 @@ EXTREMELY IMPORTANT: IF you find multiple events and are unsure which is primary
 2. The earliest upcoming date
 3. The most prominence in the content
 
-MULTI-DAY EVENT HANDLING:
+# MULTI-DAY EVENT HANDLING MODES
+
 {$multiDayInstructions}
 
 # TIMEZONE AND LOCATION EMPHASIS
@@ -1239,12 +1277,12 @@ The JSON object MUST conform EXACTLY to the following schema:
   * For conferences: Include key speakers and session topics
   * For all events: Include ticket/registration info, preparation requirements, accessibility details
   * Use `\\n` for newlines. Keep under 1000 chars. DO NOT include raw HTML. For flights, include Flight #, Confirmation #, Departure/Arrival details. Include Eventbrite ticket links prominently if found.
-  * IMPORTANT: If a source URL was provided for this event, add it at the bottom of the description with the text "\\n\\nSource: [URL]"
-- **htmlDescription:** Provide a concise HTML version of the description, ideally under 1500 characters. Use basic HTML tags only (e.g., `<p>`, `<a>`, `<b>`, `<i>`, `<ul>`, `<ol>`, `<li>`, `<br>`). DO NOT include `<style>` tags or inline `style` attributes. Minimize complex formatting. If a source URL was provided, include it at the bottom as a clickable link.
+  * IMPORTANT: Always add the source URL at the bottom of the description with the text "\\n\\nSource: [URL]" if any URL context was provided
+- **htmlDescription:** Provide a concise HTML version of the description, ideally under 1500 characters. Use basic HTML tags only (e.g., `<p>`, `<a>`, `<b>`, `<i>`, `<ul>`, `<ol>`, `<li>`, `<br>`). DO NOT include `<style>` tags or inline `style` attributes. Minimize complex formatting. Always include the source URL at the bottom as a clickable link if any URL context was provided.
 - **dtstart / dtend:** Use ISO 8601 format. Calculate end time if missing (2h default, 3h opera, 30m doctor). Use YYYY-MM-DD format ONLY if `isAllDay` is true.
 - **timezone:** Provide a valid PHP Timezone identifier (e.g., `America/Los_Angeles`, `America/New_York`, `UTC`). Infer from location if possible, default to `America/Los_Angeles` if unknown/virtual.
 - **location:** The venue name or address.
-- **url:** REQUIRED if a source URL was provided for fetching this event. Use the original source URL. If no URL was provided, include any event-specific link (tickets, registration, etc.) found in the content.
+- **url:** REQUIRED - Use the original source URL if provided for fetching this event. Otherwise, include any event-specific link (tickets, registration, etc.) found in the content.
 - **isAllDay:** Set to true only if no specific start/end times are found.
 - **emailSubject:** Should be identical to the `summary`.
 - **locationLookup:** A string suitable for searching on Google Maps (e.g., "Moscone Center, San Francisco, CA").
