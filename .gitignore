@@ -3,3 +3,4 @@ vendor
 .models_cache.json
 confirm_cache
 **/node_modules/
+worktrees
