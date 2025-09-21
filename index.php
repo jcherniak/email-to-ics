@@ -302,6 +302,7 @@ class EmailProcessor
 	private $toConfirmedEmail;
 
 	private $openaiClient;
+	private $scrapeflyScreenshot = null; // Stores screenshot from Scrapefly
 	private $httpClient;
 	private $googleMapsKey;
 
@@ -1055,21 +1056,30 @@ HasBody:
 		}
 
 		$downloadedUrlContent = null;
+		$screenshotData = null;
 		if ($extractedUrl) {
 			// Strip tracking parameters from extracted URL
 			$extractedUrl = $this->stripTrackingParameters($extractedUrl);
             errlog("URL found in TextBody (after stripping tracking): {$extractedUrl}. Fetching...");
+			// Clear any previous screenshot
+			$this->scrapeflyScreenshot = null;
 			$fetchedContent = $this->fetch_url($extractedUrl); // Returns raw HTML/content
             if ($fetchedContent) {
                 $downloadedUrlContent = $this->extractMainContent($fetchedContent); // Cleaned content
     			$combinedText .= "\n\n--- HTML content fetched from URL found in email TextBody ---\n```html\n" . $downloadedUrlContent . "\n```";
+				// Get screenshot if it was captured by Scrapefly
+				if ($this->scrapeflyScreenshot) {
+					$screenshotData = $this->scrapeflyScreenshot;
+					errlog("Using screenshot from Scrapefly for AI processing");
+				}
             } else {
                 errlog("Failed to fetch content from URL found in TextBody: {$extractedUrl}");
             }
 		}
 
         // Pass $extractedInstructions from TextBody as specific instructions to AI
-        $eventDetails = $this->generateIcalEvent($combinedText, $extractedInstructions, null, null, null, $cliDebug, false, $extractedUrl);
+        // Pass screenshot as the screenshotZoomed parameter
+        $eventDetails = $this->generateIcalEvent($combinedText, $extractedInstructions, null, $screenshotData, null, $cliDebug, false, $extractedUrl);
 
         // Handle --json flag for CLI output if requested and in CLI context
         // This check is more for future-proofing if this method is called from a CLI context that sets outputJsonOnly
@@ -1328,7 +1338,7 @@ HasBody:
 			'format' => 'clean_html',
 			'render_js' => 'true',
 			'rendering_wait' => 5000,
-			'screenshots[full]' => 'fullpage',
+			'screenshots[main]' => 'fullpage',
 			'screenshot_flags' => 'load_images',
 			'tags' => 'player,project:email-to-ics',
 		]);
@@ -1379,6 +1389,14 @@ HasBody:
 		if (empty($htmlContent)) {
 			errlog("Scrapefly returned empty content");
 			return false;
+		}
+
+		// Store screenshot if available
+		if (isset($result['result']['screenshots']['main'])) {
+			$screenshotData = $result['result']['screenshots']['main'];
+			errlog("Screenshot captured via Scrapefly");
+			// Store screenshot in a property for later use
+			$this->scrapeflyScreenshot = $screenshotData;
 		}
 
 		errlog("Successfully fetched content via Scrapefly (" . strlen($htmlContent) . " bytes)");
