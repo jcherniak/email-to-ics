@@ -130,6 +130,151 @@ if (
 
 // CORS headers are now properly handled in WebPage::handleRequest()
 
+/**
+ * Centralized Error Handler for all contexts
+ */
+class ErrorHandler {
+    /**
+     * Handle errors based on context (CLI, Web, Postmark, Extension)
+     *
+     * @param \Throwable $error The error/exception to handle
+     * @param array $context Additional context information
+     * @return void
+     */
+    public static function handle(\Throwable $error, array $context = []) {
+        $errorMessage = $error->getMessage();
+        $errorTrace = $error->getTraceAsString();
+
+        // Always log the error
+        errlog("ERROR: " . $errorMessage);
+        errlog("Stack trace: " . $errorTrace);
+
+        // Determine the context
+        $isPostmark = defined('IS_POSTMARK_WEBHOOK') && IS_POSTMARK_WEBHOOK;
+        $isCli = defined('IS_CLI_RUN') && IS_CLI_RUN;
+        $isExtension = isset($_REQUEST['fromExtension']) && ($_REQUEST['fromExtension'] === 'true' || $_REQUEST['fromExtension'] === true);
+
+        // Handle based on context
+        if ($isPostmark) {
+            self::handlePostmarkError($error, $context);
+        } elseif ($isCli) {
+            self::handleCliError($error, $context);
+        } elseif ($isExtension) {
+            self::handleExtensionError($error, $context);
+        } else {
+            self::handleWebError($error, $context);
+        }
+    }
+
+    /**
+     * Handle errors for Postmark webhooks
+     * CRITICAL: Always return 200 OK to prevent retry loops
+     */
+    private static function handlePostmarkError(\Throwable $error, array $context) {
+        // Try to send error notification
+        if (!empty($context['postmark_data'])) {
+            try {
+                $processor = new EmailProcessor();
+                $subject = 'Email-to-ICS Processing Failed: ' . ($context['postmark_data']['Subject'] ?? 'Unknown');
+                $errorDetails = "Error: " . $error->getMessage() . "\n\n";
+                $errorDetails .= "Original Email Subject: " . ($context['postmark_data']['Subject'] ?? 'N/A') . "\n";
+                $errorDetails .= "From: " . ($context['postmark_data']['From'] ?? 'N/A') . "\n";
+                $errorDetails .= "Date: " . date('Y-m-d H:i:s') . "\n\n";
+                $errorDetails .= "Stack Trace:\n" . $error->getTraceAsString();
+
+                $processor->sendErrorEmail($subject, $errorDetails, $context['postmark_data']);
+            } catch (\Exception $e) {
+                errlog("Failed to send error notification: " . $e->getMessage());
+            }
+        }
+
+        // ALWAYS return 200 OK to Postmark
+        http_response_code(200);
+        header('Content-Type: application/json');
+        echo json_encode(['status' => 'success', 'message' => 'Webhook processed']);
+        exit(0);
+    }
+
+    /**
+     * Handle errors for CLI context
+     */
+    private static function handleCliError(\Throwable $error, array $context) {
+        // Output to STDERR
+        fwrite(STDERR, "Error: " . $error->getMessage() . "\n");
+
+        if (!empty($context['show_trace'])) {
+            fwrite(STDERR, "Stack trace:\n" . $error->getTraceAsString() . "\n");
+        }
+
+        // Exit with error code
+        exit(1);
+    }
+
+    /**
+     * Handle errors for Chrome extension
+     */
+    private static function handleExtensionError(\Throwable $error, array $context) {
+        $statusCode = $context['status_code'] ?? 500;
+        http_response_code($statusCode);
+        header('Content-Type: application/json');
+        echo json_encode([
+            'error' => $error->getMessage(),
+            'success' => false
+        ]);
+        exit(1);
+    }
+
+    /**
+     * Handle errors for regular web requests
+     */
+    private static function handleWebError(\Throwable $error, array $context) {
+        $statusCode = $context['status_code'] ?? 500;
+        http_response_code($statusCode);
+
+        // Check if JSON response is expected
+        if (isset($_SERVER['HTTP_ACCEPT']) && strpos($_SERVER['HTTP_ACCEPT'], 'application/json') !== false) {
+            header('Content-Type: application/json');
+            echo json_encode([
+                'error' => $error->getMessage(),
+                'success' => false
+            ]);
+        } else {
+            // HTML error page
+            header('Content-Type: text/html');
+            echo '<h1>Error</h1>';
+            echo '<p>' . htmlspecialchars($error->getMessage()) . '</p>';
+            if (!empty($context['show_trace'])) {
+                echo '<h2>Debug Information</h2>';
+                echo '<pre>' . htmlspecialchars($error->getTraceAsString()) . '</pre>';
+            }
+        }
+        exit(1);
+    }
+
+    /**
+     * Helper to determine appropriate HTTP status code based on exception type
+     */
+    public static function getStatusCode(\Throwable $error) {
+        if ($error instanceof \InvalidArgumentException) {
+            return 400; // Bad Request
+        }
+        if ($error instanceof \UnauthorizedHttpException ||
+            (method_exists($error, 'getCode') && $error->getCode() === 401)) {
+            return 401; // Unauthorized
+        }
+        if ($error instanceof \ForbiddenHttpException ||
+            (method_exists($error, 'getCode') && $error->getCode() === 403)) {
+            return 403; // Forbidden
+        }
+        if ($error instanceof \NotFoundHttpException ||
+            (method_exists($error, 'getCode') && $error->getCode() === 404)) {
+            return 404; // Not Found
+        }
+
+        return 500; // Internal Server Error
+    }
+}
+
 class EmailProcessor
 {
 	private $postmarkApiKey;
@@ -333,18 +478,10 @@ class EmailProcessor
         // Ensure that at least one of: URL, downloadedText (HTML), or instructions are provided.
         if (empty(trim($url)) && empty(trim($downloadedText)) && empty(trim((string)$instructions))) {
             $errorMsg = 'Error: Please provide a URL, HTML content, or Instructions.';
-            errlog($errorMsg);
-            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
-                // echo $errorMsg . "\n"; // Replaced by exception
-                // $webPage = new WebPage(); // To access displayCliHelp - not ideal from here
-                // $webPage->displayCliHelp();
-                throw new \RuntimeException($errorMsg . " Use --help for usage details.");
-            } else {
-                http_response_code(400);
-                echo json_encode(['error' => $errorMsg]); // Send JSON error for web/extension
-                exit(1); // Exit for web/extension to prevent further processing
-            }
-            // No exit(1) here for CLI as exception is thrown
+            ErrorHandler::handle(
+                new \InvalidArgumentException($errorMsg),
+                ['status_code' => 400]
+            );
         }
 
 		if (empty(trim($downloadedText)) && !empty(trim($url))) { // Only fetch if URL is given and no downloadedText
@@ -354,14 +491,10 @@ class EmailProcessor
 			
 			if (!$this->is_valid_url($url)) {
                 errlog('BAD url: ' . $url);
-                if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
-                    // echo "Error: Invalid URL provided: {$url}\n"; // Replaced by exception
-                    throw new \InvalidArgumentException("Invalid URL provided: {$url}");
-                } else {
-				    http_response_code(400);
-				    echo 'Bad url!';
-                    die; 
-                }
+                ErrorHandler::handle(
+                    new \InvalidArgumentException("Invalid URL provided: {$url}"),
+                    ['status_code' => 400]
+                );
 			}
 
 			$downloadedText = $this->fetch_url($url);
@@ -372,13 +505,11 @@ class EmailProcessor
                 if (defined('IS_POSTMARK_WEBHOOK') && IS_POSTMARK_WEBHOOK) {
                     errlog('Continuing processing for Postmark webhook despite URL fetch failure');
                     $downloadedText = ''; // Set empty content and continue
-                } elseif (defined('IS_CLI_RUN') && IS_CLI_RUN) {
-                    throw new \RuntimeException("Failed to fetch URL: {$url}");
                 } else {
-                    // For regular web requests, return appropriate error
-                    http_response_code(500);
-                    echo json_encode(['error' => 'Failed to fetch URL: ' . $url]);
-                    die;
+                    ErrorHandler::handle(
+                        new \RuntimeException("Failed to fetch URL: {$url}"),
+                        ['status_code' => 500]
+                    );
                 }
             }
 		} elseif (substr($downloadedText, 0, 1) === '\'' &&
@@ -848,11 +979,6 @@ HasBody:
 
     public function processPostmarkRequest($body, $outputJsonOnly = false, $cliDebug = false)
 	{
-		// Define constant to track we're in Postmark webhook context
-		if (!defined('IS_POSTMARK_WEBHOOK')) {
-			define('IS_POSTMARK_WEBHOOK', true);
-		}
-
 		errlog("Received email with subject of " . $body['Subject']);
 
 		if (
@@ -2697,46 +2823,21 @@ HTML;
 
     private function processPostmarkInbound($json_data)
     {
-		// CRITICAL: Always return 2xx to Postmark to prevent retry loops
-		// Any errors will be sent via email to admin instead
+		// Define constant to track we're in Postmark webhook context
+		if (!defined('IS_POSTMARK_WEBHOOK')) {
+			define('IS_POSTMARK_WEBHOOK', true);
+		}
+
 		try {
 			$processor = new EmailProcessor();
 			$processor->processPostmarkRequest($json_data);
-		} catch (\Exception $e) {
-			// Log the error but still return success to Postmark
-			errlog("POSTMARK WEBHOOK ERROR: " . $e->getMessage());
-			errlog("Stack trace: " . $e->getTraceAsString());
 
-			// Try to send error notification to admin
-			$this->sendPostmarkErrorNotification($json_data, $e);
-		}
-
-		// ALWAYS return 200 OK to Postmark, regardless of processing outcome
-		http_response_code(200);
-		echo json_encode(['status' => 'success', 'message' => 'Webhook received']);
-	}
-
-	private function sendPostmarkErrorNotification($json_data, $exception)
-	{
-		try {
-			if (empty($_ENV['ERROR_EMAIL'])) {
-				errlog("ERROR_EMAIL not configured, cannot send error notification");
-				return;
-			}
-
-			$subject = 'Email-to-ICS Processing Failed: ' . ($json_data['Subject'] ?? 'Unknown Subject');
-			$errorDetails = "Error: " . $exception->getMessage() . "\n\n";
-			$errorDetails .= "Original Email Subject: " . ($json_data['Subject'] ?? 'N/A') . "\n";
-			$errorDetails .= "From: " . ($json_data['From'] ?? 'N/A') . "\n";
-			$errorDetails .= "Date: " . date('Y-m-d H:i:s') . "\n\n";
-			$errorDetails .= "Stack Trace:\n" . $exception->getTraceAsString();
-
-			// Use existing email sending mechanism
-			$processor = new EmailProcessor();
-			$processor->sendErrorEmail($subject, $errorDetails, $json_data);
-		} catch (\Exception $e) {
-			// If we can't even send the error email, just log it
-			errlog("Failed to send error notification email: " . $e->getMessage());
+			// Success - return 200 OK
+			http_response_code(200);
+			echo json_encode(['status' => 'success', 'message' => 'Webhook processed successfully']);
+		} catch (\Throwable $e) {
+			// Use centralized error handler - it will ensure 200 is returned
+			ErrorHandler::handle($e, ['postmark_data' => $json_data]);
 		}
 	}
 
@@ -2917,35 +3018,15 @@ try {
 	$page = new WebPage();
 	$page->handleRequest();
 } catch (Throwable $t) {
-	// Log the full error server-side regardless
-	errlog($t);
+	// Use centralized error handler for all unhandled exceptions
+	ErrorHandler::handle($t, [
+		'show_trace' => false, // Set to true for debugging
+		'status_code' => ErrorHandler::getStatusCode($t)
+	]);
 
-	// Check if the request likely came from the extension
-	if (!is_cli() && isset($_REQUEST['fromExtension']) && ($_REQUEST['fromExtension'] === 'true' || $_REQUEST['fromExtension'] === true)) {
-		http_response_code(500);
-		header('Content-type: application/json');
-		echo json_encode(['error' => 'Internal Server Error']);
-	} elseif (!is_cli()) {
-		// Respond with detailed HTML error for direct access/other sources
-		http_response_code(500); // Still an error
-		header('Content-type: text/html');
-		echo '<h1>Internal Server Error</h1>';
-		echo '<p>An unexpected error occurred. Details have been logged.</p>';
-        // Optionally include basic error details for direct debugging
-        echo '<hr><p><b>Debug Info (Direct Access):</b></p>';
-        echo '<p>Error: ' . htmlspecialchars($t->getMessage()) . '</p>';
-        echo '<pre>' . htmlspecialchars(substr($t->getTraceAsString(), 0, 1000)) . '...</pre>'; // Limit trace output
-	} else {
-        // CLI error output
-        global $requestId;
-        fwrite(STDERR, "INTERNAL SERVER ERROR (CLI MODE)\n");
-        fwrite(STDERR, "Request ID: {$requestId}\n");
-        fwrite(STDERR, "Error: " . $t->getMessage() . "\n");
-        fwrite(STDERR, "Trace (first 1000 chars):\n" . substr($t->getTraceAsString(), 0, 1000) . "...\n");
-        fwrite(STDERR, "Full details logged to server error log.\n");
-    }
-
-    $err = '<h1>ERROR PROCESSING CALENDAR EVENT</h1>' .
+	// The following code is now unreachable because ErrorHandler::handle() calls exit()
+	// but keeping for reference in case we need special error email handling
+	$err = '<h1>ERROR PROCESSING CALENDAR EVENT</h1>' .
 		'<p>Error: <b>' . htmlspecialchars($t->getMessage()) . '</b></p>' .
 		'<pre>' . htmlspecialchars(var_export($t, true)) . '</pre>' .
 		'<p>Original POST/REQUEST:</p>' .
