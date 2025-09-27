@@ -7,7 +7,8 @@
         "symfony/html-sanitizer": "^6.4",
         "html2text/html2text": "^4.3",
         "opis/json-schema": "^2.4",
-        "eluceo/ical": "^2.14"
+        "eluceo/ical": "^2.14",
+        "zoon/puphpeteer": "^1.0"
     },
     "config": {
         "allow-plugins": {

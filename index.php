@@ -291,6 +291,9 @@ class ErrorHandler {
     }
 }
 
+// Include the PuphpeteerRenderer class
+require_once __DIR__ . '/PuphpeteerRenderer.php';
+
 class EmailProcessor
 {
 	private $postmarkApiKey;
@@ -303,6 +306,7 @@ class EmailProcessor
 
 	private $openaiClient;
 	private $scrapeflyScreenshot = null; // Stores screenshot from Scrapefly
+	private $puphpeteerRenderer = null; // PuphpeteerRenderer instance
 	private $httpClient;
 	private $googleMapsKey;
 
@@ -1077,64 +1081,16 @@ HasBody:
             }
 		}
 
-        // Pass $extractedInstructions from TextBody as specific instructions to AI
-        // Pass screenshot as the screenshotZoomed parameter
-        $eventDetails = $this->generateIcalEvent($combinedText, $extractedInstructions, null, $screenshotData, null, $cliDebug, false, $extractedUrl);
-
-        // Check if AI failed to extract dates and retry with Scrapefly if needed
-        if (isset($eventDetails['success']) && !$eventDetails['success']) {
-            $errorMessage = $eventDetails['errorMessage'] ?? '';
-
-            // Check if the failure was due to missing dates
-            if (stripos($errorMessage, 'date') !== false || stripos($errorMessage, 'time') !== false ||
-                empty($eventDetails['eventData']['dtstart']) ||
-                (is_array($eventDetails['eventData']) && isset($eventDetails['eventData'][0]) && empty($eventDetails['eventData'][0]['dtstart']))) {
-
-                errlog("AI failed to extract date/time data, retrying with Scrapefly enhanced scraping");
-
-                // Only retry if we haven't already used Scrapefly and we have a URL
-                if ($extractedUrl && !$this->scrapeflyScreenshot && !empty($_ENV['SCRAPEFLY_API_KEY'])) {
-                    errlog("Attempting to fetch URL with Scrapefly for better date extraction: {$extractedUrl}");
-
-                    // Clear previous screenshot
-                    $this->scrapeflyScreenshot = null;
-
-                    // Force use of Scrapefly
-                    try {
-                        $scrapeflyContent = $this->fetchUrlWithScrapefly($extractedUrl);
-
-                        if ($scrapeflyContent) {
-                            $enhancedContent = $this->extractMainContent($scrapeflyContent);
-                            $enhancedCombinedText = "--- Email HTML Content ---\n```html\n" . $htmlBodyForAI . "\n```";
-
-                            if ($pdfText) {
-                                $enhancedCombinedText .= "\n\n--- Extracted from PDF Attachment ---\n```text\n" . $pdfText . "\n```";
-                            }
-
-                            $enhancedCombinedText .= "\n\n--- HTML content fetched from URL with enhanced scraping ---\n```html\n" . $enhancedContent . "\n```";
-
-                            // Get screenshot if captured
-                            $enhancedScreenshot = $this->scrapeflyScreenshot ?? null;
-
-                            errlog("Retrying AI with Scrapefly-enhanced content" . ($enhancedScreenshot ? " and screenshot" : ""));
-
-                            // Retry with enhanced content and screenshot
-                            $retryDetails = $this->generateIcalEvent($enhancedCombinedText, $extractedInstructions, null, $enhancedScreenshot, null, $cliDebug, false, $extractedUrl);
-
-                            // If retry succeeded, use those results
-                            if (isset($retryDetails['success']) && $retryDetails['success']) {
-                                errlog("Successfully extracted event data with Scrapefly enhanced scraping");
-                                $eventDetails = $retryDetails;
-                            } else {
-                                errlog("Retry with Scrapefly enhanced scraping still failed");
-                            }
-                        }
-                    } catch (\Exception $e) {
-                        errlog("Failed to retry with Scrapefly: " . $e->getMessage());
-                    }
-                }
-            }
-        }
+        // Use comprehensive retry strategy
+        $eventDetails = $this->generateEventWithRetries(
+            $combinedText,
+            $extractedInstructions,
+            $extractedUrl,
+            $htmlBodyForAI,
+            $pdfText,
+            $screenshotData,
+            $cliDebug
+        );
 
         // Handle --json flag for CLI output if requested and in CLI context
         // This check is more for future-proofing if this method is called from a CLI context that sets outputJsonOnly
@@ -1558,6 +1514,175 @@ HasBody:
             }
         }
         return null;
+    }
+
+    /**
+     * Comprehensive retry strategy for generating events
+     */
+    private function generateEventWithRetries($combinedText, $instructions, $url, $htmlBodyForAI, $pdfText, $screenshotData, $cliDebug = false)
+    {
+        // Step 1: Try with DEFAULT_MODEL
+        errlog("Attempting to generate event with DEFAULT_MODEL");
+        $eventDetails = $this->generateIcalEvent($combinedText, $instructions, null, $screenshotData, null, $cliDebug, false, $url);
+
+        // Check if successful
+        if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
+            errlog("Successfully generated event with DEFAULT_MODEL");
+            return $eventDetails;
+        }
+
+        // Step 2: Try with ALTERNATE_MODEL if configured
+        if (!empty($_ENV['ALTERNATE_MODEL'])) {
+            errlog("First attempt failed, trying with ALTERNATE_MODEL: " . $_ENV['ALTERNATE_MODEL']);
+            $eventDetails = $this->generateIcalEvent($combinedText, $instructions, null, $screenshotData, $_ENV['ALTERNATE_MODEL'], $cliDebug, false, $url);
+
+            if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
+                errlog("Successfully generated event with ALTERNATE_MODEL");
+                return $eventDetails;
+            }
+        }
+
+        // Step 3: If we have a URL and dates weren't extracted, try Puphpeteer rendering
+        if ($url && $this->isDateExtractionFailure($eventDetails)) {
+            errlog("Date extraction failed, attempting Puphpeteer rendering for URL: {$url}");
+
+            try {
+                if (!$this->puphpeteerRenderer) {
+                    $this->puphpeteerRenderer = new PuphpeteerRenderer();
+                }
+
+                $renderResult = $this->puphpeteerRenderer->renderUrl($url);
+
+                if ($renderResult['success'] && $renderResult['html']) {
+                    // Sanitize the rendered HTML
+                    $sanitizedHtml = PuphpeteerRenderer::sanitizeHtml($renderResult['html']);
+                    $renderedContent = $this->extractMainContent($sanitizedHtml);
+
+                    // Build new combined text with rendered content
+                    $puphpeteerCombinedText = "--- Email HTML Content ---\n```html\n" . $htmlBodyForAI . "\n```";
+                    if ($pdfText) {
+                        $puphpeteerCombinedText .= "\n\n--- Extracted from PDF Attachment ---\n```text\n" . $pdfText . "\n```";
+                    }
+                    $puphpeteerCombinedText .= "\n\n--- JavaScript-rendered HTML content ---\n```html\n" . $renderedContent . "\n```";
+
+                    // Step 4: Try DEFAULT_MODEL with Puphpeteer-rendered content
+                    errlog("Trying DEFAULT_MODEL with Puphpeteer-rendered content");
+                    $eventDetails = $this->generateIcalEvent($puphpeteerCombinedText, $instructions, null, null, null, $cliDebug, false, $url);
+
+                    if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
+                        errlog("Successfully generated event with Puphpeteer-rendered content using DEFAULT_MODEL");
+                        return $eventDetails;
+                    }
+
+                    // Step 5: Try ALTERNATE_MODEL with Puphpeteer-rendered content
+                    if (!empty($_ENV['ALTERNATE_MODEL'])) {
+                        errlog("Trying ALTERNATE_MODEL with Puphpeteer-rendered content");
+                        $eventDetails = $this->generateIcalEvent($puphpeteerCombinedText, $instructions, null, null, $_ENV['ALTERNATE_MODEL'], $cliDebug, false, $url);
+
+                        if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
+                            errlog("Successfully generated event with Puphpeteer-rendered content using ALTERNATE_MODEL");
+                            return $eventDetails;
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                errlog("Puphpeteer rendering failed: " . $e->getMessage());
+            }
+        }
+
+        // Step 6: Try Scrapefly as last resort
+        if ($url && !empty($_ENV['SCRAPEFLY_API_KEY'])) {
+            errlog("All previous attempts failed, trying Scrapefly for URL: {$url}");
+
+            try {
+                // Clear previous screenshot
+                $this->scrapeflyScreenshot = null;
+
+                $scrapeflyContent = $this->fetchUrlWithScrapefly($url);
+
+                if ($scrapeflyContent) {
+                    $scrapeflyExtracted = $this->extractMainContent($scrapeflyContent);
+
+                    // Build combined text with Scrapefly content
+                    $scrapeflyCombinedText = "--- Email HTML Content ---\n```html\n" . $htmlBodyForAI . "\n```";
+                    if ($pdfText) {
+                        $scrapeflyCombinedText .= "\n\n--- Extracted from PDF Attachment ---\n```text\n" . $pdfText . "\n```";
+                    }
+                    $scrapeflyCombinedText .= "\n\n--- Scrapefly-extracted HTML content ---\n```html\n" . $scrapeflyExtracted . "\n```";
+
+                    // Get screenshot if available
+                    $scrapeflyScreenshot = $this->scrapeflyScreenshot ?? null;
+
+                    // Step 7: Try DEFAULT_MODEL with Scrapefly content and screenshot
+                    errlog("Trying DEFAULT_MODEL with Scrapefly content" . ($scrapeflyScreenshot ? " and screenshot" : ""));
+                    $eventDetails = $this->generateIcalEvent($scrapeflyCombinedText, $instructions, null, $scrapeflyScreenshot, null, $cliDebug, false, $url);
+
+                    if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
+                        errlog("Successfully generated event with Scrapefly content using DEFAULT_MODEL");
+                        return $eventDetails;
+                    }
+
+                    // Step 8: Try ALTERNATE_MODEL with Scrapefly content and screenshot
+                    if (!empty($_ENV['ALTERNATE_MODEL'])) {
+                        errlog("Trying ALTERNATE_MODEL with Scrapefly content" . ($scrapeflyScreenshot ? " and screenshot" : ""));
+                        $eventDetails = $this->generateIcalEvent($scrapeflyCombinedText, $instructions, null, $scrapeflyScreenshot, $_ENV['ALTERNATE_MODEL'], $cliDebug, false, $url);
+
+                        if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
+                            errlog("Successfully generated event with Scrapefly content using ALTERNATE_MODEL");
+                            return $eventDetails;
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                errlog("Scrapefly attempt failed: " . $e->getMessage());
+            }
+        }
+
+        // All attempts failed, return the last result
+        errlog("All retry attempts exhausted, returning failure");
+        return $eventDetails;
+    }
+
+    /**
+     * Check if event data is valid (has required date/time fields)
+     */
+    private function isValidEventData($eventDetails)
+    {
+        if (!isset($eventDetails['eventData']) || !is_array($eventDetails['eventData'])) {
+            return false;
+        }
+
+        $eventData = $eventDetails['eventData'];
+
+        // Check for single event
+        if (isset($eventData['dtstart']) && !empty($eventData['dtstart'])) {
+            return true;
+        }
+
+        // Check for multiple events (array of events)
+        if (isset($eventData[0]) && is_array($eventData[0]) && !empty($eventData[0]['dtstart'])) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if the failure was due to missing date/time extraction
+     */
+    private function isDateExtractionFailure($eventDetails)
+    {
+        $errorMessage = $eventDetails['errorMessage'] ?? '';
+
+        // Check error message for date/time related failures
+        if (stripos($errorMessage, 'date') !== false ||
+            stripos($errorMessage, 'time') !== false ||
+            stripos($errorMessage, 'didn\'t contain') !== false) {
+            return true;
+        }
+
+        // Also check if eventData is missing dtstart
+        return !$this->isValidEventData($eventDetails);
     }
 
     /**
