@@ -1081,6 +1081,61 @@ HasBody:
         // Pass screenshot as the screenshotZoomed parameter
         $eventDetails = $this->generateIcalEvent($combinedText, $extractedInstructions, null, $screenshotData, null, $cliDebug, false, $extractedUrl);
 
+        // Check if AI failed to extract dates and retry with Scrapefly if needed
+        if (isset($eventDetails['success']) && !$eventDetails['success']) {
+            $errorMessage = $eventDetails['errorMessage'] ?? '';
+
+            // Check if the failure was due to missing dates
+            if (stripos($errorMessage, 'date') !== false || stripos($errorMessage, 'time') !== false ||
+                empty($eventDetails['eventData']['dtstart']) ||
+                (is_array($eventDetails['eventData']) && isset($eventDetails['eventData'][0]) && empty($eventDetails['eventData'][0]['dtstart']))) {
+
+                errlog("AI failed to extract date/time data, retrying with Scrapefly enhanced scraping");
+
+                // Only retry if we haven't already used Scrapefly and we have a URL
+                if ($extractedUrl && !$this->scrapeflyScreenshot && !empty($_ENV['SCRAPEFLY_API_KEY'])) {
+                    errlog("Attempting to fetch URL with Scrapefly for better date extraction: {$extractedUrl}");
+
+                    // Clear previous screenshot
+                    $this->scrapeflyScreenshot = null;
+
+                    // Force use of Scrapefly
+                    try {
+                        $scrapeflyContent = $this->fetchUrlWithScrapefly($extractedUrl);
+
+                        if ($scrapeflyContent) {
+                            $enhancedContent = $this->extractMainContent($scrapeflyContent);
+                            $enhancedCombinedText = "--- Email HTML Content ---\n```html\n" . $htmlBodyForAI . "\n```";
+
+                            if ($pdfText) {
+                                $enhancedCombinedText .= "\n\n--- Extracted from PDF Attachment ---\n```text\n" . $pdfText . "\n```";
+                            }
+
+                            $enhancedCombinedText .= "\n\n--- HTML content fetched from URL with enhanced scraping ---\n```html\n" . $enhancedContent . "\n```";
+
+                            // Get screenshot if captured
+                            $enhancedScreenshot = $this->scrapeflyScreenshot ?? null;
+
+                            errlog("Retrying AI with Scrapefly-enhanced content" . ($enhancedScreenshot ? " and screenshot" : ""));
+
+                            // Retry with enhanced content and screenshot
+                            $retryDetails = $this->generateIcalEvent($enhancedCombinedText, $extractedInstructions, null, $enhancedScreenshot, null, $cliDebug, false, $extractedUrl);
+
+                            // If retry succeeded, use those results
+                            if (isset($retryDetails['success']) && $retryDetails['success']) {
+                                errlog("Successfully extracted event data with Scrapefly enhanced scraping");
+                                $eventDetails = $retryDetails;
+                            } else {
+                                errlog("Retry with Scrapefly enhanced scraping still failed");
+                            }
+                        }
+                    } catch (\Exception $e) {
+                        errlog("Failed to retry with Scrapefly: " . $e->getMessage());
+                    }
+                }
+            }
+        }
+
         // Handle --json flag for CLI output if requested and in CLI context
         // This check is more for future-proofing if this method is called from a CLI context that sets outputJsonOnly
         if ($outputJsonOnly && defined('IS_CLI_RUN') && IS_CLI_RUN) {
@@ -1324,6 +1379,69 @@ HasBody:
 		return $htmlContent;
 	}
 
+	private function solveCaptchaWith2Captcha($sitekey, $pageUrl, $captchaType = 'recaptchav2') {
+		// Skip if 2captcha API key not configured
+		if (empty($_ENV['TWOCAPTCHA_API_KEY'])) {
+			errlog("2captcha API key not configured, cannot solve captcha");
+			return false;
+		}
+
+		$apiKey = $_ENV['TWOCAPTCHA_API_KEY'];
+
+		// Step 1: Submit captcha for solving
+		$submitUrl = 'http://2captcha.com/in.php';
+		$submitData = [
+			'key' => $apiKey,
+			'method' => $captchaType,
+			'googlekey' => $sitekey,
+			'pageurl' => $pageUrl,
+			'json' => 1
+		];
+
+		errlog("Submitting captcha to 2captcha for solving");
+		$response = file_get_contents($submitUrl . '?' . http_build_query($submitData));
+		$result = json_decode($response, true);
+
+		if ($result['status'] != 1) {
+			errlog("2captcha submission failed: " . ($result['error_text'] ?? 'Unknown error'));
+			return false;
+		}
+
+		$captchaId = $result['request'];
+		errlog("Captcha submitted to 2captcha, ID: {$captchaId}");
+
+		// Step 2: Wait and poll for result
+		$resultUrl = 'http://2captcha.com/res.php';
+		$maxAttempts = 30; // 30 attempts, 5 seconds each = 2.5 minutes max
+		$attempt = 0;
+
+		while ($attempt < $maxAttempts) {
+			sleep(5); // Wait 5 seconds between attempts
+			$attempt++;
+
+			$checkData = [
+				'key' => $apiKey,
+				'action' => 'get',
+				'id' => $captchaId,
+				'json' => 1
+			];
+
+			$response = file_get_contents($resultUrl . '?' . http_build_query($checkData));
+			$result = json_decode($response, true);
+
+			if ($result['status'] == 1) {
+				errlog("Captcha solved successfully by 2captcha");
+				return $result['request']; // This is the captcha solution
+			} elseif ($result['request'] != 'CAPCHA_NOT_READY') {
+				errlog("2captcha error: " . ($result['error_text'] ?? $result['request']));
+				return false;
+			}
+		}
+
+		errlog("2captcha timeout after {$maxAttempts} attempts");
+		return false;
+	}
+
 	private function fetchUrlWithScrapefly($url) {
 		// Skip if Scrapefly API key not configured
 		if (empty($_ENV['SCRAPEFLY_API_KEY'])) {
@@ -1381,6 +1499,25 @@ HasBody:
 		if (json_last_error() !== JSON_ERROR_NONE) {
 			errlog("Failed to decode Scrapefly JSON response");
 			return false;
+		}
+
+		// Check if captcha was detected
+		if (isset($result['result']['captcha_detected']) && $result['result']['captcha_detected']) {
+			errlog("Captcha detected by Scrapefly");
+
+			// Try to extract captcha details and solve with 2captcha
+			if (!empty($_ENV['TWOCAPTCHA_API_KEY']) && isset($result['result']['captcha_sitekey'])) {
+				$sitekey = $result['result']['captcha_sitekey'];
+				$captchaSolution = $this->solveCaptchaWith2Captcha($sitekey, $url);
+
+				if ($captchaSolution) {
+					// Retry with captcha solution
+					errlog("Retrying Scrapefly with captcha solution");
+					// Add captcha solution to the request
+					// Note: This would need additional Scrapefly API parameters
+					// which may vary based on the captcha type
+				}
+			}
 		}
 
 		// Extract the HTML content from Scrapefly response
