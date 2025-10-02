@@ -17950,6 +17950,14 @@ ${cleanedHtml}`;
       processingView.style.display = "none";
       reviewSection.style.display = "none";
       formSection.style.display = "block";
+      const responseAccordion = document.getElementById("responseAccordion");
+      const responseData = document.getElementById("responseData");
+      if (responseAccordion) {
+        responseAccordion.classList.add("d-none");
+      }
+      if (responseData) {
+        responseData.innerHTML = "";
+      }
     });
     sendButton?.addEventListener("click", async () => {
       if (reviewData) {
