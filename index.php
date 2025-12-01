@@ -1545,34 +1545,91 @@ HasBody:
     }
 
     /**
+     * Get list of allowed model IDs from ALLOWED_MODELS env variable
+     */
+    private function getAllowedModelIds()
+    {
+        $allowedModelsCsv = $_ENV['ALLOWED_MODELS'] ?? '';
+        if (empty($allowedModelsCsv)) {
+            return array_keys($this->availableModels); // Return all models if not configured
+        }
+
+        $allowedModelIds = array_map('trim', explode(',', $allowedModelsCsv));
+        $allowedModelIds = array_filter($allowedModelIds); // Remove empty entries
+        $allowedModelIds = array_map(function($id) { return trim($id, ' \t\n\r\0\x0B"\''); }, $allowedModelIds);
+
+        return array_filter($allowedModelIds); // Return non-empty IDs
+    }
+
+    /**
+     * Try all allowed models with given content, skipping already-tried models
+     * Returns event details on success, or last failure result
+     */
+    private function tryAllModelsWithContent($combinedText, $instructions, $screenshotData, $url, $cliDebug, $triedModels, $contentLabel)
+    {
+        // Build priority list: DEFAULT_MODEL, then ALTERNATE_MODEL, then remaining allowed models
+        $priorityModels = [];
+
+        // Add DEFAULT_MODEL first (if not already tried)
+        $defaultModel = $_ENV['DEFAULT_MODEL'] ?? $this->aiModel;
+        if (!in_array($defaultModel, $triedModels)) {
+            $priorityModels[] = $defaultModel;
+        }
+
+        // Add ALTERNATE_MODEL second (if configured, different from default, and not already tried)
+        if (!empty($_ENV['ALTERNATE_MODEL']) &&
+            $_ENV['ALTERNATE_MODEL'] !== $defaultModel &&
+            !in_array($_ENV['ALTERNATE_MODEL'], $triedModels)) {
+            $priorityModels[] = $_ENV['ALTERNATE_MODEL'];
+        }
+
+        // Add all other allowed models (excluding ones already tried or in priority list)
+        $allowedModels = $this->getAllowedModelIds();
+        foreach ($allowedModels as $modelId) {
+            if (!in_array($modelId, $triedModels) && !in_array($modelId, $priorityModels)) {
+                $priorityModels[] = $modelId;
+            }
+        }
+
+        // Try each model
+        $lastEventDetails = null;
+        foreach ($priorityModels as $modelId) {
+            errlog("Trying model {$modelId} with {$contentLabel}");
+            $triedModels[] = $modelId; // Mark as tried
+
+            $eventDetails = $this->generateIcalEvent($combinedText, $instructions, null, $screenshotData, $modelId, $cliDebug, false, $url);
+            $lastEventDetails = $eventDetails;
+
+            if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
+                errlog("Successfully generated event with model {$modelId} using {$contentLabel}");
+                return ['success' => true, 'eventDetails' => $eventDetails, 'triedModels' => $triedModels];
+            }
+
+            errlog("Model {$modelId} failed with {$contentLabel}: " . ($eventDetails['errorMessage'] ?? 'unknown error'));
+        }
+
+        return ['success' => false, 'eventDetails' => $lastEventDetails, 'triedModels' => $triedModels];
+    }
+
+    /**
      * Comprehensive retry strategy for generating events
      */
     private function generateEventWithRetries($combinedText, $instructions, $url, $htmlBodyForAI, $pdfText, $screenshotData, $cliDebug = false)
     {
-        // Step 1: Try with DEFAULT_MODEL
-        errlog("Attempting to generate event with DEFAULT_MODEL");
-        $eventDetails = $this->generateIcalEvent($combinedText, $instructions, null, $screenshotData, null, $cliDebug, false, $url);
+        $triedModels = [];
 
-        // Check if successful
-        if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
-            errlog("Successfully generated event with DEFAULT_MODEL");
-            return $eventDetails;
+        // Step 1: Try all models with original content
+        errlog("Starting model retry with original content");
+        $result = $this->tryAllModelsWithContent($combinedText, $instructions, $screenshotData, $url, $cliDebug, $triedModels, "original content");
+        if ($result['success']) {
+            return $result['eventDetails'];
         }
+        $triedModels = $result['triedModels'];
+        $lastEventDetails = $result['eventDetails'];
 
-        // Step 2: Try with ALTERNATE_MODEL if configured
-        if (!empty($_ENV['ALTERNATE_MODEL'])) {
-            errlog("First attempt failed, trying with ALTERNATE_MODEL: " . $_ENV['ALTERNATE_MODEL']);
-            $eventDetails = $this->generateIcalEvent($combinedText, $instructions, null, $screenshotData, $_ENV['ALTERNATE_MODEL'], $cliDebug, false, $url);
-
-            if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
-                errlog("Successfully generated event with ALTERNATE_MODEL");
-                return $eventDetails;
-            }
-        }
-
-        // Step 3: If we have a URL and dates weren't extracted, try Puphpeteer rendering
-        if ($url && $this->isDateExtractionFailure($eventDetails)) {
-            errlog("Date extraction failed, attempting Puphpeteer rendering for URL: {$url}");
+        // Step 2: If we have a URL and dates weren't extracted, try Puphpeteer rendering with all models
+        if ($url && $this->isDateExtractionFailure($lastEventDetails)) {
+            errlog("Date extraction failed with all models, attempting Puphpeteer rendering for URL: {$url}");
 
             try {
                 if (!$this->puphpeteerRenderer) {
@@ -1593,32 +1650,20 @@ HasBody:
                     }
                     $puphpeteerCombinedText .= "\n\n--- JavaScript-rendered HTML content ---\n```html\n" . $renderedContent . "\n```";
 
-                    // Step 4: Try DEFAULT_MODEL with Puphpeteer-rendered content
-                    errlog("Trying DEFAULT_MODEL with Puphpeteer-rendered content");
-                    $eventDetails = $this->generateIcalEvent($puphpeteerCombinedText, $instructions, null, null, null, $cliDebug, false, $url);
-
-                    if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
-                        errlog("Successfully generated event with Puphpeteer-rendered content using DEFAULT_MODEL");
-                        return $eventDetails;
+                    // Try all models with Puphpeteer content
+                    $result = $this->tryAllModelsWithContent($puphpeteerCombinedText, $instructions, null, $url, $cliDebug, $triedModels, "Puphpeteer-rendered content");
+                    if ($result['success']) {
+                        return $result['eventDetails'];
                     }
-
-                    // Step 5: Try ALTERNATE_MODEL with Puphpeteer-rendered content
-                    if (!empty($_ENV['ALTERNATE_MODEL'])) {
-                        errlog("Trying ALTERNATE_MODEL with Puphpeteer-rendered content");
-                        $eventDetails = $this->generateIcalEvent($puphpeteerCombinedText, $instructions, null, null, $_ENV['ALTERNATE_MODEL'], $cliDebug, false, $url);
-
-                        if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
-                            errlog("Successfully generated event with Puphpeteer-rendered content using ALTERNATE_MODEL");
-                            return $eventDetails;
-                        }
-                    }
+                    $triedModels = $result['triedModels'];
+                    $lastEventDetails = $result['eventDetails'];
                 }
             } catch (\Exception $e) {
                 errlog("Puphpeteer rendering failed: " . $e->getMessage());
             }
         }
 
-        // Step 6: Try Scrapefly as last resort
+        // Step 3: Try Scrapefly as last resort with all models
         if ($url && !empty($_ENV['SCRAPEFLY_API_KEY'])) {
             errlog("All previous attempts failed, trying Scrapefly for URL: {$url}");
 
@@ -1641,25 +1686,21 @@ HasBody:
                     // Get screenshot if available
                     $scrapeflyScreenshot = $this->scrapeflyScreenshot ?? null;
 
-                    // Step 7: Try DEFAULT_MODEL with Scrapefly content and screenshot
-                    errlog("Trying DEFAULT_MODEL with Scrapefly content" . ($scrapeflyScreenshot ? " and screenshot" : ""));
-                    $eventDetails = $this->generateIcalEvent($scrapeflyCombinedText, $instructions, null, $scrapeflyScreenshot, null, $cliDebug, false, $url);
-
-                    if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
-                        errlog("Successfully generated event with Scrapefly content using DEFAULT_MODEL");
-                        return $eventDetails;
+                    // Try all models with Scrapefly content and screenshot
+                    $result = $this->tryAllModelsWithContent(
+                        $scrapeflyCombinedText,
+                        $instructions,
+                        $scrapeflyScreenshot,
+                        $url,
+                        $cliDebug,
+                        $triedModels,
+                        "Scrapefly content" . ($scrapeflyScreenshot ? " with screenshot" : "")
+                    );
+                    if ($result['success']) {
+                        return $result['eventDetails'];
                     }
-
-                    // Step 8: Try ALTERNATE_MODEL with Scrapefly content and screenshot
-                    if (!empty($_ENV['ALTERNATE_MODEL'])) {
-                        errlog("Trying ALTERNATE_MODEL with Scrapefly content" . ($scrapeflyScreenshot ? " and screenshot" : ""));
-                        $eventDetails = $this->generateIcalEvent($scrapeflyCombinedText, $instructions, null, $scrapeflyScreenshot, $_ENV['ALTERNATE_MODEL'], $cliDebug, false, $url);
-
-                        if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
-                            errlog("Successfully generated event with Scrapefly content using ALTERNATE_MODEL");
-                            return $eventDetails;
-                        }
-                    }
+                    $triedModels = $result['triedModels'];
+                    $lastEventDetails = $result['eventDetails'];
                 }
             } catch (\Exception $e) {
                 errlog("Scrapefly attempt failed: " . $e->getMessage());
@@ -1667,8 +1708,8 @@ HasBody:
         }
 
         // All attempts failed, return the last result
-        errlog("All retry attempts exhausted, returning failure");
-        return $eventDetails;
+        errlog("All retry attempts exhausted. Tried " . count($triedModels) . " model(s): " . implode(', ', $triedModels));
+        return $lastEventDetails;
     }
 
     /**
