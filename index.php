@@ -490,8 +490,6 @@ class EmailProcessor
 	public function processUrl($url, $downloadedText, $display, $tentative = true, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $needsReview = false, $fromExtension = false, $outputJsonOnly = false, $cliDebug = false, $allowMultiDay = false)
 	{
 		errlog("processUrl started - URL: " . ($url ?? 'none') . ", Model: " . ($requestedModel ?? 'default'));
-		$process_start_time = microtime(true);
-		
         // NOTE TO DEVELOPER: Throughout this method, check (defined('IS_CLI_RUN') && IS_CLI_RUN)
         // before calling http_response_code(), header(), or outputting HTML error messages.
         // For CLI, output plain text errors to STDERR or STDOUT and use exit codes.
@@ -2236,7 +2234,16 @@ PROMPT;
 					errlog("Google maps lookup for '{$ret['locationLookup']}' returned '{$place}'");
 					if ($place && isset($ret['eventData'])) {
 						// Update the location within the eventData structure
-						$ret['eventData']['location'] = $place;
+						// Handle both single event and multiple events (array)
+						if (isset($ret['eventData']['summary'])) {
+							// Single event object
+							$ret['eventData']['location'] = $place;
+						} elseif (isset($ret['eventData'][0]) && is_array($ret['eventData'][0])) {
+							// Array of events - update location for all events
+							foreach ($ret['eventData'] as $key => $event) {
+								$ret['eventData'][$key]['location'] = $place;
+							}
+						}
 					}
 				} catch (Throwable $e) {
 					errlog("Error(s) doing google maps lookup: " . var_export($e, true));
@@ -3105,7 +3112,9 @@ HTML;
 				($_REQUEST['tentative'] ?? '1') === '1', // Convert '1'/'0' back to boolean
 				$_REQUEST['instructions'] ?? null,
 				$_REQUEST['screenshot_viewport'] ?? null, // Add viewport screenshot
-				$_REQUEST['screenshot_zoomed'] ?? null,    // Add zoomed screenshot
+				is_array($_REQUEST['screenshot_zoomed']) ?
+					$_REQUEST['screenshot_zoomed'][0] :
+					($_REQUEST['screenshot_zoomed'] ?? null),    // Add zoomed screenshot
 				$_REQUEST['model'] ?? null,
 				($_REQUEST['review'] ?? '0') === '1',     // Convert '1'/'0' back to boolean
 				($_REQUEST['fromExtension'] ?? 'false') === 'true', // Convert string bool to boolean
