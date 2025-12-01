@@ -1488,10 +1488,28 @@ HasBody:
 			errlog("Screenshot captured via Scrapefly");
 
 			// Extract base64 data from screenshot structure
-			// Scrapefly returns screenshots as an object with 'data', 'format', etc.
+			// Scrapefly can return screenshots as:
+			// 1. Object with 'data' property (inline base64)
+			// 2. Object with 'url' property (download URL)
+			// 3. Direct base64 string
 			if (is_array($screenshotData) && isset($screenshotData['data'])) {
 				// Extract just the base64 data
 				$this->scrapeflyScreenshot = $screenshotData['data'];
+			} elseif (is_array($screenshotData) && isset($screenshotData['url'])) {
+				// Download screenshot from URL
+				errlog("Downloading screenshot from Scrapefly URL: " . $screenshotData['url']);
+				try {
+					$client = new \GuzzleHttp\Client();
+					$screenshotResponse = $client->get($screenshotData['url'], [
+						'timeout' => 30,
+					]);
+					$screenshotBinary = $screenshotResponse->getBody()->getContents();
+					$this->scrapeflyScreenshot = base64_encode($screenshotBinary);
+					errlog("Successfully downloaded screenshot (" . strlen($screenshotBinary) . " bytes)");
+				} catch (\Throwable $e) {
+					errlog("Failed to download screenshot from URL: " . $e->getMessage());
+					$this->scrapeflyScreenshot = null;
+				}
 			} elseif (is_string($screenshotData)) {
 				// Already a string (direct base64)
 				$this->scrapeflyScreenshot = $screenshotData;
