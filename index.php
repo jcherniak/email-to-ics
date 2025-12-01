@@ -1727,6 +1727,13 @@ HasBody:
      */
     private function generateIcalEvent($combinedText, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $cliDebug = false, $allowMultiDay = false, $sourceUrl = null)
     {
+        // If a specific model was requested, use it
+        if ($requestedModel) {
+            $previousModel = $this->aiModel;
+            $this->aiModel = $requestedModel;
+            errlog("Switching model from {$previousModel} to {$requestedModel} for this request");
+        }
+
         // Define the NEW schema for structured event data
         $eventSchema = [
             'type' => 'object',
