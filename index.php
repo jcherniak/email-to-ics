@@ -1618,65 +1618,26 @@ HasBody:
     }
 
     /**
-     * Comprehensive retry strategy for generating events
+     * Determine the best content to use for AI processing
+     * Tries Scrapefly first (best), then Puphpeteer, then falls back to original
      */
-    private function generateEventWithRetries($combinedText, $instructions, $url, $htmlBodyForAI, $pdfText, $screenshotData, $cliDebug = false)
+    private function getBestContent($url, $htmlBodyForAI, $pdfText, $combinedText)
     {
-        $triedModels = [];
-
-        // Step 1: Try all models with original content
-        errlog("Starting model retry with original content");
-        $result = $this->tryAllModelsWithContent($combinedText, $instructions, $screenshotData, $url, $cliDebug, $triedModels, "original content");
-        if ($result['success']) {
-            return $result['eventDetails'];
-        }
-        $triedModels = $result['triedModels'];
-        $lastEventDetails = $result['eventDetails'];
-
-        // Step 2: If we have a URL and dates weren't extracted, try Puphpeteer rendering with all models
-        if ($url && $this->isDateExtractionFailure($lastEventDetails)) {
-            errlog("Date extraction failed with all models, attempting Puphpeteer rendering for URL: {$url}");
-
-            try {
-                if (!$this->puphpeteerRenderer) {
-                    $this->puphpeteerRenderer = new PuphpeteerRenderer();
-                }
-
-                $renderResult = $this->puphpeteerRenderer->renderUrl($url);
-
-                if ($renderResult['success'] && $renderResult['html']) {
-                    // Sanitize the rendered HTML
-                    $sanitizedHtml = PuphpeteerRenderer::sanitizeHtml($renderResult['html']);
-                    $renderedContent = $this->extractMainContent($sanitizedHtml);
-
-                    // Build new combined text with rendered content
-                    $puphpeteerCombinedText = "--- Email HTML Content ---\n```html\n" . $htmlBodyForAI . "\n```";
-                    if ($pdfText) {
-                        $puphpeteerCombinedText .= "\n\n--- Extracted from PDF Attachment ---\n```text\n" . $pdfText . "\n```";
-                    }
-                    $puphpeteerCombinedText .= "\n\n--- JavaScript-rendered HTML content ---\n```html\n" . $renderedContent . "\n```";
-
-                    // Try all models with Puphpeteer content
-                    $result = $this->tryAllModelsWithContent($puphpeteerCombinedText, $instructions, null, $url, $cliDebug, $triedModels, "Puphpeteer-rendered content");
-                    if ($result['success']) {
-                        return $result['eventDetails'];
-                    }
-                    $triedModels = $result['triedModels'];
-                    $lastEventDetails = $result['eventDetails'];
-                }
-            } catch (\Exception $e) {
-                errlog("Puphpeteer rendering failed: " . $e->getMessage());
-            }
+        // If no URL, use original content
+        if (!$url) {
+            errlog("No URL provided, using original content");
+            return [
+                'content' => $combinedText,
+                'screenshot' => null,
+                'source' => 'original'
+            ];
         }
 
-        // Step 3: Try Scrapefly as last resort with all models
-        if ($url && !empty($_ENV['SCRAPEFLY_API_KEY'])) {
-            errlog("All previous attempts failed, trying Scrapefly for URL: {$url}");
-
+        // Try Scrapefly first (best option - gets clean HTML + screenshot)
+        if (!empty($_ENV['SCRAPEFLY_API_KEY'])) {
+            errlog("Attempting to fetch enhanced content via Scrapefly");
             try {
-                // Clear previous screenshot
                 $this->scrapeflyScreenshot = null;
-
                 $scrapeflyContent = $this->fetchUrlWithScrapefly($url);
 
                 if ($scrapeflyContent) {
@@ -1689,33 +1650,94 @@ HasBody:
                     }
                     $scrapeflyCombinedText .= "\n\n--- Scrapefly-extracted HTML content ---\n```html\n" . $scrapeflyExtracted . "\n```";
 
-                    // Get screenshot if available
-                    $scrapeflyScreenshot = $this->scrapeflyScreenshot ?? null;
+                    $screenshot = $this->scrapeflyScreenshot ?? null;
+                    errlog("Successfully prepared Scrapefly content" . ($screenshot ? " with screenshot" : ""));
 
-                    // Try all models with Scrapefly content and screenshot
-                    $result = $this->tryAllModelsWithContent(
-                        $scrapeflyCombinedText,
-                        $instructions,
-                        $scrapeflyScreenshot,
-                        $url,
-                        $cliDebug,
-                        $triedModels,
-                        "Scrapefly content" . ($scrapeflyScreenshot ? " with screenshot" : "")
-                    );
-                    if ($result['success']) {
-                        return $result['eventDetails'];
-                    }
-                    $triedModels = $result['triedModels'];
-                    $lastEventDetails = $result['eventDetails'];
+                    return [
+                        'content' => $scrapeflyCombinedText,
+                        'screenshot' => $screenshot,
+                        'source' => 'scrapefly' . ($screenshot ? ' with screenshot' : '')
+                    ];
                 }
             } catch (\Exception $e) {
-                errlog("Scrapefly attempt failed: " . $e->getMessage());
+                errlog("Scrapefly content fetch failed: " . $e->getMessage());
             }
         }
 
-        // All attempts failed, return the last result
-        errlog("All retry attempts exhausted. Tried " . count($triedModels) . " model(s): " . implode(', ', $triedModels));
-        return $lastEventDetails;
+        // Try Puphpeteer as fallback
+        errlog("Attempting to fetch enhanced content via Puphpeteer");
+        try {
+            if (!$this->puphpeteerRenderer) {
+                $this->puphpeteerRenderer = new PuphpeteerRenderer();
+            }
+
+            $renderResult = $this->puphpeteerRenderer->renderUrl($url);
+
+            if ($renderResult['success'] && $renderResult['html']) {
+                $sanitizedHtml = PuphpeteerRenderer::sanitizeHtml($renderResult['html']);
+                $renderedContent = $this->extractMainContent($sanitizedHtml);
+
+                // Build combined text with rendered content
+                $puphpeteerCombinedText = "--- Email HTML Content ---\n```html\n" . $htmlBodyForAI . "\n```";
+                if ($pdfText) {
+                    $puphpeteerCombinedText .= "\n\n--- Extracted from PDF Attachment ---\n```text\n" . $pdfText . "\n```";
+                }
+                $puphpeteerCombinedText .= "\n\n--- JavaScript-rendered HTML content ---\n```html\n" . $renderedContent . "\n```";
+
+                errlog("Successfully prepared Puphpeteer-rendered content");
+                return [
+                    'content' => $puphpeteerCombinedText,
+                    'screenshot' => null,
+                    'source' => 'puphpeteer'
+                ];
+            }
+        } catch (\Exception $e) {
+            errlog("Puphpeteer rendering failed: " . $e->getMessage());
+        }
+
+        // Fall back to original content
+        errlog("All enhanced content methods failed, using original content");
+        return [
+            'content' => $combinedText,
+            'screenshot' => null,
+            'source' => 'original'
+        ];
+    }
+
+    /**
+     * Comprehensive retry strategy for generating events
+     * Determines best content FIRST, then tries all models ONCE
+     */
+    private function generateEventWithRetries($combinedText, $instructions, $url, $htmlBodyForAI, $pdfText, $screenshotData, $cliDebug = false)
+    {
+        // Step 1: Determine the best content to use (Scrapefly > Puphpeteer > Original)
+        errlog("Determining best content for AI processing");
+        $contentResult = $this->getBestContent($url, $htmlBodyForAI, $pdfText, $combinedText);
+
+        // Use screenshot from content determination, or fall back to passed screenshot
+        $finalScreenshot = $contentResult['screenshot'] ?? $screenshotData;
+
+        errlog("Using content from: " . $contentResult['source']);
+
+        // Step 2: Try all models ONCE with the best content
+        $triedModels = [];
+        $result = $this->tryAllModelsWithContent(
+            $contentResult['content'],
+            $instructions,
+            $finalScreenshot,
+            $url,
+            $cliDebug,
+            $triedModels,
+            $contentResult['source']
+        );
+
+        if ($result['success']) {
+            return $result['eventDetails'];
+        }
+
+        // All models failed, return the last result
+        errlog("All models failed. Tried " . count($result['triedModels']) . " model(s): " . implode(', ', $result['triedModels']));
+        return $result['eventDetails'];
     }
 
     /**
