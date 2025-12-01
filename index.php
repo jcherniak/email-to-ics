@@ -1496,11 +1496,17 @@ HasBody:
 				// Extract just the base64 data
 				$this->scrapeflyScreenshot = $screenshotData['data'];
 			} elseif (is_array($screenshotData) && isset($screenshotData['url'])) {
-				// Download screenshot from URL
-				errlog("Downloading screenshot from Scrapefly URL: " . $screenshotData['url']);
+				// Download screenshot from URL (requires API key)
+				$screenshotUrl = $screenshotData['url'];
+
+				// Add API key to URL as query parameter
+				$separator = (strpos($screenshotUrl, '?') !== false) ? '&' : '?';
+				$screenshotUrlWithKey = $screenshotUrl . $separator . 'key=' . urlencode($_ENV['SCRAPEFLY_API_KEY']);
+
+				errlog("Downloading screenshot from Scrapefly URL: " . $screenshotUrl);
 				try {
 					$client = new \GuzzleHttp\Client();
-					$screenshotResponse = $client->get($screenshotData['url'], [
+					$screenshotResponse = $client->get($screenshotUrlWithKey, [
 						'timeout' => 30,
 					]);
 					$screenshotBinary = $screenshotResponse->getBody()->getContents();
