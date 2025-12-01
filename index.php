@@ -1486,8 +1486,20 @@ HasBody:
 		if (isset($result['result']['screenshots']['main'])) {
 			$screenshotData = $result['result']['screenshots']['main'];
 			errlog("Screenshot captured via Scrapefly");
-			// Store screenshot in a property for later use
-			$this->scrapeflyScreenshot = $screenshotData;
+
+			// Extract base64 data from screenshot structure
+			// Scrapefly returns screenshots as an object with 'data', 'format', etc.
+			if (is_array($screenshotData) && isset($screenshotData['data'])) {
+				// Extract just the base64 data
+				$this->scrapeflyScreenshot = $screenshotData['data'];
+			} elseif (is_string($screenshotData)) {
+				// Already a string (direct base64)
+				$this->scrapeflyScreenshot = $screenshotData;
+			} else {
+				// Unexpected format, log and skip
+				errlog("Unexpected screenshot format from Scrapefly: " . json_encode($screenshotData));
+				$this->scrapeflyScreenshot = null;
+			}
 		}
 
 		errlog("Successfully fetched content via Scrapefly (" . strlen($htmlContent) . " bytes)");
