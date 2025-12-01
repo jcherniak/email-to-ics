@@ -1618,124 +1618,30 @@ HasBody:
     }
 
     /**
-     * Determine the best content to use for AI processing
-     * Tries Scrapefly first (best), then Puphpeteer, then falls back to original
-     */
-    private function getBestContent($url, $htmlBodyForAI, $pdfText, $combinedText)
-    {
-        // If no URL, use original content
-        if (!$url) {
-            errlog("No URL provided, using original content");
-            return [
-                'content' => $combinedText,
-                'screenshot' => null,
-                'source' => 'original'
-            ];
-        }
-
-        // Try Scrapefly first (best option - gets clean HTML + screenshot)
-        if (!empty($_ENV['SCRAPEFLY_API_KEY'])) {
-            errlog("Attempting to fetch enhanced content via Scrapefly");
-            try {
-                $this->scrapeflyScreenshot = null;
-                $scrapeflyContent = $this->fetchUrlWithScrapefly($url);
-
-                if ($scrapeflyContent) {
-                    $scrapeflyExtracted = $this->extractMainContent($scrapeflyContent);
-
-                    // Build combined text with Scrapefly content
-                    $scrapeflyCombinedText = "--- Email HTML Content ---\n```html\n" . $htmlBodyForAI . "\n```";
-                    if ($pdfText) {
-                        $scrapeflyCombinedText .= "\n\n--- Extracted from PDF Attachment ---\n```text\n" . $pdfText . "\n```";
-                    }
-                    $scrapeflyCombinedText .= "\n\n--- Scrapefly-extracted HTML content ---\n```html\n" . $scrapeflyExtracted . "\n```";
-
-                    $screenshot = $this->scrapeflyScreenshot ?? null;
-                    errlog("Successfully prepared Scrapefly content" . ($screenshot ? " with screenshot" : ""));
-
-                    return [
-                        'content' => $scrapeflyCombinedText,
-                        'screenshot' => $screenshot,
-                        'source' => 'scrapefly' . ($screenshot ? ' with screenshot' : '')
-                    ];
-                }
-            } catch (\Exception $e) {
-                errlog("Scrapefly content fetch failed: " . $e->getMessage());
-            }
-        }
-
-        // Try Puphpeteer as fallback
-        errlog("Attempting to fetch enhanced content via Puphpeteer");
-        try {
-            if (!$this->puphpeteerRenderer) {
-                $this->puphpeteerRenderer = new PuphpeteerRenderer();
-            }
-
-            $renderResult = $this->puphpeteerRenderer->renderUrl($url);
-
-            if ($renderResult['success'] && $renderResult['html']) {
-                $sanitizedHtml = PuphpeteerRenderer::sanitizeHtml($renderResult['html']);
-                $renderedContent = $this->extractMainContent($sanitizedHtml);
-
-                // Build combined text with rendered content
-                $puphpeteerCombinedText = "--- Email HTML Content ---\n```html\n" . $htmlBodyForAI . "\n```";
-                if ($pdfText) {
-                    $puphpeteerCombinedText .= "\n\n--- Extracted from PDF Attachment ---\n```text\n" . $pdfText . "\n```";
-                }
-                $puphpeteerCombinedText .= "\n\n--- JavaScript-rendered HTML content ---\n```html\n" . $renderedContent . "\n```";
-
-                errlog("Successfully prepared Puphpeteer-rendered content");
-                return [
-                    'content' => $puphpeteerCombinedText,
-                    'screenshot' => null,
-                    'source' => 'puphpeteer'
-                ];
-            }
-        } catch (\Exception $e) {
-            errlog("Puphpeteer rendering failed: " . $e->getMessage());
-        }
-
-        // Fall back to original content
-        errlog("All enhanced content methods failed, using original content");
-        return [
-            'content' => $combinedText,
-            'screenshot' => null,
-            'source' => 'original'
-        ];
-    }
-
-    /**
-     * Comprehensive retry strategy for generating events
-     * Determines best content FIRST, then tries all models ONCE
+     * Simple retry strategy - try all models once with provided content
+     * Content fetching (direct -> oxylabs -> scrapefly) already happened before this
      */
     private function generateEventWithRetries($combinedText, $instructions, $url, $htmlBodyForAI, $pdfText, $screenshotData, $cliDebug = false)
     {
-        // Step 1: Determine the best content to use (Scrapefly > Puphpeteer > Original)
-        errlog("Determining best content for AI processing");
-        $contentResult = $this->getBestContent($url, $htmlBodyForAI, $pdfText, $combinedText);
-
-        // Use screenshot from content determination, or fall back to passed screenshot
-        $finalScreenshot = $contentResult['screenshot'] ?? $screenshotData;
-
-        errlog("Using content from: " . $contentResult['source']);
-
-        // Step 2: Try all models ONCE with the best content
+        // Try all models ONCE with the provided content
+        // (Content was already fetched using direct -> oxylabs -> scrapefly fallback in processPostmarkRequest)
+        errlog("Trying all models with provided content");
         $triedModels = [];
         $result = $this->tryAllModelsWithContent(
-            $contentResult['content'],
+            $combinedText,
             $instructions,
-            $finalScreenshot,
+            $screenshotData,
             $url,
             $cliDebug,
             $triedModels,
-            $contentResult['source']
+            "provided content"
         );
 
         if ($result['success']) {
             return $result['eventDetails'];
         }
 
-        // All models failed, return the last result
+        // All models failed
         errlog("All models failed. Tried " . count($result['triedModels']) . " model(s): " . implode(', ', $result['triedModels']));
         return $result['eventDetails'];
     }
@@ -1762,24 +1668,6 @@ HasBody:
         }
 
         return false;
-    }
-
-    /**
-     * Check if the failure was due to missing date/time extraction
-     */
-    private function isDateExtractionFailure($eventDetails)
-    {
-        $errorMessage = $eventDetails['errorMessage'] ?? '';
-
-        // Check error message for date/time related failures
-        if (stripos($errorMessage, 'date') !== false ||
-            stripos($errorMessage, 'time') !== false ||
-            stripos($errorMessage, 'didn\'t contain') !== false) {
-            return true;
-        }
-
-        // Also check if eventData is missing dtstart
-        return !$this->isValidEventData($eventDetails);
     }
 
     /**
