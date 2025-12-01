@@ -2226,10 +2226,7 @@ PROMPT;
         if ($decodedJson === null) {
             $errorMsg = "Failed to extract or decode valid JSON from AI response.";
             errlog($errorMsg . " Raw Response Snippet: " . substr($returnedData, 0, 500));
-            // In CLI mode, throw exception. In web mode, maybe return a structured error?
-            // For now, consistent exception for easier debugging.
-            throw new \RuntimeException($errorMsg . " Raw Response Snippet: " . substr($returnedData, 0, 500));
-            /* Previous approach for potential web error handling:
+            // Return failed result so retry logic can continue
             return [
                 'success' => false,
                 'errorMessage' => $errorMsg,
@@ -2237,7 +2234,6 @@ PROMPT;
                 'emailSubject' => 'Error: Invalid AI Response',
                 'locationLookup' => null
             ];
-            */
         }
 
         // Use the successfully decoded JSON array
@@ -2263,29 +2259,10 @@ PROMPT;
 			if (isset($ret['success']) && $ret['success'] === false) {
 				$errorMessage = $ret['errorMessage'] ?? 'AI indicated failure with no specific message.';
 				errlog("AI returned success = false: {$errorMessage}\nJSON: {$jsonData}");
-				
-				// Check if we should retry with alternate model
-				if (stripos($errorMessage, "didn't contain dates or times") !== false || 
-				    stripos($errorMessage, "didn't contain dates/times") !== false) {
-					$alternateModel = $_ENV['ALTERNATE_MODEL'] ?? null;
-					if ($alternateModel && $this->aiModel !== $alternateModel && $requestedModel === null) {
-						errlog("No dates found, retrying with ALTERNATE_MODEL: {$alternateModel}");
-						// Retry with alternate model
-						return $this->generateIcalEvent($combinedText, $instructions, $screenshotViewport, $screenshotZoomed, $alternateModel, $cliDebug, $allowMultiDay, $sourceUrl);
-					}
-				}
-				
-                // Keep throwing exception for consistency in CLI
-                throw new \RuntimeException("AI processing error: {$errorMessage}. JSON: {$jsonData}");
-                /* Web mode alternative:
-                return [
-                    'success' => false,
-                    'errorMessage' => $errorMessage,
-                    'eventData' => $ret['eventData'] ?? null, // Return partial data if available?
-                    'emailSubject' => $ret['emailSubject'] ?? 'AI Processing Error',
-                    'locationLookup' => $ret['locationLookup'] ?? null
-                ];
-                */
+
+				// Don't throw exception - return the failed result so retry logic can continue
+				// The comprehensive retry strategy in generateEventWithRetries will try other models
+				return $ret;
 			}
 
 			// Check for valid eventData structure (single event or array of events)
@@ -2305,11 +2282,25 @@ PROMPT;
 			
 			if (!$hasValidEventData) {
 				errlog("AI response missing required 'eventData.summary'. JSON: {$jsonData}");
-                throw new \RuntimeException("AI response missing required 'eventData.summary'. JSON: {$jsonData}");
+				// Return failed result so retry logic can continue
+				return [
+					'success' => false,
+					'errorMessage' => 'AI response missing required eventData.summary',
+					'eventData' => $ret['eventData'] ?? null,
+					'emailSubject' => $ret['emailSubject'] ?? 'Error: Missing Event Data',
+					'locationLookup' => $ret['locationLookup'] ?? null
+				];
 			}
 			if (empty($ret['emailSubject'] ?? null)) {
 				errlog("AI response missing required 'emailSubject'. JSON: {$jsonData}");
-                throw new \RuntimeException("AI response missing required 'emailSubject'. JSON: {$jsonData}");
+				// Return failed result so retry logic can continue
+				return [
+					'success' => false,
+					'errorMessage' => 'AI response missing required emailSubject',
+					'eventData' => $ret['eventData'] ?? null,
+					'emailSubject' => 'Error: Missing Email Subject',
+					'locationLookup' => $ret['locationLookup'] ?? null
+				];
 			}
 
 			if (!empty($ret['locationLookup'])) {
