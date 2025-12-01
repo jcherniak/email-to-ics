@@ -1087,7 +1087,8 @@ HasBody:
 				function($matches) use ($icsData) {
 					// The actual ICS data (not the JSON-escaped version from the match)
 					// Replace with backticks and preserve actual newlines
-					return '"icsData": `' . $icsData . '`';
+					// Add newline after opening backtick and before closing backtick
+					return '"icsData": `' . "\n" . $icsData . "\n" . '`';
 				},
 				$json
 			);
