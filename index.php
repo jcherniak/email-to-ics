@@ -1155,16 +1155,28 @@ HasBody:
             errlog("Skipping ICS generation for Postmark email because eventData was missing/empty from AI despite success. Error: " . ($eventDetails['errorMessage'] ?? 'eventData missing'));
         }
 
-        $subject = $eventDetails['emailSubject'] ?? 'Calendar Event'; // Use a default subject
-		$recipientEmail = $this->toTentativeEmail;
+        // Only send email if we successfully generated a calendar event
+        if ($calendarEvent) {
+            $subject = $eventDetails['emailSubject'] ?? 'Calendar Event'; // Use a default subject
+            $recipientEmail = $this->toTentativeEmail;
 
-		if (strcasecmp($body['ToFull'][0]['Email'], $this->inboundConfirmedEmail) === 0) {
-			$recipientEmail = $this->toConfirmedEmail;
-		}
+            if (strcasecmp($body['ToFull'][0]['Email'], $this->inboundConfirmedEmail) === 0) {
+                $recipientEmail = $this->toConfirmedEmail;
+            }
 
-        $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body, $eventDetails, $pdfText, $downloadedUrlContent);
+            $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body, $eventDetails, $pdfText, $downloadedUrlContent);
 
-        echo json_encode(['status' => 'success', 'message' => 'Email processed successfully']); // Original success message for Postmark webhook
+            echo json_encode(['status' => 'success', 'message' => 'Email processed successfully']);
+        } else {
+            // Send error email since ICS generation failed
+            errlog("Sending error email because ICS generation failed");
+            $this->sendErrorEmail(
+                'Email-to-ICS Processing Failed: ' . ($body['Subject'] ?? 'No Subject'),
+                ($eventDetails['errorMessage'] ?? 'Unknown error occurred during processing'),
+                $body
+            );
+            echo json_encode(['status' => 'error', 'message' => 'Failed to process email - error notification sent']);
+        }
 	}
 
 	private function is_valid_url($text) : bool
