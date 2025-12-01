@@ -1074,7 +1074,26 @@ HasBody:
 		// Write updated content
 		ftruncate($fp, 0);
 		rewind($fp);
-		fwrite($fp, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+		// Custom JSON encoding for ICS data with backticks and actual newlines
+		$json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+		// If there's ICS data, replace the JSON-encoded version with backtick version
+		if ($icsData !== null) {
+			// Find the icsData field and replace it
+			// Pattern: "icsData": "..." (with escaped content)
+			$json = preg_replace_callback(
+				'/"icsData":\s*"((?:[^"\\\\]|\\\\.)*)"/s',
+				function($matches) use ($icsData) {
+					// The actual ICS data (not the JSON-escaped version from the match)
+					// Replace with backticks and preserve actual newlines
+					return '"icsData": `' . $icsData . '`';
+				},
+				$json
+			);
+		}
+
+		fwrite($fp, $json);
 
 		// Release lock and close
 		flock($fp, LOCK_UN);
