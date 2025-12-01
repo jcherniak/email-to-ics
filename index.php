@@ -996,11 +996,117 @@ HasBody:
 		);
 	}
 
+	/**
+	 * Get the processed folder path
+	 */
+	private function getProcessedFolder()
+	{
+		$folder = __DIR__ . '/processed';
+		if (!is_dir($folder)) {
+			mkdir($folder, 0755, true);
+		}
+		return $folder;
+	}
+
+	/**
+	 * Get processing status for a MessageID
+	 * Returns array of processing attempts with timestamps
+	 */
+	private function getProcessingStatus($messageId)
+	{
+		$filename = $this->getProcessedFolder() . '/' . preg_replace('/[^a-zA-Z0-9\-_]/', '_', $messageId) . '.json';
+
+		if (!file_exists($filename)) {
+			return [];
+		}
+
+		$content = file_get_contents($filename);
+		if ($content === false) {
+			return [];
+		}
+
+		$data = json_decode($content, true);
+		return is_array($data) ? $data : [];
+	}
+
+	/**
+	 * Record processing attempt for a MessageID
+	 * Writes atomically using file locking
+	 */
+	private function recordProcessingAttempt($messageId, $status, $icsData = null, $errorMessage = null, $stackTrace = null)
+	{
+		$filename = $this->getProcessedFolder() . '/' . preg_replace('/[^a-zA-Z0-9\-_]/', '_', $messageId) . '.json';
+		$dateStarted = date('Y-m-d H:i:s');
+
+		// Open file with exclusive lock
+		$fp = fopen($filename, 'c+');
+		if (!$fp) {
+			errlog("Failed to open processing status file: {$filename}");
+			return false;
+		}
+
+		// Acquire exclusive lock
+		if (!flock($fp, LOCK_EX)) {
+			errlog("Failed to lock processing status file: {$filename}");
+			fclose($fp);
+			return false;
+		}
+
+		// Read existing content
+		$content = stream_get_contents($fp);
+		$data = [];
+		if (!empty($content)) {
+			$decoded = json_decode($content, true);
+			if (is_array($decoded)) {
+				$data = $decoded;
+			}
+		}
+
+		// Add new attempt
+		$data[$dateStarted] = [
+			'dateEnded' => date('Y-m-d H:i:s'),
+			'status' => $status,
+			'icsData' => $icsData,
+			'errorMessage' => $errorMessage,
+			'stackTrace' => $stackTrace
+		];
+
+		// Write updated content
+		ftruncate($fp, 0);
+		rewind($fp);
+		fwrite($fp, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+		// Release lock and close
+		flock($fp, LOCK_UN);
+		fclose($fp);
+
+		return true;
+	}
+
+	/**
+	 * Check if email should be processed based on retry limit
+	 * Returns true if should process, false if retry limit exceeded
+	 */
+	private function shouldProcessEmail($messageId)
+	{
+		$maxRetries = (int)($_ENV['MAX_EMAIL_RETRIES'] ?? 1);
+		$attempts = $this->getProcessingStatus($messageId);
+
+		if (count($attempts) >= $maxRetries) {
+			errlog("MessageID {$messageId} has already been processed " . count($attempts) . " time(s). Max retries: {$maxRetries}");
+			return false;
+		}
+
+		return true;
+	}
+
     public function processPostmarkRequest($body, $outputJsonOnly = false, $cliDebug = false)
 	{
 		if (LOG_LEVEL == LogLevel::DEBUG) {
 			errlog(json_encode($body, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 		}
+
+		$messageId = $body['MessageID'] ?? null;
 
 		errlog("Received email with subject of " . $body['Subject']);
 
@@ -1012,6 +1118,16 @@ HasBody:
 			errlog('Skipping response email with subject ' . $body['Subject']);
 			return;
 		}
+
+		// Check if email has already been processed too many times
+		if ($messageId && !$this->shouldProcessEmail($messageId)) {
+			errlog("Skipping email - retry limit exceeded for MessageID: {$messageId}");
+			echo json_encode(['status' => 'skipped', 'message' => 'Email already processed - retry limit exceeded']);
+			return;
+		}
+
+		// Wrap entire processing in try-catch to record status
+		try {
         
         $htmlBodyForAI = $body['HtmlBody'] ?? '';
         $textBodyForExtraction = $body['TextBody'] ?? '';
@@ -1166,16 +1282,49 @@ HasBody:
 
             $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body, $eventDetails, $pdfText, $downloadedUrlContent);
 
+            // Record successful processing
+            if ($messageId) {
+                $this->recordProcessingAttempt($messageId, 'success', $calendarEvent, null, null);
+            }
+
             echo json_encode(['status' => 'success', 'message' => 'Email processed successfully']);
         } else {
             // Send error email since ICS generation failed
             errlog("Sending error email because ICS generation failed");
+            $errorMessage = $eventDetails['errorMessage'] ?? 'Unknown error occurred during processing';
             $this->sendErrorEmail(
                 'Email-to-ICS Processing Failed: ' . ($body['Subject'] ?? 'No Subject'),
-                ($eventDetails['errorMessage'] ?? 'Unknown error occurred during processing'),
+                $errorMessage,
                 $body
             );
+
+            // Record failed processing
+            if ($messageId) {
+                $this->recordProcessingAttempt($messageId, 'failure', null, $errorMessage, null);
+            }
+
             echo json_encode(['status' => 'error', 'message' => 'Failed to process email - error notification sent']);
+        }
+
+        } catch (\Throwable $e) {
+            // Record exception
+            $errorMessage = $e->getMessage();
+            $stackTrace = $e->getTraceAsString();
+            errlog("Exception processing email: " . $errorMessage);
+            errlog("Stack trace: " . $stackTrace);
+
+            if ($messageId) {
+                $this->recordProcessingAttempt($messageId, 'exception', null, $errorMessage, $stackTrace);
+            }
+
+            // Send error email
+            $this->sendErrorEmail(
+                'Email-to-ICS Processing Exception: ' . ($body['Subject'] ?? 'No Subject'),
+                $errorMessage . "\n\nStack Trace:\n" . $stackTrace,
+                $body
+            );
+
+            echo json_encode(['status' => 'error', 'message' => 'Exception occurred during processing']);
         }
 	}
 

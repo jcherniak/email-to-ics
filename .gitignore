@@ -5,3 +5,4 @@ confirm_cache
 **/node_modules/
 worktrees
 uploads
+processed
