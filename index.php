@@ -1065,6 +1065,12 @@ HasBody:
 	 */
 	private function recordProcessingAttempt($messageId, $subject, $status, $icsData = null, $errorMessage = null, $stackTrace = null, $downloadedContent = null, $screenshot = null, $pdfText = null, $emailHtml = null)
 	{
+		// Skip recording in CLI mode to avoid permission issues
+		if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+			errlog("Skipping recordProcessingAttempt in CLI mode");
+			return true;
+		}
+
 		// Check if file already exists from previous attempt
 		$existingFile = $this->findProcessingFile($messageId);
 		$filename = $existingFile ?: $this->getProcessingFilename($messageId, $subject);
@@ -1157,7 +1163,7 @@ HasBody:
 		return true;
 	}
 
-    public function processPostmarkRequest($body, $outputJsonOnly = false, $cliDebug = false)
+    public function processPostmarkRequest($body, $outputJsonOnly = false, $cliDebug = false, $outputIcsOnly = false)
 	{
 		if (LOG_LEVEL == LogLevel::DEBUG) {
 			errlog(json_encode($body, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
@@ -1341,6 +1347,12 @@ HasBody:
 
         // Only send email if we successfully generated a calendar event
         if ($calendarEvent) {
+            // If in CLI mode and --display flag set, output ICS to stdout
+            if ($outputIcsOnly && defined('IS_CLI_RUN') && IS_CLI_RUN) {
+                echo $calendarEvent;
+                exit(0);
+            }
+
             $subject = $eventDetails['emailSubject'] ?? 'Calendar Event'; // Use a default subject
             $recipientEmail = $this->toTentativeEmail;
 
@@ -3269,14 +3281,16 @@ class WebPage
         header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
         header("Access-Control-Allow-Headers: Content-Type, Authorization");
 
+        // Handle CLI first (REQUEST_METHOD not set in CLI)
+        if (is_cli()) {
+            $this->handleCli();
+            return;
+        }
+
         // Handle OPTIONS preflight requests
         if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
             header("HTTP/1.1 204 No Content");
             exit;
-        }
-        if (is_cli()) {
-            $this->handleCli();
-            return;
         }
 
         // Check if this is a Postmark webhook (bypasses auth)
@@ -3522,6 +3536,7 @@ HTML;
             "json",                  // Optional: Output raw JSON response instead of ICS (CLI only)
             "postmark-json-file:", // Optional: Process a local JSON file as a Postmark inbound email
             "debug",                 // Optional: Output AI request/response to STDERR (CLI only)
+            "output-ics",            // Optional: Output ICS to stdout instead of emailing (CLI only, for Postmark)
             "help"              // Optional: Show help message
         ];
 
@@ -3560,7 +3575,7 @@ HTML;
 
             try {
                 errlog("Processing Postmark JSON file: {$filePath}");
-                $processor->processPostmarkRequest($jsonData, isset($options['json']), isset($options['debug']));
+                $processor->processPostmarkRequest($jsonData, isset($options['json']), isset($options['debug']), isset($options['output-ics']));
                 exit(0); // Success
             } catch (Throwable $e) {
                 errlog("Error processing Postmark JSON file {$filePath}: " . $e->getMessage());
