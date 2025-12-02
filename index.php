@@ -60,7 +60,6 @@ $dotenv->load();
 error_log('Dotenv loaded'); // Add log to confirm loading
 
 use GuzzleHttp\Client;
-use OpenAI\Exceptions\UnserializableResponse;
 use Spatie\PdfToText\Pdf;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizerConfig;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
@@ -342,7 +341,17 @@ class EmailProcessor
 			$this->maxTokens = $_ENV['MAX_TOKENS'];
 		}
 
-		$this->openaiClient = $this->buildAiClient();
+		// Initialize Guzzle client for OpenRouter API
+		$this->openaiClient = new Client([
+			'base_uri' => 'https://openrouter.ai/api/v1/',
+			'headers' => [
+				'Authorization' => 'Bearer ' . $this->openRouterKey,
+				'Content-Type' => 'application/json',
+				'X-Title' => $_ENV['APP_TITLE'] ?? 'Email-to-ICS',
+			],
+			'timeout' => 120,
+		]);
+
 		$this->httpClient = new Client([
             'base_uri' => 'https://api.postmarkapp.com',
             'headers' => [
@@ -353,24 +362,6 @@ class EmailProcessor
         ]);
 	}
 
-	/**
-	 * Initialize the AI client connection to OpenRouter
-	 * 
-	 * @return \OpenAI\Client OpenAI client configured for OpenRouter
-	 */
-	private function buildAiClient()
-	{
-		$factory = OpenAI::factory();
-
-		// Configure for OpenRouter API 
-		$factory->withBaseUri('https://openrouter.ai/api/v1'); // Point to OpenRouter API endpoint
-		$factory->withApiKey($this->openRouterKey); // Use OpenRouter key instead of OpenAI key
-		// Add recommended headers for OpenRouter
-		// $factory->withHttpHeader('HTTP-Referer', $_ENV['SITE_URL'] ?? 'https://example.com'); // Removed - Optional/potentially sensitive
-		$factory->withHttpHeader('X-Title', $_ENV['APP_TITLE'] ?? 'Email-to-ICS'); // Help identify app in OpenRouter logs
-
-		return $factory->make();
-	}
 
 	/**
 	 * Load available models, using cache if available and valid.
@@ -2235,117 +2226,99 @@ PROMPT;
 
         errlog('Sending OpenRouter request to model: ' . $this->aiModel);
         $api_start_time = microtime(true);
-        
-        try
-        {
-            $response = $this->openaiClient->chat()->create($data);
+
+        try {
+            // Make direct POST request to OpenRouter
+            $guzzleResponse = $this->openaiClient->post('chat/completions', [
+                'json' => $data,
+                'http_errors' => false, // Don't throw on 4xx/5xx, handle manually
+            ]);
+
             $api_duration = microtime(true) - $api_start_time;
+            $statusCode = $guzzleResponse->getStatusCode();
+            $responseBody = (string) $guzzleResponse->getBody();
+
             errlog('Received OpenRouter response in ' . number_format($api_duration, 4) . ' seconds');
-        }
-        catch (UnserializableResponse $e)
-        {
-            // Log the exception message, as accessing the raw body is problematic
-            errlog("OpenRouter UnserializableResponse: " . $e->getMessage());
-            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
-                echo "Error: AI Provider UnserializableResponse - " . $e->getMessage() . "\n";
-            } else {
-                http_response_code(500);
-                echo "<h1>Error communicating with AI Provider</h1><p>Could not decode the response.</p>";
-                echo '<p>This usually means the API returned an unexpected format (e.g., an error object, rate limit info) instead of a valid chat completion.</p>';
-                echo '<pre>' . htmlspecialchars($e->getMessage()) . '</pre>';
-            }
-            die; // Or exit(1) for CLI
-        }
-        catch (\OpenAI\Exceptions\ErrorException $e) { // Catch API errors specifically
-            $errorDetails = $e->getMessage();
-            // Attempt to get more structured error details if possible
-            // This depends on how ErrorException is structured in the library version
-            if (method_exists($e, 'getErrorMessage')) { // Example check
-                $errorDetails .= " | Type: " . ($e->getErrorType() ?? 'N/A');
-                $errorDetails .= " | Code: " . ($e->getErrorCode() ?? 'N/A');
-            }
-            errlog("OpenRouter API ErrorException: " . $errorDetails);
-            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
-                echo "Error: AI Provider API Error - " . $errorDetails . "\n";
-            } else {
-                http_response_code(500);
-                echo "<h1>Error communicating with AI Provider (API Error)</h1>";
-                echo '<p>Details: ' . htmlspecialchars($errorDetails) . '</p>';
-                die; 
-            }
-        }
-        catch (\Throwable $e) {
-            errlog("General Error during OpenRouter request: " . $e->getMessage());
-            errlog("Error class: " . get_class($e));
+            errlog('Response status code: ' . $statusCode);
+            errlog('Response body (first 1000 chars): ' . substr($responseBody, 0, 1000));
 
-            // Check if this is a model-specific error that should trigger retry with different model
-            $errorMsg = $e->getMessage();
-            $isRetryableError = false;
+            // Parse JSON response
+            $response = json_decode($responseBody, true);
 
-            // Response missing 'choices' key - malformed API response
-            if (stripos($errorMsg, 'Undefined array key "choices"') !== false ||
-                stripos($errorMsg, "Undefined array key 'choices'") !== false) {
-                errlog("Model returned malformed response (missing 'choices') - will retry with different model");
-                $isRetryableError = true;
-            }
-            // Google schema complexity errors
-            elseif (stripos($errorMsg, 'schema produces a constraint that has too many states') !== false) {
-                errlog("Model rejected schema as too complex - will retry with different model");
-                $isRetryableError = true;
-            }
-            // Other provider-specific errors
-            elseif (stripos($errorMsg, 'Provider returned error') !== false) {
-                errlog("Provider-specific error - will retry with different model");
-                $isRetryableError = true;
-            }
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                $jsonError = json_last_error_msg();
+                errlog("Failed to parse OpenRouter JSON response: " . $jsonError);
+                errlog("Raw response: " . $responseBody);
 
-            // Try to extract response body if available
-            if (method_exists($e, 'getResponse')) {
-                try {
-                    $response = $e->getResponse();
-                    if ($response) {
-                        $body = (string) $response->getBody();
-                        errlog("Raw OpenRouter response body: " . $body);
-                    }
-                } catch (\Throwable $ex) {
-                    errlog("Could not extract response body: " . $ex->getMessage());
-                }
-            }
-
-            // If retryable, return failure to allow trying next model
-            if ($isRetryableError) {
                 return [
                     'success' => false,
-                    'errorMessage' => "Model error: " . $errorMsg,
+                    'errorMessage' => "Invalid JSON from API: " . $jsonError,
                     'eventData' => null,
-                    'emailSubject' => 'Error: Model API Error',
+                    'emailSubject' => 'Error: Invalid API Response',
                     'locationLookup' => null
                 ];
             }
 
-            // Otherwise re-throw for fatal errors
-            if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
-                 echo "Error: General error during AI request - " . $e->getMessage() . "\n";
-                 throw $e; // Re-throw for web handler to catch and format, or main CLI handler
-            }
-            throw $e; // Re-throw for web handler to catch and format
-        }
-
-        errlog('Received OpenRouter response.');
-
-        // Check if response has expected structure
-        if (!isset($response['choices']) || !isset($response['choices'][0]) || !isset($response['choices'][0]['message']['content'])) {
-            $responseJson = json_encode($response, JSON_PRETTY_PRINT);
-            errlog("OpenRouter response missing expected 'choices' structure. Full response: " . $responseJson);
-
-            // Check for error field in response
-            if (isset($response['error'])) {
-                $errorMsg = "OpenRouter API error: " . ($response['error']['message'] ?? json_encode($response['error']));
+            // Check for HTTP error status
+            if ($statusCode >= 400) {
+                $errorMsg = "OpenRouter API returned error status {$statusCode}";
+                if (isset($response['error'])) {
+                    $errorMsg .= ": " . ($response['error']['message'] ?? json_encode($response['error']));
+                }
                 errlog($errorMsg);
-                throw new \RuntimeException($errorMsg);
+                errlog("Full error response: " . json_encode($response, JSON_PRETTY_PRINT));
+
+                // These are retryable errors - try next model
+                return [
+                    'success' => false,
+                    'errorMessage' => $errorMsg,
+                    'eventData' => null,
+                    'emailSubject' => 'Error: API Error',
+                    'locationLookup' => null
+                ];
             }
 
-            throw new \RuntimeException("OpenRouter response missing 'choices' field. This may indicate a rate limit, API error, or unexpected response format.");
+            // Check if response has expected structure
+            if (!isset($response['choices']) || !isset($response['choices'][0]) || !isset($response['choices'][0]['message']['content'])) {
+                errlog("OpenRouter response missing expected 'choices' structure.");
+                errlog("Full response: " . json_encode($response, JSON_PRETTY_PRINT));
+
+                // Check for error field in response
+                if (isset($response['error'])) {
+                    $errorMsg = "OpenRouter API error: " . ($response['error']['message'] ?? json_encode($response['error']));
+                    errlog($errorMsg);
+
+                    return [
+                        'success' => false,
+                        'errorMessage' => $errorMsg,
+                        'eventData' => null,
+                        'emailSubject' => 'Error: API Error',
+                        'locationLookup' => null
+                    ];
+                }
+
+                return [
+                    'success' => false,
+                    'errorMessage' => "Malformed API response (missing 'choices' field)",
+                    'eventData' => null,
+                    'emailSubject' => 'Error: Malformed Response',
+                    'locationLookup' => null
+                ];
+            }
+
+        } catch (\Throwable $e) {
+            errlog("Exception during OpenRouter request: " . $e->getMessage());
+            errlog("Error class: " . get_class($e));
+            errlog("Stack trace: " . $e->getTraceAsString());
+
+            // All exceptions during API call are retryable - try next model
+            return [
+                'success' => false,
+                'errorMessage' => "HTTP request failed: " . $e->getMessage(),
+                'eventData' => null,
+                'emailSubject' => 'Error: Request Failed',
+                'locationLookup' => null
+            ];
         }
 
         $returnedData = $response['choices'][0]['message']['content'];
@@ -3073,9 +3046,71 @@ BODY;
 			];
 			
 			errlog("Sending URL detection request to OpenRouter");
-			$response = $this->openaiClient->chat()->create($data);
-			$content = $response->choices[0]->message->content;
-			errlog("AI response for URL detection: " . $content);
+			$api_start_time = microtime(true);
+
+			try {
+				// Make direct POST request to OpenRouter
+				$guzzleResponse = $this->openaiClient->post('chat/completions', [
+					'json' => $data,
+					'http_errors' => false, // Don't throw on 4xx/5xx, handle manually
+				]);
+
+				$api_duration = microtime(true) - $api_start_time;
+				$statusCode = $guzzleResponse->getStatusCode();
+				$responseBody = (string) $guzzleResponse->getBody();
+
+				errlog('URL detection response received in ' . number_format($api_duration, 4) . ' seconds');
+				errlog('URL detection response status: ' . $statusCode);
+				errlog('URL detection response body (first 500 chars): ' . substr($responseBody, 0, 500));
+
+				// Parse JSON response
+				$response = json_decode($responseBody, true);
+
+				if (json_last_error() !== JSON_ERROR_NONE) {
+					$jsonError = json_last_error_msg();
+					errlog("Failed to parse OpenRouter JSON response for URL detection: " . $jsonError);
+					errlog("Raw response: " . $responseBody);
+
+					// Restore original model
+					$this->aiModel = $originalModel;
+					return null;
+				}
+
+				// Check for HTTP error status
+				if ($statusCode >= 400) {
+					$errorMsg = "OpenRouter API returned error status {$statusCode} for URL detection";
+					if (isset($response['error'])) {
+						$errorMsg .= ": " . ($response['error']['message'] ?? json_encode($response['error']));
+					}
+					errlog($errorMsg);
+					errlog("Full error response: " . json_encode($response, JSON_PRETTY_PRINT));
+
+					// Restore original model
+					$this->aiModel = $originalModel;
+					return null;
+				}
+
+				// Check if response has expected structure
+				if (!isset($response['choices']) || !isset($response['choices'][0]) || !isset($response['choices'][0]['message']['content'])) {
+					errlog("OpenRouter response missing expected 'choices' structure for URL detection.");
+					errlog("Full response: " . json_encode($response, JSON_PRETTY_PRINT));
+
+					// Restore original model
+					$this->aiModel = $originalModel;
+					return null;
+				}
+
+				$content = $response['choices'][0]['message']['content'];
+				errlog("AI response for URL detection: " . $content);
+			} catch (\Throwable $e) {
+				errlog("Exception during URL detection request: " . $e->getMessage());
+				errlog("Error class: " . get_class($e));
+				errlog("Stack trace: " . $e->getTraceAsString());
+
+				// Restore original model
+				$this->aiModel = $originalModel;
+				return null;
+			}
 			
 			// Restore original model
 			$this->aiModel = $originalModel;
