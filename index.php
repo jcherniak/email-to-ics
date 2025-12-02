@@ -1072,7 +1072,7 @@ HasBody:
 	 * Record processing attempt for a MessageID
 	 * Writes atomically using file locking
 	 */
-	private function recordProcessingAttempt($messageId, $subject, $status, $icsData = null, $errorMessage = null, $stackTrace = null)
+	private function recordProcessingAttempt($messageId, $subject, $status, $icsData = null, $errorMessage = null, $stackTrace = null, $downloadedContent = null, $screenshot = null, $pdfText = null, $emailHtml = null)
 	{
 		// Check if file already exists from previous attempt
 		$existingFile = $this->findProcessingFile($messageId);
@@ -1110,7 +1110,11 @@ HasBody:
 			'status' => $status,
 			'icsData' => $icsData,
 			'errorMessage' => $errorMessage,
-			'stackTrace' => $stackTrace
+			'stackTrace' => $stackTrace,
+			'downloadedContent' => $downloadedContent ? base64_encode($downloadedContent) : null,
+			'screenshot' => $screenshot, // Already base64 encoded
+			'pdfText' => $pdfText ? base64_encode($pdfText) : null,
+			'emailHtml' => $emailHtml ? base64_encode($emailHtml) : null
 		];
 
 		// Write updated content
@@ -1346,7 +1350,7 @@ HasBody:
 
             // Record successful processing
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'success', $calendarEvent, null, null);
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'success', $calendarEvent, null, null, $downloadedUrlContent, $this->scrapeflyScreenshot, $pdfText, $htmlBodyForAI);
             }
 
             echo json_encode(['status' => 'success', 'message' => 'Email processed successfully']);
@@ -1362,7 +1366,7 @@ HasBody:
 
             // Record failed processing
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'failure', null, $errorMessage, null);
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'failure', null, $errorMessage, null, $downloadedUrlContent, $this->scrapeflyScreenshot, $pdfText, $htmlBodyForAI);
             }
 
             echo json_encode(['status' => 'error', 'message' => 'Failed to process email - error notification sent']);
@@ -1376,7 +1380,7 @@ HasBody:
             errlog("Stack trace: " . $stackTrace);
 
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'exception', null, $errorMessage, $stackTrace);
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'exception', null, $errorMessage, $stackTrace, $downloadedUrlContent ?? null, $this->scrapeflyScreenshot ?? null, $pdfText ?? null, $htmlBodyForAI ?? null);
             }
 
             // Send error email
