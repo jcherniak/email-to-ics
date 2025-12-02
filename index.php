@@ -1798,7 +1798,7 @@ HasBody:
      * Try all allowed models with given content, skipping already-tried models
      * Returns event details on success, or last failure result
      */
-    private function tryAllModelsWithContent($combinedText, $instructions, $screenshotData, $url, $cliDebug, $triedModels, $contentLabel)
+    private function tryAllModelsWithContent($combinedText, $instructions, $screenshotData, $url, $cliDebug, $triedModels, $contentLabel, $allowMultiDay = false)
     {
         // Build priority list: DEFAULT_MODEL, then ALTERNATE_MODEL, then remaining allowed models
         $priorityModels = [];
@@ -1830,7 +1830,7 @@ HasBody:
             errlog("Trying model {$modelId} with {$contentLabel}");
             $triedModels[] = $modelId; // Mark as tried
 
-            $eventDetails = $this->generateIcalEvent($combinedText, $instructions, null, $screenshotData, $modelId, $cliDebug, false, $url);
+            $eventDetails = $this->generateIcalEvent($combinedText, $instructions, null, $screenshotData, $modelId, $cliDebug, $allowMultiDay, $url);
             $lastEventDetails = $eventDetails;
 
             if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
@@ -1850,6 +1850,13 @@ HasBody:
      */
     private function generateEventWithRetries($combinedText, $instructions, $url, $htmlBodyForAI, $pdfText, $screenshotData, $cliDebug = false)
     {
+        // Check if instructions contain "MULTI" to enable multi-day mode
+        $allowMultiDay = false;
+        if (!empty($instructions) && stripos($instructions, 'MULTI') !== false) {
+            $allowMultiDay = true;
+            errlog("Multi-day mode enabled via Instructions field");
+        }
+
         // Try all models ONCE with the provided content
         // (Content was already fetched using direct -> oxylabs -> scrapefly fallback in processPostmarkRequest)
         errlog("Trying all models with provided content");
@@ -1861,7 +1868,8 @@ HasBody:
             $url,
             $cliDebug,
             $triedModels,
-            "provided content"
+            "provided content",
+            $allowMultiDay
         );
 
         if ($result['success']) {
