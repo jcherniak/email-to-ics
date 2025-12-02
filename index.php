@@ -1955,7 +1955,7 @@ HasBody:
             'type' => 'array',  // Array of event objects
             'items' => $eventSchema,
             'minItems' => 1,
-            'maxItems' => 50
+            'maxItems' => 10  // Reduced from 50 - Google rejects schemas with too many array states
         ] : $eventSchema;
 
         $responseSchema = [
@@ -2004,12 +2004,9 @@ This applies to:
             "## Single Event Mode (DEFAULT):
 Focus on extracting ONLY the main/primary event. Ignore secondary or related events.";
 
-        $system = <<<PROMPT
-You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
-
-CRITICAL: You must respond with valid JSON only. No markdown, no explanations, just pure JSON.
-
-# PRIMARY EVENT IDENTIFICATION - READ THIS FIRST
+        // Primary event identification instructions - only in single-event mode
+        $primaryEventInstructions = $allowMultiDay ? "" :
+            "# PRIMARY EVENT IDENTIFICATION - READ THIS FIRST
 Your primary task is to identify and extract ONLY the MAIN event described in the content.
 
 How to identify the primary event:
@@ -2019,7 +2016,7 @@ How to identify the primary event:
 - For ticketed events, it's the event for which the ticket/confirmation is issued
 
 Explicitly IGNORE these secondary events:
-- Events labeled as "Related Events", "You might also like", "Upcoming Events", "Other shows"
+- Events labeled as \"Related Events\", \"You might also like\", \"Upcoming Events\", \"Other shows\"
 - Events in sidebars or supplementary sections
 - Events mentioned only in passing or with minimal details
 - Any event clearly not the focus of the email/page
@@ -2029,6 +2026,14 @@ EXTREMELY IMPORTANT: IF you find multiple events and are unsure which is primary
 2. The earliest upcoming date
 3. The most prominence in the content
 
+";
+
+        $system = <<<PROMPT
+You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
+
+CRITICAL: You must respond with valid JSON only. No markdown, no explanations, just pure JSON.
+
+{$primaryEventInstructions}
 # MULTI-DAY EVENT HANDLING MODES
 
 {$multiDayInstructions}
