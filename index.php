@@ -2279,6 +2279,22 @@ PROMPT;
         }
         catch (\Throwable $e) {
             errlog("General Error during OpenRouter request: " . $e->getMessage());
+            errlog("Error class: " . get_class($e));
+            errlog("Error trace: " . $e->getTraceAsString());
+
+            // Try to extract response body if available
+            if (method_exists($e, 'getResponse')) {
+                try {
+                    $response = $e->getResponse();
+                    if ($response) {
+                        $body = (string) $response->getBody();
+                        errlog("Raw OpenRouter response body: " . $body);
+                    }
+                } catch (\Throwable $ex) {
+                    errlog("Could not extract response body: " . $ex->getMessage());
+                }
+            }
+
             if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
                  echo "Error: General error during AI request - " . $e->getMessage() . "\n";
                  throw $e; // Re-throw for web handler to catch and format, or main CLI handler
