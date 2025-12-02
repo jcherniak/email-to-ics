@@ -1959,17 +1959,12 @@ HasBody:
             'additionalProperties' => false
         ];
 
-        // For multi-day mode, eventData can be either a single object or an array of objects
+        // For multi-day mode, eventData is ALWAYS an array (no oneOf - not supported by providers)
         $eventDataSchema = $allowMultiDay ? [
-            'oneOf' => [
-                $eventSchema,  // Single event object
-                [
-                    'type' => 'array',  // Array of event objects
-                    'items' => $eventSchema,
-                    'minItems' => 1,
-                    'maxItems' => 50
-                ]
-            ]
+            'type' => 'array',  // Array of event objects
+            'items' => $eventSchema,
+            'minItems' => 1,
+            'maxItems' => 50
         ] : $eventSchema;
 
         $responseSchema = [
@@ -2006,7 +2001,9 @@ Create SEPARATE events for each performance, each with:
 - Same timezone
 
 RETURN FORMAT FOR MULTI-DAY MODE:
-When multiple events are found, return eventData as an ARRAY of event objects.
+ALWAYS return eventData as an ARRAY of event objects, even if there's only ONE event.
+- One event found: [{event}]
+- Multiple events found: [{event1}, {event2}, ...]
 
 This applies to:
 - Multiple concert performances
