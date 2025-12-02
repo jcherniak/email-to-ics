@@ -2280,7 +2280,21 @@ PROMPT;
         catch (\Throwable $e) {
             errlog("General Error during OpenRouter request: " . $e->getMessage());
             errlog("Error class: " . get_class($e));
-            errlog("Error trace: " . $e->getTraceAsString());
+
+            // Check if this is a model-specific error that should trigger retry with different model
+            $errorMsg = $e->getMessage();
+            $isRetryableError = false;
+
+            // Google schema complexity errors
+            if (stripos($errorMsg, 'schema produces a constraint that has too many states') !== false) {
+                errlog("Model rejected schema as too complex - will retry with different model");
+                $isRetryableError = true;
+            }
+            // Other provider-specific errors
+            elseif (stripos($errorMsg, 'Provider returned error') !== false) {
+                errlog("Provider-specific error - will retry with different model");
+                $isRetryableError = true;
+            }
 
             // Try to extract response body if available
             if (method_exists($e, 'getResponse')) {
@@ -2295,6 +2309,18 @@ PROMPT;
                 }
             }
 
+            // If retryable, return failure to allow trying next model
+            if ($isRetryableError) {
+                return [
+                    'success' => false,
+                    'errorMessage' => "Model error: " . $errorMsg,
+                    'eventData' => null,
+                    'emailSubject' => 'Error: Model API Error',
+                    'locationLookup' => null
+                ];
+            }
+
+            // Otherwise re-throw for fatal errors
             if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
                  echo "Error: General error during AI request - " . $e->getMessage() . "\n";
                  throw $e; // Re-throw for web handler to catch and format, or main CLI handler
