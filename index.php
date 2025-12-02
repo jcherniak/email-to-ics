@@ -2282,8 +2282,14 @@ PROMPT;
             $errorMsg = $e->getMessage();
             $isRetryableError = false;
 
+            // Response missing 'choices' key - malformed API response
+            if (stripos($errorMsg, 'Undefined array key "choices"') !== false ||
+                stripos($errorMsg, "Undefined array key 'choices'") !== false) {
+                errlog("Model returned malformed response (missing 'choices') - will retry with different model");
+                $isRetryableError = true;
+            }
             // Google schema complexity errors
-            if (stripos($errorMsg, 'schema produces a constraint that has too many states') !== false) {
+            elseif (stripos($errorMsg, 'schema produces a constraint that has too many states') !== false) {
                 errlog("Model rejected schema as too complex - will retry with different model");
                 $isRetryableError = true;
             }
