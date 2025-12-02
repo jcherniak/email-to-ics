@@ -1222,6 +1222,10 @@ HasBody:
                 // Standalone MULTI keyword
                 $hasMultiFlag = true;
                 errlog("Found standalone MULTI keyword in email body");
+            } elseif (!$extractedUrl && $this->is_valid_url($trimmedLine)) {
+                // URL without "URL:" prefix on its own line
+                $extractedUrl = $trimmedLine;
+                errlog("Found URL without prefix: {$extractedUrl}");
             } // else {
               // $remainingTextBodyLines[] = $line; // Not combining with HTML directly anymore
             // }
