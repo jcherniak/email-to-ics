@@ -1009,14 +1009,53 @@ HasBody:
 	}
 
 	/**
+	 * Generate filename for processing status
+	 * Format: YYYY-MM-DD.HH.MM.SS-MESSAGEID-SUBJECT.json
+	 */
+	private function getProcessingFilename($messageId, $subject = '')
+	{
+		$date = date('Y-m-d.H.i.s');
+		$safeMessageId = preg_replace('/[^a-zA-Z0-9\-_]/', '_', $messageId);
+		$safeSubject = preg_replace('/[^a-zA-Z0-9\-_]/', '_', substr($subject, 0, 100)); // Limit length
+
+		if (empty($safeSubject)) {
+			$safeSubject = 'no_subject';
+		}
+
+		return $this->getProcessedFolder() . '/' . $date . '-' . $safeMessageId . '-' . $safeSubject . '.json';
+	}
+
+	/**
+	 * Find existing processing file for a MessageID
+	 * Returns the filename if found, null otherwise
+	 */
+	private function findProcessingFile($messageId)
+	{
+		$folder = $this->getProcessedFolder();
+		$safeMessageId = preg_replace('/[^a-zA-Z0-9\-_]/', '_', $messageId);
+
+		// Search for files matching *-MESSAGEID-*.json pattern
+		$pattern = $folder . '/*-' . $safeMessageId . '-*.json';
+		$files = glob($pattern);
+
+		// Return the most recent file (last in sorted order)
+		if (!empty($files)) {
+			sort($files);
+			return end($files);
+		}
+
+		return null;
+	}
+
+	/**
 	 * Get processing status for a MessageID
 	 * Returns array of processing attempts with timestamps
 	 */
 	private function getProcessingStatus($messageId)
 	{
-		$filename = $this->getProcessedFolder() . '/' . preg_replace('/[^a-zA-Z0-9\-_]/', '_', $messageId) . '.json';
+		$filename = $this->findProcessingFile($messageId);
 
-		if (!file_exists($filename)) {
+		if (!$filename || !file_exists($filename)) {
 			return [];
 		}
 
@@ -1033,9 +1072,12 @@ HasBody:
 	 * Record processing attempt for a MessageID
 	 * Writes atomically using file locking
 	 */
-	private function recordProcessingAttempt($messageId, $status, $icsData = null, $errorMessage = null, $stackTrace = null)
+	private function recordProcessingAttempt($messageId, $subject, $status, $icsData = null, $errorMessage = null, $stackTrace = null)
 	{
-		$filename = $this->getProcessedFolder() . '/' . preg_replace('/[^a-zA-Z0-9\-_]/', '_', $messageId) . '.json';
+		// Check if file already exists from previous attempt
+		$existingFile = $this->findProcessingFile($messageId);
+		$filename = $existingFile ?: $this->getProcessingFilename($messageId, $subject);
+
 		$dateStarted = date('Y-m-d H:i:s');
 
 		// Open file with exclusive lock
@@ -1304,7 +1346,7 @@ HasBody:
 
             // Record successful processing
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, 'success', $calendarEvent, null, null);
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'success', $calendarEvent, null, null);
             }
 
             echo json_encode(['status' => 'success', 'message' => 'Email processed successfully']);
@@ -1320,7 +1362,7 @@ HasBody:
 
             // Record failed processing
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, 'failure', null, $errorMessage, null);
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'failure', null, $errorMessage, null);
             }
 
             echo json_encode(['status' => 'error', 'message' => 'Failed to process email - error notification sent']);
@@ -1334,7 +1376,7 @@ HasBody:
             errlog("Stack trace: " . $stackTrace);
 
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, 'exception', null, $errorMessage, $stackTrace);
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'exception', null, $errorMessage, $stackTrace);
             }
 
             // Send error email
