@@ -2287,7 +2287,22 @@ PROMPT;
         }
 
         errlog('Received OpenRouter response.');
-        
+
+        // Check if response has expected structure
+        if (!isset($response['choices']) || !isset($response['choices'][0]) || !isset($response['choices'][0]['message']['content'])) {
+            $responseJson = json_encode($response, JSON_PRETTY_PRINT);
+            errlog("OpenRouter response missing expected 'choices' structure. Full response: " . $responseJson);
+
+            // Check for error field in response
+            if (isset($response['error'])) {
+                $errorMsg = "OpenRouter API error: " . ($response['error']['message'] ?? json_encode($response['error']));
+                errlog($errorMsg);
+                throw new \RuntimeException($errorMsg);
+            }
+
+            throw new \RuntimeException("OpenRouter response missing 'choices' field. This may indicate a rate limit, API error, or unexpected response format.");
+        }
+
         $returnedData = $response['choices'][0]['message']['content'];
         // $jsonData = trim($returnedData); // Old simple trim
 
