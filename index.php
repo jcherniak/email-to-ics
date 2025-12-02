@@ -2578,8 +2578,11 @@ BODY;
 		if (!empty($attachmentLinks)) {
 			$updatedIcs = $this->addAttachmentLinksToIcs($ics, $attachmentLinks);
 		}
-		
-		$this->sendEmail($updatedIcs, $toEmail, $subject, $htmlBody, $attachments);
+
+		// Get MessageID for threading
+		$messageId = $originalEmail['MessageID'] ?? null;
+
+		$this->sendEmail($updatedIcs, $toEmail, $subject, $htmlBody, $attachments, $messageId);
 	}
 
 	private function addAttachmentLinksToIcs($ics, $attachmentLinks) {
@@ -2639,15 +2642,18 @@ BODY;
 			}
 		}
 
+		// Get MessageID for threading
+		$messageId = $originalEmailData['MessageID'] ?? null;
+
 		try {
-			return $this->sendEmail(null, $_ENV['ERROR_EMAIL'], $subject, $htmlBody);
+			return $this->sendEmail(null, $_ENV['ERROR_EMAIL'], $subject, $htmlBody, [], $messageId);
 		} catch (\Exception $e) {
 			errlog("Failed to send error email: " . $e->getMessage());
 			return false;
 		}
 	}
 
-	public function sendEmail($ics, $toEmail, $subject, $htmlBody, array $otherAttachments = []) {
+	public function sendEmail($ics, $toEmail, $subject, $htmlBody, array $otherAttachments = [], $inReplyTo = null) {
 		$attachments = [];
 		if (!empty($ics)) {
 			$attachments = array_merge([
@@ -2674,6 +2680,16 @@ BODY;
 
 		if (!empty($attachments)) {
 			$request['Attachments'] = $attachments;
+		}
+
+		// Add In-Reply-To header for email threading
+		if (!empty($inReplyTo)) {
+			$request['Headers'] = [
+				[
+					'Name' => 'In-Reply-To',
+					'Value' => $inReplyTo
+				]
+			];
 		}
 
         $response = $this->httpClient->post('/email', [
