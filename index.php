@@ -1205,17 +1205,23 @@ HasBody:
 
 		$pdfText = $this->extractPdfText($body['Attachments'] ?? []);
 
-        // Extract URL and instructions from the TEXT version of the email body
+        // Extract URL, instructions, and MULTI flag from the TEXT version of the email body
         $extractedUrl = null;
         $extractedInstructions = null;
+        $hasMultiFlag = false;
         $lines = explode("\n", $textBodyForExtraction);
         // $remainingTextBodyLines = []; // Not strictly needed if HtmlBody is primary
 
         foreach ($lines as $line) {
-            if (preg_match('/^URL:\s*(.+)$/i', $line, $matches)) {
+            $trimmedLine = trim($line);
+            if (preg_match('/^URL:\s*(.+)$/i', $trimmedLine, $matches)) {
                 $extractedUrl = trim($matches[1]);
-            } elseif (preg_match('/^Instructions:\s*(.+)$/i', $line, $matches)) {
+            } elseif (preg_match('/^Instructions:\s*(.+)$/i', $trimmedLine, $matches)) {
                 $extractedInstructions = trim($matches[1]);
+            } elseif (strcasecmp($trimmedLine, 'MULTI') === 0) {
+                // Standalone MULTI keyword
+                $hasMultiFlag = true;
+                errlog("Found standalone MULTI keyword in email body");
             } // else {
               // $remainingTextBodyLines[] = $line; // Not combining with HTML directly anymore
             // }
@@ -1269,7 +1275,8 @@ HasBody:
             $htmlBodyForAI,
             $pdfText,
             $screenshotData,
-            $cliDebug
+            $cliDebug,
+            $hasMultiFlag
         );
 
         // Handle --json flag for CLI output if requested and in CLI context
@@ -1848,13 +1855,16 @@ HasBody:
      * Simple retry strategy - try all models once with provided content
      * Content fetching (direct -> oxylabs -> scrapefly) already happened before this
      */
-    private function generateEventWithRetries($combinedText, $instructions, $url, $htmlBodyForAI, $pdfText, $screenshotData, $cliDebug = false)
+    private function generateEventWithRetries($combinedText, $instructions, $url, $htmlBodyForAI, $pdfText, $screenshotData, $cliDebug = false, $hasMultiFlag = false)
     {
-        // Check if instructions contain "MULTI" to enable multi-day mode
+        // Check if multi-day mode should be enabled
         $allowMultiDay = false;
-        if (!empty($instructions) && stripos($instructions, 'MULTI') !== false) {
+        if ($hasMultiFlag) {
             $allowMultiDay = true;
-            errlog("Multi-day mode enabled via Instructions field");
+            errlog("Multi-day mode enabled via standalone MULTI keyword");
+        } elseif (!empty($instructions) && stripos($instructions, 'MULTI') !== false) {
+            $allowMultiDay = true;
+            errlog("Multi-day mode enabled via MULTI in Instructions field");
         }
 
         // Try all models ONCE with the provided content
