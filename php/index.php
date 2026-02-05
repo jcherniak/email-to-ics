@@ -475,31 +475,35 @@ TEXT;
 		// If not outputting JSON directly, proceed with standard logic
 		// Generate ICS only if not outputting JSON and if eventData is present and AI was successful
 		$ics = null;
-		$individualIcsFiles = []; // Array to store individual ICS files when multiple events
-		$isMultipleEvents = false;
+		$individualIcsFiles = []; // Array to store individual ICS files for each event
 
 		if (($eventDetails['success'] ?? false) && !empty($eventDetails['eventData'])) {
 			$generator = new IcalGenerator();
 
-			// Check if we have multiple events
+			// Normalize eventData to array of events
+			$eventsArray = [];
 			if (isset($eventDetails['eventData'][0]) && is_array($eventDetails['eventData'][0])) {
-				$isMultipleEvents = true;
-				// Generate individual ICS files for each event
-				foreach ($eventDetails['eventData'] as $singleEvent) {
-					$singleIcs = $generator->convertJsonToIcs($singleEvent, $this->fromEmail);
-					$eventSubject = 'Calendar Event: ' . ($singleEvent['summary'] ?? 'Event');
-					$individualIcsFiles[] = [
-						'ics' => $singleIcs,
-						'subject' => $eventSubject,
-						'eventData' => $singleEvent
-					];
-				}
-				// For compatibility, also generate a combined ICS (used for review)
-				$ics = $generator->convertJsonToIcs($eventDetails['eventData'], $this->fromEmail);
+				// Already an array of events
+				$eventsArray = $eventDetails['eventData'];
 			} else {
-				// Single event
-				$ics = $generator->convertJsonToIcs($eventDetails['eventData'], $this->fromEmail);
+				// Single event - wrap in array
+				$eventsArray = [$eventDetails['eventData']];
 			}
+
+			// Generate individual ICS files for each event
+			foreach ($eventsArray as $singleEvent) {
+				$singleIcs = $generator->convertJsonToIcs($singleEvent, $this->fromEmail);
+				$eventSubject = 'Calendar Event: ' . ($singleEvent['summary'] ?? 'Event');
+				$individualIcsFiles[] = [
+					'ics' => $singleIcs,
+					'subject' => $eventSubject,
+					'eventData' => $singleEvent
+				];
+			}
+
+			// For compatibility/review, also generate a combined ICS
+			$ics = $generator->convertJsonToIcs($eventDetails['eventData'], $this->fromEmail);
+
 		} elseif (($eventDetails['success'] ?? false) === false) {
 			errlog("Skipping ICS generation because AI processing failed: " . ($eventDetails['errorMessage'] ?? 'Unknown AI error'));
 		} else { // Success was true, but eventData was empty/missing
@@ -609,10 +613,11 @@ TEXT;
 
 		$recipientEmail = $tentative ? $this->toTentativeEmail : $this->toConfirmedEmail;
 
-		// Handle multiple events - send individual emails
-		if ($isMultipleEvents && !empty($individualIcsFiles)) {
+		// Always use a loop for sending emails
+		if (!empty($individualIcsFiles)) {
 			$sentCount = 0;
 			$failedEvents = [];
+			$totalEvents = count($individualIcsFiles);
 
 			foreach ($individualIcsFiles as $eventFile) {
 				$htmlBody =  <<<BODY
@@ -632,18 +637,20 @@ BODY;
 				}
 			}
 
-			// Prepare response
-			$totalEvents = count($individualIcsFiles);
+			// Check results
 			if ($sentCount === 0) {
-				throw new \Exception("Failed to send all {$totalEvents} emails");
+				throw new \Exception("Failed to send all {$totalEvents} email(s)");
 			} elseif (!empty($failedEvents)) {
 				$partialErrorMessage = "Sent {$sentCount} of {$totalEvents} emails. Failed events: " . implode(', ', $failedEvents);
 				errlog($partialErrorMessage);
 			}
 
-			$message = ($sentCount === $totalEvents)
-				? "All {$totalEvents} calendar invites sent successfully to {$recipientEmail}"
-				: "Sent {$sentCount} of {$totalEvents} calendar invites to {$recipientEmail}";
+			// Prepare success message
+			$message = ($totalEvents === 1)
+				? "Email sent successfully to {$recipientEmail}"
+				: (($sentCount === $totalEvents)
+					? "All {$totalEvents} calendar invites sent successfully to {$recipientEmail}"
+					: "Sent {$sentCount} of {$totalEvents} calendar invites to {$recipientEmail}");
 
 			// --- Respond based on origin ---
 			if ($fromExtension) {
@@ -651,7 +658,7 @@ BODY;
 					'status' => 'success',
 					'message' => $message,
 					'recipientEmail' => $recipientEmail,
-					'emailSubject' => "Multiple Events ({$totalEvents})",
+					'emailSubject' => $totalEvents === 1 ? $individualIcsFiles[0]['subject'] : "Multiple Events ({$totalEvents})",
 					'icsContent' => $ics, // Return combined ICS for compatibility
 					'sentCount' => $sentCount,
 					'totalCount' => $totalEvents
@@ -673,43 +680,8 @@ BODY;
 				}
 			}
 		} else {
-			// Single event - original logic
-			$htmlBody =  <<<BODY
-<p>Please find your iCal event attached.</p>
-
-<p>URL submitted: {$url}</p>
-<p>---------- Downloaded HTML (cleaned): ----------</p>
-<div>{$downloadedText}</div>
-BODY;
-
-			$this->sendEmail($ics, $recipientEmail, $subject, $htmlBody); // This can throw
-
-			// --- Respond based on origin ---
-			if ($fromExtension) {
-				$successOutput = [
-					'status' => 'success',
-					'message' => "Email sent successfully to {$recipientEmail}",
-					'recipientEmail' => $recipientEmail,
-					'emailSubject' => $subject,
-					'icsContent' => $ics
-				];
-				if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
-					echo json_encode($successOutput, JSON_PRETTY_PRINT) . "\n";
-				} else {
-					header('Content-Type: application/json');
-					echo json_encode($successOutput);
-				}
-			} else {
-				if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
-					echo "Email sent to {$recipientEmail} with ICS file: {$subject}\n";
-					// Optionally print ICS content or path if useful for CLI
-				} else {
-					http_response_code(200);
-					echo "<h1>Email sent to {$recipientEmail} with ICS file:</h1><pre>";
-					echo htmlspecialchars($this->unescapeNewlines($ics));
-					echo '</pre>';
-				}
-			}
+			// No ICS files generated - this should not normally happen
+			throw new \Exception("No ICS files were generated");
 		}
 		exit;
 	}
@@ -1059,31 +1031,30 @@ HasBody:
 
         // If not outputting JSON directly, proceed with standard logic
         // Generate ICS only if not outputting JSON and if eventData is present and AI was successful
-        $calendarEvent = null;
         $individualIcsFiles = [];
-        $isMultipleEvents = false;
 
         if (($eventDetails['success'] ?? false) && !empty($eventDetails['eventData'])) {
             $generator = new IcalGenerator();
 
-            // Check if we have multiple events
+            // Normalize eventData to array of events
+            $eventsArray = [];
             if (isset($eventDetails['eventData'][0]) && is_array($eventDetails['eventData'][0])) {
-                $isMultipleEvents = true;
-                // Generate individual ICS files for each event
-                foreach ($eventDetails['eventData'] as $singleEvent) {
-                    $singleIcs = $generator->convertJsonToIcs($singleEvent, $this->fromEmail);
-                    $eventSubject = 'Calendar Event: ' . ($singleEvent['summary'] ?? 'Event');
-                    $individualIcsFiles[] = [
-                        'ics' => $singleIcs,
-                        'subject' => $eventSubject,
-                        'eventData' => $singleEvent
-                    ];
-                }
-                // For compatibility, also generate a combined ICS
-                $calendarEvent = $generator->convertJsonToIcs($eventDetails['eventData'], $this->fromEmail);
+                // Already an array of events
+                $eventsArray = $eventDetails['eventData'];
             } else {
-                // Single event
-                $calendarEvent = $generator->convertJsonToIcs($eventDetails['eventData'], $this->fromEmail);
+                // Single event - wrap in array
+                $eventsArray = [$eventDetails['eventData']];
+            }
+
+            // Generate individual ICS files for each event
+            foreach ($eventsArray as $singleEvent) {
+                $singleIcs = $generator->convertJsonToIcs($singleEvent, $this->fromEmail);
+                $eventSubject = 'Calendar Event: ' . ($singleEvent['summary'] ?? 'Event');
+                $individualIcsFiles[] = [
+                    'ics' => $singleIcs,
+                    'subject' => $eventSubject,
+                    'eventData' => $singleEvent
+                ];
             }
         } elseif (($eventDetails['success'] ?? false) === false) {
             errlog("Skipping ICS generation for Postmark email because AI processing failed: " . ($eventDetails['errorMessage'] ?? 'Unknown AI error'));
@@ -1091,15 +1062,13 @@ HasBody:
             errlog("Skipping ICS generation for Postmark email because eventData was missing/empty from AI despite success. Error: " . ($eventDetails['errorMessage'] ?? 'eventData missing'));
         }
 
-        $subject = $eventDetails['emailSubject'] ?? 'Calendar Event'; // Use a default subject
         $recipientEmail = $this->toTentativeEmail;
-
         if (strcasecmp($body['ToFull'][0]['Email'], $this->inboundConfirmedEmail) === 0) {
             $recipientEmail = $this->toConfirmedEmail;
         }
 
-        // Handle multiple events - send individual emails
-        if ($isMultipleEvents && !empty($individualIcsFiles)) {
+        // Always use a loop for sending emails
+        if (!empty($individualIcsFiles)) {
             foreach ($individualIcsFiles as $eventFile) {
                 // Create a modified eventDetails for each individual event
                 $singleEventDetails = $eventDetails;
@@ -1109,8 +1078,7 @@ HasBody:
                 $this->sendEmailWithAttachment($recipientEmail, $eventFile['ics'], $eventFile['subject'], $body, $singleEventDetails, $pdfText, $downloadedUrlContent);
             }
         } else {
-            // Single event - original logic
-            $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body, $eventDetails, $pdfText, $downloadedUrlContent);
+            errlog("No ICS files generated for Postmark email processing");
         }
 
         echo json_encode(['status' => 'success', 'message' => 'Email processed successfully']); // Original success message for Postmark webhook

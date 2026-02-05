@@ -1419,12 +1419,11 @@ Extract event details from the provided content. Pay attention to:
             });
 
             const recipientEmail = tentative ? settings.toTentativeEmail : settings.toConfirmedEmail;
-            const isMultiple = Array.isArray(events) && events.length > 1;
 
             console.log('📧 Email details:', {
                 recipientEmail,
                 fromEmail: settings.fromEmail,
-                isMultiple,
+                eventCount: events.length,
                 tentative
             });
 
@@ -1433,73 +1432,17 @@ Extract event details from the provided content. Pay attention to:
                 return text.replace(/(^|\n)\s*Status:\s*(Tentative|Confirmed)\s*(?=\n|$)/gi, '$1').trim();
             };
 
-            // When multiple events, send individual emails
-            if (isMultiple) {
-                console.log(`📨 Sending ${events.length} individual emails for multiple events...`);
-                const results = [];
+            // Always use a loop, whether single or multiple events
+            console.log(`📨 Sending ${events.length} email(s)...`);
+            const results = [];
 
-                for (let i = 0; i < events.length; i++) {
-                    const event = events[i];
-                    console.log(`📧 Sending email ${i + 1}/${events.length} for event: ${event.summary}`);
+            for (let i = 0; i < events.length; i++) {
+                const event = events[i];
+                console.log(`📧 Sending email ${i + 1}/${events.length} for event: ${event.summary}`);
 
-                    // Generate individual ICS content for this single event
-                    const singleEventIcs = await generateICSContent([event], tentative);
+                // Generate individual ICS content for this single event
+                const singleEventIcs = await generateICSContent([event], tentative);
 
-                    const subject = `Calendar Event: ${event.summary}`;
-                    const cleanDesc = sanitizeDescription(event.description || '');
-                    const emailBody = `Please find the calendar invitation attached.\n\nEvent: ${event.summary}\n${event.location ? `Location: ${event.location}\n` : ''}${cleanDesc ? `Description: ${cleanDesc}` : ''}`;
-
-                    const emailPayload = {
-                        From: settings.fromEmail,
-                        To: recipientEmail,
-                        Subject: subject,
-                        TextBody: emailBody,
-                        Attachments: [
-                            {
-                                Name: 'invite.ics',
-                                Content: btoa(unescape(encodeURIComponent(singleEventIcs))),
-                                ContentType: 'text/calendar'
-                            }
-                        ]
-                    };
-
-                    console.log(`📤 Sending email ${i + 1}/${events.length} payload to background script:`, {
-                        from: emailPayload.From,
-                        to: emailPayload.To,
-                        subject: emailPayload.Subject,
-                        bodyLength: emailPayload.TextBody.length,
-                        attachmentSize: emailPayload.Attachments[0].Content.length
-                    });
-
-                    const response = await chrome.runtime.sendMessage({
-                        action: 'sendEmail',
-                        payload: emailPayload
-                    });
-
-                    console.log(`📥 Email ${i + 1}/${events.length} send response:`, response);
-
-                    if (response.success) {
-                        console.log(`✅ Email ${i + 1}/${events.length} sent successfully:`, response.data);
-                        results.push({ success: true, event: event.summary });
-                    } else {
-                        console.error(`❌ Email ${i + 1}/${events.length} send failed:`, response.error);
-                        results.push({ success: false, event: event.summary, error: response.error });
-                    }
-                }
-
-                // Check if all emails were sent successfully
-                const failedCount = results.filter(r => !r.success).length;
-                if (failedCount > 0) {
-                    const failedEvents = results.filter(r => !r.success).map(r => r.event).join(', ');
-                    throw new Error(`Failed to send ${failedCount} out of ${events.length} emails. Failed events: ${failedEvents}`);
-                }
-
-                console.log(`✅ All ${events.length} calendar invites sent successfully!`);
-                return { message: `All ${events.length} calendar invites sent successfully!` };
-
-            } else {
-                // Single event - existing logic
-                const event = events[0];
                 const subject = `Calendar Event: ${event.summary}`;
                 const cleanDesc = sanitizeDescription(event.description || '');
                 const emailBody = `Please find the calendar invitation attached.\n\nEvent: ${event.summary}\n${event.location ? `Location: ${event.location}\n` : ''}${cleanDesc ? `Description: ${cleanDesc}` : ''}`;
@@ -1512,13 +1455,13 @@ Extract event details from the provided content. Pay attention to:
                     Attachments: [
                         {
                             Name: 'invite.ics',
-                            Content: btoa(unescape(encodeURIComponent(icsContent))),
+                            Content: btoa(unescape(encodeURIComponent(singleEventIcs))),
                             ContentType: 'text/calendar'
                         }
                     ]
                 };
 
-                console.log('📤 Sending email payload to background script:', {
+                console.log(`📤 Sending email ${i + 1}/${events.length} payload to background script:`, {
                     from: emailPayload.From,
                     to: emailPayload.To,
                     subject: emailPayload.Subject,
@@ -1531,16 +1474,31 @@ Extract event details from the provided content. Pay attention to:
                     payload: emailPayload
                 });
 
-                console.log('📥 Email send response:', response);
+                console.log(`📥 Email ${i + 1}/${events.length} send response:`, response);
 
                 if (response.success) {
-                    console.log('✅ Email sent successfully:', response.data);
-                    return { message: 'Calendar invite sent successfully!' };
+                    console.log(`✅ Email ${i + 1}/${events.length} sent successfully:`, response.data);
+                    results.push({ success: true, event: event.summary });
                 } else {
-                    console.error('❌ Email send failed:', response.error);
-                    throw new Error(response.error);
+                    console.error(`❌ Email ${i + 1}/${events.length} send failed:`, response.error);
+                    results.push({ success: false, event: event.summary, error: response.error });
                 }
             }
+
+            // Check if all emails were sent successfully
+            const failedCount = results.filter(r => !r.success).length;
+            if (failedCount > 0) {
+                const failedEvents = results.filter(r => !r.success).map(r => r.event).join(', ');
+                throw new Error(`Failed to send ${failedCount} out of ${events.length} email(s). Failed events: ${failedEvents}`);
+            }
+
+            const successMessage = events.length === 1
+                ? 'Calendar invite sent successfully!'
+                : `All ${events.length} calendar invites sent successfully!`;
+
+            console.log(`✅ ${successMessage}`);
+            return { message: successMessage };
+
         } catch (error) {
             console.error('💥 Email sending error:', error);
             throw error;
