@@ -9,18 +9,22 @@
     "build:shared-core": "cd ../shared-core && npm run build",
     "build:popup": "esbuild src/popup.ts --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --external:chrome --external:fs --external:path --external:ical-generator --define:global=globalThis --platform=browser",
     "build:content": "esbuild src/content.ts --bundle --outfile=dist/content.js --format=iife --sourcemap --external:chrome --platform=browser",
-    "copy-assets": "cp node_modules/bootstrap/dist/css/bootstrap.min.css dist/ && cp src/popup.html dist/popup.html && cp src/popup.css dist/popup.css && cp src/background.js dist/ && cp manifest.json dist/ && cp -r icons dist/ 2>/dev/null || true",
+    "copy-assets": "bash copy-assets.sh",
     "watch": "npm run build:shared-core && esbuild src/popup.ts --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --watch --external:chrome",
     "clean": "rm -rf dist && mkdir -p dist"
   },
   "devDependencies": {
-    "esbuild": "^0.20.0",
     "@types/chrome": "^0.1.4",
+    "esbuild": "^0.20.0",
     "typescript": "^5.3.0"
   },
   "dependencies": {
     "@email-to-ics/shared-core": "file:../shared-core",
+    "@types/jquery": "^3.5.33",
+    "@types/select2": "^4.0.63",
     "bootstrap": "^5.3.7",
-    "ical.js": "^2.2.0"
+    "ical.js": "^2.2.0",
+    "jquery": "^3.7.1",
+    "select2": "^4.1.0-rc.0"
   }
 }

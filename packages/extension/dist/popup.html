@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <title>Email to ICS</title>
     <link rel="stylesheet" href="bootstrap.min.css">
+    <link rel="stylesheet" href="select2.min.css">
     <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -64,12 +65,12 @@
                 
                 <div class="mb-3">
                     <label for="model-select" class="form-label">Select AI Model:</label>
-                <div class="input-group">
-                     <select class="form-select" id="model-select">
-                        <option value="">Loading models...</option>
-                     </select>
-                     <button class="btn btn-outline-secondary" id="refresh-models" type="button" title="Refresh Model List">&#x21bb;</button>
-                </div>
+                    <div class="input-group">
+                        <select class="form-select" id="model-select" data-placeholder="Search or select a model">
+                            <option value=""></option>
+                        </select>
+                        <button class="btn btn-outline-secondary" id="refresh-models" type="button" title="Refresh Model List">&#x21bb;</button>
+                    </div>
                 </div>
                 <div class="mb-3">
                     <label for="instructions" class="form-label">Instructions:</label>

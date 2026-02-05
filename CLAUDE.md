@@ -114,7 +114,7 @@ Configure via extension settings dialog:
 - `fromEmail`: Sender email address
 - `toConfirmedEmail`: Recipient for confirmed events
 - `toTentativeEmail`: Recipient for tentative events
-- `defaultModel`: Default AI model (openai/gpt-5)
+- `defaultModel`: Default AI model (google/gemini-3-pro-preview)
 
 ### Server Environment (`.env` file)
 ```env

@@ -10,11 +10,40 @@ import {
 } from '@email-to-ics/shared-core';
 import 'bootstrap';
 import ICAL from 'ical.js';
+import $ from 'jquery';
+import 'select2';
+
+type ModelOption = {
+  id: string;
+  name: string;
+  isPriority?: boolean;
+  isSeparator?: boolean;
+};
+
+const DEFAULT_MODEL_ID = 'google/gemini-3-pro-preview';
+const PRIORITY_MODEL_IDS = [
+  'openai/gpt-5.1',
+  'anthropic/claude-sonnet-4.5',
+  'google/gemini-2.5-flash',
+  'openai/gpt-5-mini',
+  'google/gemini-3-pro-preview',
+  'google/gemini-2.5-pro',
+  'anthropic/claude-opus-4.5'
+];
+const PRIORITY_MODEL_LABELS: Record<string, string> = {
+  'openai/gpt-5.1': 'GPT-5.1',
+  'anthropic/claude-sonnet-4.5': 'Claude Sonnet 4.5',
+  'google/gemini-2.5-flash': 'Gemini 2.5 Flash',
+  'openai/gpt-5-mini': 'GPT-5 Mini',
+  'google/gemini-3-pro-preview': 'Gemini 3 Pro Preview',
+  'google/gemini-2.5-pro': 'Gemini 2.5 Pro',
+  'anthropic/claude-opus-4.5': 'Claude Opus 4.5'
+};
 
 // Global state
 let adapters: ReturnType<typeof createBrowserAdapters>;
 let icsGenerator: BrowserIcsGenerator;
-let availableModels: any[] = [];
+let availableModels: ModelOption[] = [];
 let selectedModel: string | null = null;
 let serverUrl = '';
 let isAuthenticated = false;
@@ -46,7 +75,6 @@ class TabStateManager {
         if (!this.tabId || !this.stateKey) return;
         
         const instructionsInput = document.getElementById('instructions') as HTMLTextAreaElement;
-        const modelSelect = document.getElementById('model-select') as HTMLSelectElement;
         const tentativeToggle = document.getElementById('tentative-toggle') as HTMLInputElement;
         const multidayToggle = document.getElementById('multiday-toggle') as HTMLInputElement;
         const preextractToggle = document.getElementById('preextract-toggle') as HTMLInputElement;
@@ -54,7 +82,7 @@ class TabStateManager {
         const state = {
             formData: {
                 instructions: instructionsInput?.value || '',
-                model: modelSelect?.value || '',
+                model: selectedModel || '',
                 tentative: tentativeToggle?.checked || false,
                 multiday: multidayToggle?.checked || false,
                 preextract: preextractToggle?.checked ?? true,
@@ -90,13 +118,12 @@ class TabStateManager {
             if (state && (Date.now() - state.timestamp) < 3600000) {
                 const form = state.formData;
                 const instructionsInput = document.getElementById('instructions') as HTMLTextAreaElement;
-                const modelSelect = document.getElementById('model-select') as HTMLSelectElement;
                 const tentativeToggle = document.getElementById('tentative-toggle') as HTMLInputElement;
                 const multidayToggle = document.getElementById('multiday-toggle') as HTMLInputElement;
                 const preextractToggle = document.getElementById('preextract-toggle') as HTMLInputElement;
                 
                 if (form.instructions && instructionsInput) instructionsInput.value = form.instructions;
-                if (form.model && modelSelect) modelSelect.value = form.model;
+                if (form.model) selectedModel = form.model;
                 if (tentativeToggle) tentativeToggle.checked = form.tentative;
                 if (multidayToggle) multidayToggle.checked = form.multiday;
                 if (preextractToggle && typeof form.preextract === 'boolean') preextractToggle.checked = form.preextract;
@@ -211,7 +238,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     function disableForm(disable = true) {
         instructionsInput.disabled = disable;
         convertButton.disabled = disable;
-        modelSelect.disabled = disable;
+        if (modelSelect) $(modelSelect).prop('disabled', disable);
         refreshModelsButton.disabled = disable;
         tentativeToggle.disabled = disable;
         if (preextractToggle) preextractToggle.disabled = disable;
@@ -306,97 +333,146 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     // Model management
-    async function fetchAvailableModels(): Promise<any[]> {
+    function normalizeModels(allModels: any[]): ModelOption[] {
+        const unique = new Map<string, ModelOption>();
+        (allModels || []).forEach(model => {
+            const id = model?.id;
+            if (!id || unique.has(id)) return;
+            unique.set(id, {
+                id,
+                name: model.name || PRIORITY_MODEL_LABELS[id] || id
+            });
+        });
+        return Array.from(unique.values());
+    }
+
+    function getModelLabel(modelId: string | null): string {
+        if (!modelId) return '';
+        return availableModels.find(m => m.id === modelId)?.name || modelId;
+    }
+
+    let select2Initialized = false;
+
+    function initModelSelect2() {
+        if (!modelSelect) return;
+
+        if (select2Initialized) {
+            $(modelSelect).select2('destroy');
+            select2Initialized = false;
+        }
+
+        $(modelSelect).select2({
+            placeholder: $(modelSelect).data('placeholder') || 'Search or select a model',
+            allowClear: true,
+            width: '100%'
+        });
+
+        $(modelSelect).off('change');
+        $(modelSelect).on('change', () => {
+            selectedModel = modelSelect.value || null;
+        });
+
+        select2Initialized = true;
+    }
+
+    function syncModelSelectValue() {
+        if (!modelSelect) return;
+        const value = selectedModel || '';
+        $(modelSelect).val(value).trigger('change.select2');
+    }
+
+    function getOfflinePriorityModels(): ModelOption[] {
+        return PRIORITY_MODEL_IDS.map(id => ({
+            id,
+            name: PRIORITY_MODEL_LABELS[id] || id,
+            isPriority: true
+        }));
+    }
+
+    function buildModelOptions(allModels: ModelOption[]): ModelOption[] {
+        const normalized = normalizeModels(allModels);
+        const seen = new Set<string>();
+        const offlinePriority = getOfflinePriorityModels();
+
+        const priorityList = PRIORITY_MODEL_IDS.map(id => {
+            const found = normalized.find(m => m.id === id);
+            const fallback = offlinePriority.find(m => m.id === id);
+            const model = found || fallback;
+            if (model && !seen.has(model.id)) {
+                seen.add(model.id);
+                return { ...model, isPriority: true } as ModelOption;
+            }
+            return null;
+        }).filter(Boolean) as ModelOption[];
+
+        const otherModels = normalized
+            .filter(model => !seen.has(model.id))
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map(model => ({ ...model, isPriority: false }));
+
+        return [...priorityList, ...otherModels];
+    }
+
+    function resolveInitialModel(preferredId: string | null | undefined, options: ModelOption[]): string | null {
+        const selectable = options;
+        const candidates = [preferredId, DEFAULT_MODEL_ID].filter(Boolean) as string[];
+        for (const candidate of candidates) {
+            if (selectable.some(option => option.id === candidate)) {
+                return candidate;
+            }
+        }
+        return selectable[0]?.id || null;
+    }
+
+    async function fetchAvailableModels(): Promise<ModelOption[]> {
         try {
             // Use background script to fetch models to avoid CSP issues
             const response = await chrome.runtime.sendMessage({ action: 'listModels' });
             
             if (!response.success) {
                 console.warn('Failed to fetch models from background:', response.error);
-                return getOfflineAllowedModels();
+                return getOfflinePriorityModels();
             }
             
-            const allModels = response.data || [];
-            const filteredModels = filterAllowedModels(allModels);
-            console.log("Available models:", filteredModels);
-            return filteredModels;
+            const normalizedModels = normalizeModels(response.data || []);
+            if (normalizedModels.length === 0) {
+                console.warn('No models returned from API; using offline priority list');
+                return getOfflinePriorityModels();
+            }
+
+            console.log("Available models (raw):", normalizedModels);
+            return normalizedModels;
             
         } catch (error) {
             console.error("Error fetching models:", error);
-            return getOfflineAllowedModels();
+            return getOfflinePriorityModels();
         }
-    }
-
-    function getOfflineAllowedModels() {
-        return [
-            { id: 'openai/gpt-5', name: 'GPT-5' },
-            { id: 'openai/gpt-5-nano', name: 'GPT-5 Nano' },
-            { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-            { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4' },
-            { id: 'openai/o3', name: 'OpenAI o3' },
-            { id: 'anthropic/claude-opus-4.1', name: 'Claude Opus 4.1' },
-            { id: 'openai/o4-mini-high', name: 'OpenAI o4 Mini High' }
-        ];
-    }
-
-    function filterAllowedModels(allModels: any[]) {
-        const allowedModelIds = [
-            'openai/gpt-5',
-            'openai/gpt-5-nano',
-            'google/gemini-2.5-pro', 
-            'anthropic/claude-sonnet-4',
-            'openai/o3',
-            'anthropic/claude-opus-4.1',
-            'openai/o4-mini-high'
-        ];
-
-        const filteredModels = allModels.filter(model => 
-            allowedModelIds.includes(model.id)
-        );
-
-        const foundIds = filteredModels.map(m => m.id);
-        const missingIds = allowedModelIds.filter(id => !foundIds.includes(id));
-        
-        missingIds.forEach(id => {
-            const fallbackModel = getOfflineAllowedModels().find(m => m.id === id);
-            if (fallbackModel) {
-                filteredModels.push(fallbackModel);
-            }
-        });
-
-        return filteredModels.sort((a, b) => {
-            const aIndex = allowedModelIds.indexOf(a.id);
-            const bIndex = allowedModelIds.indexOf(b.id);
-            return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
-        });
     }
 
     async function loadModels(forceRefresh = false) {
         if (!forceRefresh && availableModels.length > 0) {
             console.log('Using cached models.');
+            const settings = await chrome.storage.sync.get(['defaultModel']);
+            const savedModel = settings.defaultModel || DEFAULT_MODEL_ID;
+            selectedModel = resolveInitialModel(selectedModel || savedModel, availableModels);
             populateModelDropdown();
             return;
         }
 
         console.log("Loading AI models...");
         showStatus('Loading AI models...');
-        modelSelect.disabled = true;
         refreshModelsButton.disabled = true;
+        if (modelSelect) $(modelSelect).prop('disabled', true);
 
         try {
-            const models = await fetchAvailableModels();
+            const models = buildModelOptions(await fetchAvailableModels());
             console.log("Received models:", models);
 
             const settings = await chrome.storage.sync.get(['defaultModel']);
-            const savedModel = settings.defaultModel || 'openai/gpt-5';
+            const savedModel = settings.defaultModel || DEFAULT_MODEL_ID;
             
-            availableModels = models.map(model => ({
-                id: model.id,
-                name: model.name || model.id,
-                default: model.id === savedModel
-            }));
-
-            selectedModel = availableModels.find(m => m.default)?.id || (availableModels.length > 0 ? availableModels[0].id : null);
+            availableModels = models;
+            selectedModel = resolveInitialModel(selectedModel || savedModel, availableModels);
             console.log("Default model ID:", selectedModel);
 
             populateModelDropdown();
@@ -405,24 +481,42 @@ document.addEventListener('DOMContentLoaded', async function() {
             console.error('Error loading models:', error);
             showStatus('Error loading models', 'error', true);
         } finally {
-            modelSelect.disabled = false;
             refreshModelsButton.disabled = false;
+            if (modelSelect) $(modelSelect).prop('disabled', false);
         }
     }
 
     function populateModelDropdown() {
-        if (!modelSelect || availableModels.length === 0) return;
+        if (!modelSelect) return;
+
+        const priorityOptions = availableModels.filter(m => m.isPriority);
+        const otherOptions = availableModels.filter(m => !m.isPriority);
 
         modelSelect.innerHTML = '';
-        availableModels.forEach(model => {
-            const option = document.createElement('option');
-            option.value = model.id;
-            option.textContent = model.name;
-            if (model.default || model.id === selectedModel) {
-                option.selected = true;
-            }
-            modelSelect.appendChild(option);
-        });
+
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = '';
+        modelSelect.appendChild(placeholder);
+
+        const appendGroup = (label: string, items: ModelOption[]) => {
+            if (items.length === 0) return;
+            const group = document.createElement('optgroup');
+            group.label = label;
+            items.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.id;
+                option.textContent = model.name;
+                group.appendChild(option);
+            });
+            modelSelect.appendChild(group);
+        };
+
+        appendGroup('Priority models', priorityOptions);
+        appendGroup('All models', otherOptions);
+
+        initModelSelect2();
+        syncModelSelectValue();
     }
 
     // Settings management
@@ -451,7 +545,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     async function populateDefaultModels(selectedModel?: string) {
         try {
-            const models = await fetchAvailableModels();
+            const models = buildModelOptions(await fetchAvailableModels());
             defaultModelSelect.innerHTML = '';
             
             if (models.length === 0) {
@@ -462,20 +556,42 @@ document.addEventListener('DOMContentLoaded', async function() {
                 return;
             }
 
-            models.forEach(model => {
-                const option = document.createElement('option');
-                option.value = model.id;
-                option.textContent = model.name;
-                if (selectedModel && selectedModel === model.id) {
-                    option.selected = true;
-                }
-                defaultModelSelect.appendChild(option);
-            });
+            const priority = models.filter(m => m.isPriority);
+            const others = models.filter(m => !m.isPriority);
+
+            const appendOptions = (parent: HTMLOptGroupElement | HTMLSelectElement, items: ModelOption[]) => {
+                items.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.id;
+                    option.textContent = model.name;
+                    if (selectedModel && selectedModel === model.id) {
+                        option.selected = true;
+                    }
+                    parent.appendChild(option);
+                });
+            };
+
+            if (priority.length) {
+                const group = document.createElement('optgroup');
+                group.label = 'Priority models';
+                appendOptions(group, priority);
+                defaultModelSelect.appendChild(group);
+            }
+
+            if (others.length) {
+                const group = document.createElement('optgroup');
+                group.label = 'All models';
+                appendOptions(group, others);
+                defaultModelSelect.appendChild(group);
+            }
 
             // Set default if none selected
             if (!selectedModel && models.length > 0) {
-                const defaultModel = models.find(m => m.id === 'openai/gpt-5') || models[0];
-                defaultModel && (defaultModelSelect.value = defaultModel.id);
+                const defaultModel = resolveInitialModel(DEFAULT_MODEL_ID, models);
+                defaultModel && (defaultModelSelect.value = defaultModel);
+            } else if (selectedModel && !models.some(m => !m.isSeparator && m.id === selectedModel)) {
+                const fallback = resolveInitialModel(DEFAULT_MODEL_ID, models);
+                fallback && (defaultModelSelect.value = fallback);
             }
         } catch (error) {
             console.error('Error loading models for settings:', error);
@@ -518,7 +634,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         console.log('🚀 Generate ICS Started');
         
         const instructions = instructionsInput.value.trim();
-        const model = modelSelect.value;
+        const model = selectedModel;
         const tentative = tentativeToggle.checked;
         const multiday = multidayToggle.checked;
         const reviewFirst = (document.querySelector('input[name="review-option"]:checked') as HTMLInputElement)?.value === 'review';
@@ -1088,6 +1204,7 @@ Extract event details from the provided content. Pay attention to:
     }
 
     // Event listeners
+
     convertButton?.addEventListener('click', generateICS);
     
     refreshModelsButton?.addEventListener('click', () => loadModels(true));
@@ -1158,7 +1275,7 @@ Extract event details from the provided content. Pay attention to:
         const toTentativeEmail = toTentativeEmailInput.value.trim();
         const toConfirmedEmailInput = document.getElementById('toConfirmedEmail') as HTMLInputElement;
         const toConfirmedEmail = toConfirmedEmailInput.value.trim();
-        const defaultModel = defaultModelSelect.value;
+        const defaultModel = defaultModelSelect.value || DEFAULT_MODEL_ID;
 
         if (!openRouterKey) {
             showStatus('OpenRouter API key is required', 'error', true);
@@ -1288,7 +1405,7 @@ Extract event details from the provided content. Pay attention to:
             icsLength: icsContent.length,
             tentative
         });
-        
+
         try {
             console.log('⚙️ Loading email settings...');
             const settings = await chrome.storage.sync.get([
@@ -1300,73 +1417,129 @@ Extract event details from the provided content. Pay attention to:
                 hasToConfirmed: !!settings.toConfirmedEmail,
                 tentative
             });
-            
+
             const recipientEmail = tentative ? settings.toTentativeEmail : settings.toConfirmedEmail;
             const isMultiple = Array.isArray(events) && events.length > 1;
-            
+
             console.log('📧 Email details:', {
                 recipientEmail,
                 fromEmail: settings.fromEmail,
                 isMultiple,
                 tentative
             });
-            
-            let subject: string;
-            let emailBody: string;
+
             const sanitizeDescription = (text: string) => {
                 if (!text) return '';
                 return text.replace(/(^|\n)\s*Status:\s*(Tentative|Confirmed)\s*(?=\n|$)/gi, '$1').trim();
             };
-            
+
+            // When multiple events, send individual emails
             if (isMultiple) {
-                subject = `Calendar Events: ${events.length} Events`;
-                const eventsList = events.map((event: any, index: number) => {
-                    const desc = sanitizeDescription(event.description || '');
-                    return `${index + 1}. ${event.summary} - ${event.start_date}${event.start_time ? ' at ' + event.start_time : ''}${desc ? `\n   ${desc}` : ''}`;
-                }).join('\n');
-                emailBody = `Please find the attached calendar events.\n\n${eventsList}`;
-            } else {
-                const event = events[0];
-                subject = `Calendar Event: ${event.summary}`;
-                const cleanDesc = sanitizeDescription(event.description || '');
-                emailBody = `Please find the calendar invitation attached.\n\nEvent: ${event.summary}\n${event.location ? `Location: ${event.location}\n` : ''}${cleanDesc ? `Description: ${cleanDesc}` : ''}`;
-            }
-            
-            const emailPayload = {
-                From: settings.fromEmail,
-                To: recipientEmail,
-                Subject: subject,
-                TextBody: emailBody,
-                Attachments: [
-                    {
-                        Name: 'invite.ics',
-                        Content: btoa(unescape(encodeURIComponent(icsContent))),
-                        ContentType: 'text/calendar'
+                console.log(`📨 Sending ${events.length} individual emails for multiple events...`);
+                const results = [];
+
+                for (let i = 0; i < events.length; i++) {
+                    const event = events[i];
+                    console.log(`📧 Sending email ${i + 1}/${events.length} for event: ${event.summary}`);
+
+                    // Generate individual ICS content for this single event
+                    const singleEventIcs = await generateICSContent([event], tentative);
+
+                    const subject = `Calendar Event: ${event.summary}`;
+                    const cleanDesc = sanitizeDescription(event.description || '');
+                    const emailBody = `Please find the calendar invitation attached.\n\nEvent: ${event.summary}\n${event.location ? `Location: ${event.location}\n` : ''}${cleanDesc ? `Description: ${cleanDesc}` : ''}`;
+
+                    const emailPayload = {
+                        From: settings.fromEmail,
+                        To: recipientEmail,
+                        Subject: subject,
+                        TextBody: emailBody,
+                        Attachments: [
+                            {
+                                Name: 'invite.ics',
+                                Content: btoa(unescape(encodeURIComponent(singleEventIcs))),
+                                ContentType: 'text/calendar'
+                            }
+                        ]
+                    };
+
+                    console.log(`📤 Sending email ${i + 1}/${events.length} payload to background script:`, {
+                        from: emailPayload.From,
+                        to: emailPayload.To,
+                        subject: emailPayload.Subject,
+                        bodyLength: emailPayload.TextBody.length,
+                        attachmentSize: emailPayload.Attachments[0].Content.length
+                    });
+
+                    const response = await chrome.runtime.sendMessage({
+                        action: 'sendEmail',
+                        payload: emailPayload
+                    });
+
+                    console.log(`📥 Email ${i + 1}/${events.length} send response:`, response);
+
+                    if (response.success) {
+                        console.log(`✅ Email ${i + 1}/${events.length} sent successfully:`, response.data);
+                        results.push({ success: true, event: event.summary });
+                    } else {
+                        console.error(`❌ Email ${i + 1}/${events.length} send failed:`, response.error);
+                        results.push({ success: false, event: event.summary, error: response.error });
                     }
-                ]
-            };
-            
-            console.log('📤 Sending email payload to background script:', {
-                from: emailPayload.From,
-                to: emailPayload.To,
-                subject: emailPayload.Subject,
-                bodyLength: emailPayload.TextBody.length,
-                attachmentSize: emailPayload.Attachments[0].Content.length
-            });
-            
-            const response = await chrome.runtime.sendMessage({
-                action: 'sendEmail',
-                payload: emailPayload
-            });
-            
-            console.log('📥 Email send response:', response);
-            
-            if (response.success) {
-                console.log('✅ Email sent successfully:', response.data);
-                return { message: 'Calendar invite sent successfully!' };
+                }
+
+                // Check if all emails were sent successfully
+                const failedCount = results.filter(r => !r.success).length;
+                if (failedCount > 0) {
+                    const failedEvents = results.filter(r => !r.success).map(r => r.event).join(', ');
+                    throw new Error(`Failed to send ${failedCount} out of ${events.length} emails. Failed events: ${failedEvents}`);
+                }
+
+                console.log(`✅ All ${events.length} calendar invites sent successfully!`);
+                return { message: `All ${events.length} calendar invites sent successfully!` };
+
             } else {
-                console.error('❌ Email send failed:', response.error);
-                throw new Error(response.error);
+                // Single event - existing logic
+                const event = events[0];
+                const subject = `Calendar Event: ${event.summary}`;
+                const cleanDesc = sanitizeDescription(event.description || '');
+                const emailBody = `Please find the calendar invitation attached.\n\nEvent: ${event.summary}\n${event.location ? `Location: ${event.location}\n` : ''}${cleanDesc ? `Description: ${cleanDesc}` : ''}`;
+
+                const emailPayload = {
+                    From: settings.fromEmail,
+                    To: recipientEmail,
+                    Subject: subject,
+                    TextBody: emailBody,
+                    Attachments: [
+                        {
+                            Name: 'invite.ics',
+                            Content: btoa(unescape(encodeURIComponent(icsContent))),
+                            ContentType: 'text/calendar'
+                        }
+                    ]
+                };
+
+                console.log('📤 Sending email payload to background script:', {
+                    from: emailPayload.From,
+                    to: emailPayload.To,
+                    subject: emailPayload.Subject,
+                    bodyLength: emailPayload.TextBody.length,
+                    attachmentSize: emailPayload.Attachments[0].Content.length
+                });
+
+                const response = await chrome.runtime.sendMessage({
+                    action: 'sendEmail',
+                    payload: emailPayload
+                });
+
+                console.log('📥 Email send response:', response);
+
+                if (response.success) {
+                    console.log('✅ Email sent successfully:', response.data);
+                    return { message: 'Calendar invite sent successfully!' };
+                } else {
+                    console.error('❌ Email send failed:', response.error);
+                    throw new Error(response.error);
+                }
             }
         } catch (error) {
             console.error('💥 Email sending error:', error);
