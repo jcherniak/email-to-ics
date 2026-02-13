@@ -13,6 +13,10 @@ import ICAL from 'ical.js';
 import $ from 'jquery';
 import 'select2';
 
+// Build-time defaults injected from .env.default / .env via build-popup.js
+declare const __DEFAULT_TIMEZONE__: string;
+declare const __CUSTOM_PROMPT_DEFAULT__: string;
+
 type ModelOption = {
   id: string;
   name: string;
@@ -527,10 +531,11 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     async function loadSettingsIntoUI() {
         const settings = await chrome.storage.sync.get([
-            'openRouterKey', 'postmarkApiKey', 'fromEmail', 
-            'toTentativeEmail', 'toConfirmedEmail', 'defaultModel'
+            'openRouterKey', 'postmarkApiKey', 'fromEmail',
+            'toTentativeEmail', 'toConfirmedEmail', 'defaultModel',
+            'defaultTimezone', 'customPrompt'
         ]);
-        
+
         openRouterKeyInput.value = settings.openRouterKey || '';
         const postmarkApiKeyInput = document.getElementById('postmarkApiKey') as HTMLInputElement;
         postmarkApiKeyInput.value = settings.postmarkApiKey || '';
@@ -539,7 +544,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         toTentativeEmailInput.value = settings.toTentativeEmail || '';
         const toConfirmedEmailInput = document.getElementById('toConfirmedEmail') as HTMLInputElement;
         toConfirmedEmailInput.value = settings.toConfirmedEmail || '';
-        
+
+        const defaultTimezoneSelect = document.getElementById('defaultTimezone') as HTMLSelectElement;
+        const customPromptInput = document.getElementById('customPrompt') as HTMLTextAreaElement;
+        if (defaultTimezoneSelect) defaultTimezoneSelect.value = settings.defaultTimezone || __DEFAULT_TIMEZONE__;
+        if (customPromptInput) customPromptInput.value = settings.customPrompt ?? __CUSTOM_PROMPT_DEFAULT__;
+
         await populateDefaultModels(settings.defaultModel);
     }
 
@@ -728,34 +738,35 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
             }
 
-            let events: any[];
+            let aiResult: { events: any[], emailSubject: string, locationLookup: string };
             try {
                 statusMessage.textContent = 'Analyzing content with AI...';
-                events = await callAIModel({ ...pageContent, html: effectiveHtml }, instructions, model, tentative, multiday, screenshot);
+                aiResult = await callAIModel({ ...pageContent, html: effectiveHtml }, instructions, model, tentative, multiday, screenshot);
             } catch (err) {
                 if (preextract) {
                     console.warn('⚠️ Parsing failed with extracted content. Retrying with full HTML...');
                     statusMessage.textContent = 'Analyzing content with AI (full HTML fallback)...';
-                    events = await callAIModel(pageContent, instructions, model, tentative, multiday, screenshot);
+                    aiResult = await callAIModel(pageContent, instructions, model, tentative, multiday, screenshot);
                 } else {
                     throw err;
                 }
             }
-            console.log('🎯 AI model returned events:', { eventCount: events.length, events });
-            
+            const events = aiResult.events;
+            console.log('🎯 AI model returned events:', { eventCount: events.length, emailSubject: aiResult.emailSubject, events });
+
             // Generate ICS
             console.log('📅 Generating ICS file...');
             statusMessage.textContent = 'Generating ICS file...';
             const icsContent = await generateICSContent(events, tentative);
             console.log('📅 ICS content generated:', { length: icsContent.length, preview: icsContent.substring(0, 200) + '...' });
-            
+
             if (reviewFirst) {
-                await showReviewSection(events, icsContent);
+                await showReviewSection(events, icsContent, aiResult.emailSubject);
             } else {
                 // Direct send - auto-send email, then show completion
                 try {
                     statusMessage.textContent = 'Sending email...';
-                    await sendEmail(events, icsContent, tentative);
+                    await sendEmail(events, icsContent, tentative, aiResult.emailSubject);
                     statusMessage.textContent = 'Email sent. ICS ready to download.';
                 } catch (sendErr: any) {
                     console.error('💥 Auto-send failed:', sendErr);
@@ -808,7 +819,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     // AI model calling
-    async function callAIModel(pageData: any, instructions: string, model: string, tentative: boolean, multiday: boolean, screenshot: string | null): Promise<any> {
+    async function callAIModel(pageData: any, instructions: string, model: string, tentative: boolean, multiday: boolean, screenshot: string | null): Promise<{ events: any[], emailSubject: string, locationLookup: string }> {
         console.log('🤖 AI Request Starting...', {
             model,
             url: pageData.url,
@@ -818,39 +829,111 @@ document.addEventListener('DOMContentLoaded', async function() {
             tentative,
             multiday
         });
-        
+
         const cleanUrl = stripTrackingParameters(pageData.url);
-        
+
+        // Load configurable prompt settings (runtime overrides build-time defaults)
+        const promptSettings = await chrome.storage.sync.get(['defaultTimezone', 'customPrompt']);
+        const defaultTimezone = promptSettings.defaultTimezone || __DEFAULT_TIMEZONE__;
+        const customPrompt = promptSettings.customPrompt ?? __CUSTOM_PROMPT_DEFAULT__;
+        const todayDate = new Date().toISOString().split('T')[0];
+
         const systemPrompt = `You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
 
-Today's date is 2025-09-07. If a date is not a full date with month, day and year, assume it is in the future past today (2025-09-07). If a date has explicit parameters (month/day/year), then it is ok to be in the past.
+# PRIMARY EVENT IDENTIFICATION - READ THIS FIRST
+Your primary task is to identify and extract ONLY the MAIN event described in the content.
+How to identify the primary event:
+- It's typically the most prominently featured and detailed event
+- It's often the first event described in detail
+- It's usually the subject of the email or central content of the webpage
+- For ticketed events, it's the event for which the ticket/confirmation is issued
 
-Extract event details from the provided content. Pay attention to:
+Explicitly IGNORE these secondary events:
+- Events labeled as "Related Events", "You might also like", "Upcoming Events", "Other shows"
+- Events in sidebars or supplementary sections
+- Events mentioned only in passing or with minimal details
+- Any event clearly not the focus of the email/page
+
+EXTREMELY IMPORTANT: IF you find multiple events and are unsure which is primary, choose the event with:
+1. The most complete details (date, time, location)
+2. The earliest upcoming date
+3. The most prominence in the content
+
+# MULTI-DAY EVENT HANDLING
+${multiday
+    ? `MULTI-EVENT MODE: The user has checked the multi-event flag. Extract ALL related performances/sessions as SEPARATE events. Each different time slot should be a separate event in the events array. Do NOT combine multiple times into a single event. This applies to multiple concert performances, conference sessions across days, festival events on different dates, etc.`
+    : `SINGLE EVENT MODE: Extract exactly one event. If multiple times are mentioned, choose the primary/first one or create a single event that encompasses the main timeframe.`}
+
+# DATE PARSING RULES
+Today's date is ${todayDate}.
+When parsing dates:
+1. If the year IS explicitly mentioned, use that year
+2. If the year is NOT explicitly mentioned:
+   - Use current year if the date is ON or AFTER today
+   - Use next year if the date is BEFORE today
+3. Use the correct timezone abbreviation based on the date (e.g., PDT vs PST for Pacific)
+4. Be aware that many events are scheduled months in advance; carefully check if dates are in the past relative to today
+5. If multiple dates are mentioned, prioritize dates that are explicitly associated with the primary event
+
+# TIMEZONE INFERENCE
+If a location is specified, infer the appropriate timezone:
+- Eastern Time: New York, Boston, Miami, Atlanta, Washington DC, Florida, etc.
+- Central Time: Chicago, Dallas, Houston, Memphis, Minneapolis, New Orleans, etc.
+- Mountain Time: Denver, Salt Lake City, Phoenix, Albuquerque, etc.
+- Pacific Time: Los Angeles, San Francisco, Seattle, Portland, San Diego, etc.
+- Hawaii-Aleutian Time: Hawaii, Honolulu, etc.
+- Alaska Time: Anchorage, Juneau, etc.
+For international locations, determine the appropriate timezone for that region.
+If no location is found in the content, default to ${defaultTimezone}.
+
+# FIELD INSTRUCTIONS
 - Use ISO 8601 date format (YYYY-MM-DD) and 24-hour time format (HH:MM)
-- For all-day events, set start_time and end_time to null
-- If no end time specified, make reasonable estimate
-- Default timezone is America/New_York unless specified
-- ${multiday ? 'MULTI-EVENT MODE: The user has checked the multi-event flag, indicating they want multiple separate calendar events extracted. Extract ALL distinct event times/sessions mentioned on the page as separate events. Each different time slot should be a separate event in the events array. Do NOT combine multiple times into a single event.' : 'SINGLE EVENT MODE: Extract exactly one event. If multiple times are mentioned, choose the primary/first one or create a single event that encompasses the main timeframe.'}
+- For all-day events, set start_time and end_time to null and isAllDay to true
+- Date/Time: Calculate end time if missing (2h default, 3h for opera, 30m for doctor appointments)
 - Event status: ${tentative ? 'Tentative' : 'Confirmed'} (set status field only; do NOT include a "Status:" line in the description)
-- Title prefix (group/host): Determine the presenting organization from the page/site (prefer <meta property="og:site_name">, the site header/brand, or phrases like "X presents ..."). Set the event summary to "[Group]: [Event Title]". Avoid duplicating the prefix if already present.
-  - Examples: "KQED Live presents …" -> summary "KQED Live: …". If the site is sfsymphony.org or sanfranciscosymphony.org, use "SF Symphony: …".
-  - IMPORTANT: Never use a ticketing/platform brand (e.g., Eventbrite, Ticketmaster) as the group. If the domain is eventbrite.com, identify the organizer from the page (e.g., the Organizer/By section or organizer profile) and use that as the group. If no organizer can be found, omit the prefix rather than using the platform name.
-- Concerts: Include the complete program as listed on the page in the description under a section titled "Program:". Preserve the order, include composer names and full work titles (and movements if listed).
-- Location selection: If both streaming and in-person options are present, ALWAYS use the in-person option. Set the location to the physical venue name AND address (street, city, state) if available. You may include a URL as the location only if no physical venue/address is available anywhere on the page; otherwise, never use a URL for the location. You may mention streaming details in the description, but the location must prefer the physical address.
-- CRITICAL: Always include the source URL in the "url" field
-- CRITICAL: Always add the source URL at the end of the description with format: "\\n\\nSource: [URL]"
-- Important: Do NOT fetch or browse the Source URL or any external resources. Only use the provided HTML under "Content to analyze" and the optional screenshot image. The Source URL is for attribution/reference only.`;
+- description: Concise summary with rich details. Use \\n for newlines. Keep under 1000 chars. DO NOT include raw HTML.
+- htmlDescription: HTML formatted version of the description. Use basic HTML tags only (p, a, b, i, ul, ol, li, br). DO NOT include <style> tags or inline style attributes. If a source URL was provided, include it at the bottom as a clickable link.
+- location: The venue name or address.
+- emailSubject: Use the generated event summary.
+- locationLookup: Location string suitable for Google Maps lookup.
+- CRITICAL: Always include the event page link in the "url" field using the source URL provided.
+- CRITICAL: Always include the event page link at the bottom of the description: "\\n\\nEvent page: [URL]"
+- CRITICAL: Always include the event page link at the bottom of the htmlDescription as a clickable <a> tag.
+- Important: Do NOT fetch or browse the Source URL or any external resources. Only use the provided HTML under "Content to analyze" and the optional screenshot image. The Source URL is for attribution/reference only.
 
-        const userText = `${instructions ? `Special instructions: ${instructions}\n` : ''}\nSource URL (MUST be included in url field and description): ${cleanUrl}\n\nContent to analyze:\n${pageData.html}`;
+# IGNORE SPONSOR OR POLICY DISCLAIMERS
+Do not include details about sponsors or policy disclaimers unless they are explicitly part of the main event content.
+
+# ERROR HANDLING
+IF NO DATES ARE FOUND ANYWHERE IN THE CONTENT, set success to false with errorMessage "Content didn't contain dates or times" and return an empty events array.
+
+# USER PREFERENCES
+${customPrompt}`;
+
+        const userText = `${instructions ? `Special instructions: ${instructions}\n` : ''}\nSource URL (MUST be included in the url field AND at the bottom of the description as "Event page: ${cleanUrl}"): ${cleanUrl}\n\nContent to analyze:\n${pageData.html}`;
 
         const eventSchema = {
             type: "object",
             properties: {
+                success: {
+                    type: "boolean",
+                    description: "Whether event extraction was successful. False if no dates found."
+                },
+                errorMessage: {
+                    type: "string",
+                    description: "Error message if success is false, empty string otherwise"
+                },
+                emailSubject: {
+                    type: "string",
+                    description: "Email subject line using the event summary"
+                },
+                locationLookup: {
+                    type: "string",
+                    description: "Location string suitable for Google Maps lookup"
+                },
                 events: {
                     type: "array",
-                    description: multiday ? "Array of calendar events (extract ALL distinct event times/sessions as separate events)" : "Array of calendar events (must contain exactly one event)",
-                    minItems: multiday ? 2 : 1,
-                    maxItems: multiday ? 50 : 1,
+                    description: multiday ? "Array of calendar events (extract ALL distinct event times/sessions as separate events)" : "Array of calendar events (exactly one event when success is true)",
                     items: {
                         type: "object",
                         properties: {
@@ -860,7 +943,7 @@ Extract event details from the provided content. Pay attention to:
                             },
                             location: {
                                 type: "string",
-                                description: "Physical venue name and address (preferred). If no physical venue/address is available, use a URL. If both streaming and in-person exist, choose the in-person venue address."
+                                description: "Venue name or address"
                             },
                             start_date: {
                                 type: "string",
@@ -873,7 +956,7 @@ Extract event details from the provided content. Pay attention to:
                                 description: "Start time in HH:MM format or null for all-day"
                             },
                             end_date: {
-                                type: "string", 
+                                type: "string",
                                 pattern: "^\\d{4}-\\d{2}-\\d{2}$",
                                 description: "End date in YYYY-MM-DD format"
                             },
@@ -884,24 +967,31 @@ Extract event details from the provided content. Pay attention to:
                             },
                             description: {
                                 type: "string",
-                                description: "Event description"
+                                description: "Plain text event description (under 1000 chars). MUST end with Event page: [URL]"
+                            },
+                            htmlDescription: {
+                                type: "string",
+                                description: "HTML formatted description using basic tags (p, a, b, i, ul, ol, li, br). No style tags. Include event page link at bottom."
                             },
                             timezone: {
                                 type: "string",
-                                default: "America/New_York",
-                                description: "Timezone for the event"
+                                description: "IANA timezone identifier (e.g., America/Los_Angeles)"
                             },
                             url: {
                                 type: "string",
-                                description: "Event URL or source URL"
+                                description: "Link to the event page (source URL)"
+                            },
+                            isAllDay: {
+                                type: "boolean",
+                                description: "Whether this is an all-day event (true when start_time is null)"
                             }
                         },
-                        required: ["summary", "location", "start_date", "end_date", "start_time", "end_time", "description", "timezone", "url"],
+                        required: ["summary", "location", "start_date", "end_date", "start_time", "end_time", "description", "htmlDescription", "timezone", "url", "isAllDay"],
                         additionalProperties: false
                     }
                 }
             },
-            required: ["events"],
+            required: ["success", "errorMessage", "emailSubject", "locationLookup", "events"],
             additionalProperties: false
         };
 
@@ -1021,7 +1111,7 @@ Extract event details from the provided content. Pay attention to:
         return content;
     }
 
-    function parseAiResponse(response: string): any[] {
+    function parseAiResponse(response: string): { events: any[], emailSubject: string, locationLookup: string } {
         try {
             let cleaned = response.trim();
             if (cleaned.startsWith('```json')) {
@@ -1029,19 +1119,26 @@ Extract event details from the provided content. Pay attention to:
             } else if (cleaned.startsWith('```')) {
                 cleaned = cleaned.replace(/```\n?/, '').replace(/\n?```$/, '');
             }
-            
+
             const parsed = JSON.parse(cleaned);
-            
-            if (!parsed.events || !Array.isArray(parsed.events)) {
-                throw new Error('Response must contain an events array');
+
+            // Handle success/error wrapper from AI
+            if (parsed.success === false) {
+                throw new Error(parsed.errorMessage || 'AI could not extract event data from the content');
             }
-            
-            if (parsed.events.length === 0) {
-                throw new Error('Events array cannot be empty');
+
+            // Support both wrapped { events: [...] } and legacy formats
+            const events = Array.isArray(parsed.events) ? parsed.events :
+                           Array.isArray(parsed) ? parsed :
+                           parsed.eventData ? (Array.isArray(parsed.eventData) ? parsed.eventData : [parsed.eventData]) :
+                           null;
+
+            if (!events || events.length === 0) {
+                throw new Error('No events found in AI response');
             }
-            
+
             // Validate each event has required fields
-            for (const event of parsed.events) {
+            for (const event of events) {
                 if (!event.summary) {
                     throw new Error('Missing required field: summary');
                 }
@@ -1049,8 +1146,12 @@ Extract event details from the provided content. Pay attention to:
                     throw new Error('Missing required field: start_date');
                 }
             }
-            
-            return parsed.events;
+
+            return {
+                events,
+                emailSubject: parsed.emailSubject || events[0]?.summary || 'Calendar Event',
+                locationLookup: parsed.locationLookup || events[0]?.location || ''
+            };
         } catch (error) {
             console.error('Error parsing AI response:', error);
             throw new Error(`Failed to parse AI response: ${error.message}`);
@@ -1066,32 +1167,35 @@ Extract event details from the provided content. Pay attention to:
             return text.replace(/(^|\n)\s*Status:\s*(Tentative|Confirmed)\s*(?=\n|$)/gi, '$1').trim();
         };
 
+        const promptSettings = await chrome.storage.sync.get(['defaultTimezone']);
+        const fallbackTz = promptSettings.defaultTimezone || __DEFAULT_TIMEZONE__;
+
         const eventDataArray: EventData[] = events.map(eventData => ({
             summary: eventData.summary,
             description: sanitizeDescription(eventData.description || ''),
             location: eventData.location || '',
             dtstart: eventData.start_date + (eventData.start_time ? `T${eventData.start_time}:00` : 'T00:00:00'),
-            dtend: eventData.end_date ? 
-                eventData.end_date + (eventData.end_time ? `T${eventData.end_time}:00` : 'T23:59:59') : 
+            dtend: eventData.end_date ?
+                eventData.end_date + (eventData.end_time ? `T${eventData.end_time}:00` : 'T23:59:59') :
                 undefined,
-            timezone: eventData.timezone || 'America/New_York',
-            isAllDay: eventData.start_time === null,
+            timezone: eventData.timezone || fallbackTz,
+            isAllDay: eventData.isAllDay ?? (eventData.start_time === null),
             status: tentative ? 'tentative' : 'confirmed',
             url: eventData.url
         }));
 
         // Get fromEmail for organizer
         const settings = await chrome.storage.sync.get(['fromEmail']);
-        
+
         // Generate ICS content for all events
         return icsGenerator.generateIcs(eventDataArray, {}, settings.fromEmail);
     }
 
-    async function showReviewSection(events: any[], icsContent: string) {
+    async function showReviewSection(events: any[], icsContent: string, emailSubject?: string) {
         processingView.style.display = 'none';
         reviewSection.style.display = 'block';
-        
-        reviewData = { eventData: events, icsContent };
+
+        reviewData = { eventData: events, icsContent, emailSubject };
         
         const reviewContent = document.getElementById('review-content')!;
         const reviewRecipient = document.getElementById('review-recipient')!;
@@ -1232,7 +1336,7 @@ Extract event details from the provided content. Pay attention to:
             disableReviewButtons(true);
             
             try {
-                await sendEmail(reviewData.eventData, reviewData.icsContent, tentativeToggle.checked);
+                await sendEmail(reviewData.eventData, reviewData.icsContent, tentativeToggle.checked, reviewData.emailSubject);
                 console.log('✅ Email sent successfully from review section');
                 hideReviewStatus();
                 reviewSection.style.display = 'none';
@@ -1276,27 +1380,31 @@ Extract event details from the provided content. Pay attention to:
         const toConfirmedEmailInput = document.getElementById('toConfirmedEmail') as HTMLInputElement;
         const toConfirmedEmail = toConfirmedEmailInput.value.trim();
         const defaultModel = defaultModelSelect.value || DEFAULT_MODEL_ID;
+        const defaultTimezoneSelect = document.getElementById('defaultTimezone') as HTMLSelectElement;
+        const defaultTimezone = defaultTimezoneSelect?.value || __DEFAULT_TIMEZONE__;
+        const customPromptInput = document.getElementById('customPrompt') as HTMLTextAreaElement;
+        const customPrompt = customPromptInput?.value ?? __CUSTOM_PROMPT_DEFAULT__;
 
         if (!openRouterKey) {
             showStatus('OpenRouter API key is required', 'error', true);
             return;
         }
-        
+
         if (!postmarkApiKey) {
             showStatus('Postmark API key is required', 'error', true);
             return;
         }
-        
+
         if (!fromEmail) {
             showStatus('From email is required', 'error', true);
             return;
         }
-        
+
         if (!toTentativeEmail) {
             showStatus('Tentative email recipient is required', 'error', true);
             return;
         }
-        
+
         if (!toConfirmedEmail) {
             showStatus('Confirmed email recipient is required', 'error', true);
             return;
@@ -1308,11 +1416,13 @@ Extract event details from the provided content. Pay attention to:
             fromEmail,
             toTentativeEmail,
             toConfirmedEmail,
-            defaultModel
+            defaultModel,
+            defaultTimezone,
+            customPrompt
         });
 
         showStatus('Settings saved successfully!', 'success');
-        
+
         if (areRequiredSettingsPresent({ openRouterKey, postmarkApiKey, fromEmail, toTentativeEmail, toConfirmedEmail })) {
             setTimeout(showForm, 1000);
         }
@@ -1399,11 +1509,12 @@ Extract event details from the provided content. Pay attention to:
     };
 
     // Email sending function using Postmark API via background script
-    async function sendEmail(events: any[], icsContent: string, tentative: boolean) {
+    async function sendEmail(events: any[], icsContent: string, tentative: boolean, emailSubject?: string) {
         console.log('📬 sendEmail function called:', {
             eventCount: events.length,
             icsLength: icsContent.length,
-            tentative
+            tentative,
+            emailSubject
         });
 
         try {
@@ -1443,11 +1554,14 @@ Extract event details from the provided content. Pay attention to:
                 // Generate individual ICS content for this single event
                 const singleEventIcs = await generateICSContent([event], tentative);
 
-                const subject = `Calendar Event: ${event.summary}`;
+                // Use AI-generated emailSubject for single events, per-event subject for multi
+                const subject = (events.length === 1 && emailSubject)
+                    ? `Calendar Event: ${emailSubject}`
+                    : `Calendar Event: ${event.summary}`;
                 const cleanDesc = sanitizeDescription(event.description || '');
                 const emailBody = `Please find the calendar invitation attached.\n\nEvent: ${event.summary}\n${event.location ? `Location: ${event.location}\n` : ''}${cleanDesc ? `Description: ${cleanDesc}` : ''}`;
 
-                const emailPayload = {
+                const emailPayload: any = {
                     From: settings.fromEmail,
                     To: recipientEmail,
                     Subject: subject,
@@ -1461,11 +1575,17 @@ Extract event details from the provided content. Pay attention to:
                     ]
                 };
 
+                // Add HTML body if htmlDescription is available from AI
+                if (event.htmlDescription) {
+                    emailPayload.HtmlBody = event.htmlDescription;
+                }
+
                 console.log(`📤 Sending email ${i + 1}/${events.length} payload to background script:`, {
                     from: emailPayload.From,
                     to: emailPayload.To,
                     subject: emailPayload.Subject,
                     bodyLength: emailPayload.TextBody.length,
+                    hasHtmlBody: !!emailPayload.HtmlBody,
                     attachmentSize: emailPayload.Attachments[0].Content.length
                 });
 
