@@ -17,4 +17,5 @@ build/
 **/.turbo
 **/*.tsbuildinfo
 **/dist/
+*.tsbuildinfo
 worktrees
