@@ -28412,10 +28412,10 @@
       toTentativeEmailInput.value = settings.toTentativeEmail || "";
       const toConfirmedEmailInput = document.getElementById("toConfirmedEmail");
       toConfirmedEmailInput.value = settings.toConfirmedEmail || "";
-      const defaultTimezoneInput = document.getElementById("defaultTimezone");
+      const defaultTimezoneSelect = document.getElementById("defaultTimezone");
       const customPromptInput = document.getElementById("customPrompt");
-      if (defaultTimezoneInput)
-        defaultTimezoneInput.value = settings.defaultTimezone || "America/Los_Angeles";
+      if (defaultTimezoneSelect)
+        defaultTimezoneSelect.value = settings.defaultTimezone || "America/Los_Angeles";
       if (customPromptInput)
         customPromptInput.value = settings.customPrompt ?? '- Summary format for artistic/cultural events: "Venue - Artist/Show" (e.g., "SF Opera - La Boheme", "Stern Grove - The Honeydrips", "Davies Hall - SF Symphony")\n- For concerts with programs: "Venue - Program Title" (e.g., "SF Symphony - Sibelius and Mahler")\n- For general events: Keep the summary concise and descriptive (e.g., "Dr. White Appointment")\n- Title prefix: Determine the presenting organization from the page/site (prefer <meta property="og:site_name">, the site header/brand, or phrases like "X presents...").\n- IMPORTANT: Never use a ticketing/platform brand (e.g., Eventbrite, Ticketmaster) as the group prefix. If the domain is eventbrite.com, identify the organizer from the page (e.g., the Organizer/By section or organizer profile). If no organizer can be found, omit the prefix rather than using the platform name.\n- Concerts: Include the complete program in the description under a "Program:" section. Preserve order, include composer names and full work titles (and movements if listed).\n- For artistic events: Highlight featured artists, performers, and full program/repertoire.\n- For concerts/opera: Include composer names, piece titles, featured soloists.\n- For conferences: Include key speakers and session topics.\n- For flights: Include Flight #, Confirmation #, Departure/Arrival details.\n- Include Eventbrite ticket links prominently if found in the content.\n- Location: Always prefer physical venue name and address over streaming/virtual URLs. If both streaming and in-person options exist, use the in-person venue.';
       await populateDefaultModels(settings.defaultModel);
@@ -29138,8 +29138,8 @@ ${cleanedHtml}`;
       const toConfirmedEmailInput = document.getElementById("toConfirmedEmail");
       const toConfirmedEmail = toConfirmedEmailInput.value.trim();
       const defaultModel = defaultModelSelect.value || DEFAULT_MODEL_ID;
-      const defaultTimezoneInput = document.getElementById("defaultTimezone");
-      const defaultTimezone = defaultTimezoneInput?.value.trim() || "America/Los_Angeles";
+      const defaultTimezoneSelect = document.getElementById("defaultTimezone");
+      const defaultTimezone = defaultTimezoneSelect?.value || "America/Los_Angeles";
       const customPromptInput = document.getElementById("customPrompt");
       const customPrompt = customPromptInput?.value ?? '- Summary format for artistic/cultural events: "Venue - Artist/Show" (e.g., "SF Opera - La Boheme", "Stern Grove - The Honeydrips", "Davies Hall - SF Symphony")\n- For concerts with programs: "Venue - Program Title" (e.g., "SF Symphony - Sibelius and Mahler")\n- For general events: Keep the summary concise and descriptive (e.g., "Dr. White Appointment")\n- Title prefix: Determine the presenting organization from the page/site (prefer <meta property="og:site_name">, the site header/brand, or phrases like "X presents...").\n- IMPORTANT: Never use a ticketing/platform brand (e.g., Eventbrite, Ticketmaster) as the group prefix. If the domain is eventbrite.com, identify the organizer from the page (e.g., the Organizer/By section or organizer profile). If no organizer can be found, omit the prefix rather than using the platform name.\n- Concerts: Include the complete program in the description under a "Program:" section. Preserve order, include composer names and full work titles (and movements if listed).\n- For artistic events: Highlight featured artists, performers, and full program/repertoire.\n- For concerts/opera: Include composer names, piece titles, featured soloists.\n- For conferences: Include key speakers and session topics.\n- For flights: Include Flight #, Confirmation #, Departure/Arrival details.\n- Include Eventbrite ticket links prominently if found in the content.\n- Location: Always prefer physical venue name and address over streaming/virtual URLs. If both streaming and in-person options exist, use the in-person venue.';
       if (!openRouterKey) {
