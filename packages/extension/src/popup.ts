@@ -545,9 +545,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         const toConfirmedEmailInput = document.getElementById('toConfirmedEmail') as HTMLInputElement;
         toConfirmedEmailInput.value = settings.toConfirmedEmail || '';
 
-        const defaultTimezoneInput = document.getElementById('defaultTimezone') as HTMLInputElement;
+        const defaultTimezoneSelect = document.getElementById('defaultTimezone') as HTMLSelectElement;
         const customPromptInput = document.getElementById('customPrompt') as HTMLTextAreaElement;
-        if (defaultTimezoneInput) defaultTimezoneInput.value = settings.defaultTimezone || __DEFAULT_TIMEZONE__;
+        if (defaultTimezoneSelect) defaultTimezoneSelect.value = settings.defaultTimezone || __DEFAULT_TIMEZONE__;
         if (customPromptInput) customPromptInput.value = settings.customPrompt ?? __CUSTOM_PROMPT_DEFAULT__;
 
         await populateDefaultModels(settings.defaultModel);
@@ -1380,8 +1380,8 @@ ${customPrompt}`;
         const toConfirmedEmailInput = document.getElementById('toConfirmedEmail') as HTMLInputElement;
         const toConfirmedEmail = toConfirmedEmailInput.value.trim();
         const defaultModel = defaultModelSelect.value || DEFAULT_MODEL_ID;
-        const defaultTimezoneInput = document.getElementById('defaultTimezone') as HTMLInputElement;
-        const defaultTimezone = defaultTimezoneInput?.value.trim() || __DEFAULT_TIMEZONE__;
+        const defaultTimezoneSelect = document.getElementById('defaultTimezone') as HTMLSelectElement;
+        const defaultTimezone = defaultTimezoneSelect?.value || __DEFAULT_TIMEZONE__;
         const customPromptInput = document.getElementById('customPrompt') as HTMLTextAreaElement;
         const customPrompt = customPromptInput?.value ?? __CUSTOM_PROMPT_DEFAULT__;
 
