@@ -837,11 +837,11 @@ Extract event details from the provided content. Pay attention to:
   - IMPORTANT: Never use a ticketing/platform brand (e.g., Eventbrite, Ticketmaster) as the group. If the domain is eventbrite.com, identify the organizer from the page (e.g., the Organizer/By section or organizer profile) and use that as the group. If no organizer can be found, omit the prefix rather than using the platform name.
 - Concerts: Include the complete program as listed on the page in the description under a section titled "Program:". Preserve the order, include composer names and full work titles (and movements if listed).
 - Location selection: If both streaming and in-person options are present, ALWAYS use the in-person option. Set the location to the physical venue name AND address (street, city, state) if available. You may include a URL as the location only if no physical venue/address is available anywhere on the page; otherwise, never use a URL for the location. You may mention streaming details in the description, but the location must prefer the physical address.
-- CRITICAL: Always include the source URL in the "url" field
-- CRITICAL: Always add the source URL at the end of the description with format: "\\n\\nSource: [URL]"
+- CRITICAL: Always include a link back to the event page in the "url" field. Use the source URL provided below.
+- CRITICAL: Always include a link back to the event page at the bottom of the description. Append it with the format: "\\n\\nEvent page: [URL]" using the source URL provided below.
 - Important: Do NOT fetch or browse the Source URL or any external resources. Only use the provided HTML under "Content to analyze" and the optional screenshot image. The Source URL is for attribution/reference only.`;
 
-        const userText = `${instructions ? `Special instructions: ${instructions}\n` : ''}\nSource URL (MUST be included in url field and description): ${cleanUrl}\n\nContent to analyze:\n${pageData.html}`;
+        const userText = `${instructions ? `Special instructions: ${instructions}\n` : ''}\nSource URL (MUST be included in the url field AND at the bottom of the description as "Event page: ${cleanUrl}"): ${cleanUrl}\n\nContent to analyze:\n${pageData.html}`;
 
         const eventSchema = {
             type: "object",
@@ -884,7 +884,7 @@ Extract event details from the provided content. Pay attention to:
                             },
                             description: {
                                 type: "string",
-                                description: "Event description"
+                                description: "Event description. MUST end with a link back to the event page in the format: \\n\\nEvent page: [URL]"
                             },
                             timezone: {
                                 type: "string",
@@ -893,7 +893,7 @@ Extract event details from the provided content. Pay attention to:
                             },
                             url: {
                                 type: "string",
-                                description: "Event URL or source URL"
+                                description: "Link back to the event page (use the source URL provided)"
                             }
                         },
                         required: ["summary", "location", "start_date", "end_date", "start_time", "end_time", "description", "timezone", "url"],
