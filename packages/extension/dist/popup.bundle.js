@@ -28400,7 +28400,9 @@
         "fromEmail",
         "toTentativeEmail",
         "toConfirmedEmail",
-        "defaultModel"
+        "defaultModel",
+        "defaultTimezone",
+        "customPrompt"
       ]);
       openRouterKeyInput.value = settings.openRouterKey || "";
       const postmarkApiKeyInput = document.getElementById("postmarkApiKey");
@@ -28410,6 +28412,12 @@
       toTentativeEmailInput.value = settings.toTentativeEmail || "";
       const toConfirmedEmailInput = document.getElementById("toConfirmedEmail");
       toConfirmedEmailInput.value = settings.toConfirmedEmail || "";
+      const defaultTimezoneInput = document.getElementById("defaultTimezone");
+      const customPromptInput = document.getElementById("customPrompt");
+      if (defaultTimezoneInput)
+        defaultTimezoneInput.value = settings.defaultTimezone || "America/Los_Angeles";
+      if (customPromptInput)
+        customPromptInput.value = settings.customPrompt ?? '- Summary format for artistic/cultural events: "Venue - Artist/Show" (e.g., "SF Opera - La Boheme", "Stern Grove - The Honeydrips", "Davies Hall - SF Symphony")\n- For concerts with programs: "Venue - Program Title" (e.g., "SF Symphony - Sibelius and Mahler")\n- For general events: Keep the summary concise and descriptive (e.g., "Dr. White Appointment")\n- Title prefix: Determine the presenting organization from the page/site (prefer <meta property="og:site_name">, the site header/brand, or phrases like "X presents...").\n- IMPORTANT: Never use a ticketing/platform brand (e.g., Eventbrite, Ticketmaster) as the group prefix. If the domain is eventbrite.com, identify the organizer from the page (e.g., the Organizer/By section or organizer profile). If no organizer can be found, omit the prefix rather than using the platform name.\n- Concerts: Include the complete program in the description under a "Program:" section. Preserve order, include composer names and full work titles (and movements if listed).\n- For artistic events: Highlight featured artists, performers, and full program/repertoire.\n- For concerts/opera: Include composer names, piece titles, featured soloists.\n- For conferences: Include key speakers and session topics.\n- For flights: Include Flight #, Confirmation #, Departure/Arrival details.\n- Include Eventbrite ticket links prominently if found in the content.\n- Location: Always prefer physical venue name and address over streaming/virtual URLs. If both streaming and in-person options exist, use the in-person venue.';
       await populateDefaultModels(settings.defaultModel);
     }
     async function populateDefaultModels(selectedModel2) {
@@ -28570,30 +28578,31 @@
             console.warn("\u26A0\uFE0F Extraction failed; using full HTML", exErr);
           }
         }
-        let events;
+        let aiResult;
         try {
           statusMessage.textContent = "Analyzing content with AI...";
-          events = await callAIModel({ ...pageContent, html: effectiveHtml }, instructions, model, tentative, multiday, screenshot);
+          aiResult = await callAIModel({ ...pageContent, html: effectiveHtml }, instructions, model, tentative, multiday, screenshot);
         } catch (err) {
           if (preextract) {
             console.warn("\u26A0\uFE0F Parsing failed with extracted content. Retrying with full HTML...");
             statusMessage.textContent = "Analyzing content with AI (full HTML fallback)...";
-            events = await callAIModel(pageContent, instructions, model, tentative, multiday, screenshot);
+            aiResult = await callAIModel(pageContent, instructions, model, tentative, multiday, screenshot);
           } else {
             throw err;
           }
         }
-        console.log("\u{1F3AF} AI model returned events:", { eventCount: events.length, events });
+        const events = aiResult.events;
+        console.log("\u{1F3AF} AI model returned events:", { eventCount: events.length, emailSubject: aiResult.emailSubject, events });
         console.log("\u{1F4C5} Generating ICS file...");
         statusMessage.textContent = "Generating ICS file...";
         const icsContent = await generateICSContent(events, tentative);
         console.log("\u{1F4C5} ICS content generated:", { length: icsContent.length, preview: icsContent.substring(0, 200) + "..." });
         if (reviewFirst) {
-          await showReviewSection(events, icsContent);
+          await showReviewSection(events, icsContent, aiResult.emailSubject);
         } else {
           try {
             statusMessage.textContent = "Sending email...";
-            await sendEmail(events, icsContent, tentative);
+            await sendEmail(events, icsContent, tentative, aiResult.emailSubject);
             statusMessage.textContent = "Email sent. ICS ready to download.";
           } catch (sendErr) {
             console.error("\u{1F4A5} Auto-send failed:", sendErr);
@@ -28643,25 +28652,79 @@
         multiday
       });
       const cleanUrl = stripTrackingParameters(pageData.url);
+      const promptSettings = await chrome.storage.sync.get(["defaultTimezone", "customPrompt"]);
+      const defaultTimezone = promptSettings.defaultTimezone || "America/Los_Angeles";
+      const customPrompt = promptSettings.customPrompt ?? '- Summary format for artistic/cultural events: "Venue - Artist/Show" (e.g., "SF Opera - La Boheme", "Stern Grove - The Honeydrips", "Davies Hall - SF Symphony")\n- For concerts with programs: "Venue - Program Title" (e.g., "SF Symphony - Sibelius and Mahler")\n- For general events: Keep the summary concise and descriptive (e.g., "Dr. White Appointment")\n- Title prefix: Determine the presenting organization from the page/site (prefer <meta property="og:site_name">, the site header/brand, or phrases like "X presents...").\n- IMPORTANT: Never use a ticketing/platform brand (e.g., Eventbrite, Ticketmaster) as the group prefix. If the domain is eventbrite.com, identify the organizer from the page (e.g., the Organizer/By section or organizer profile). If no organizer can be found, omit the prefix rather than using the platform name.\n- Concerts: Include the complete program in the description under a "Program:" section. Preserve order, include composer names and full work titles (and movements if listed).\n- For artistic events: Highlight featured artists, performers, and full program/repertoire.\n- For concerts/opera: Include composer names, piece titles, featured soloists.\n- For conferences: Include key speakers and session topics.\n- For flights: Include Flight #, Confirmation #, Departure/Arrival details.\n- Include Eventbrite ticket links prominently if found in the content.\n- Location: Always prefer physical venue name and address over streaming/virtual URLs. If both streaming and in-person options exist, use the in-person venue.';
+      const todayDate = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
       const systemPrompt = `You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
 
-Today's date is 2025-09-07. If a date is not a full date with month, day and year, assume it is in the future past today (2025-09-07). If a date has explicit parameters (month/day/year), then it is ok to be in the past.
+# PRIMARY EVENT IDENTIFICATION - READ THIS FIRST
+Your primary task is to identify and extract ONLY the MAIN event described in the content.
+How to identify the primary event:
+- It's typically the most prominently featured and detailed event
+- It's often the first event described in detail
+- It's usually the subject of the email or central content of the webpage
+- For ticketed events, it's the event for which the ticket/confirmation is issued
 
-Extract event details from the provided content. Pay attention to:
+Explicitly IGNORE these secondary events:
+- Events labeled as "Related Events", "You might also like", "Upcoming Events", "Other shows"
+- Events in sidebars or supplementary sections
+- Events mentioned only in passing or with minimal details
+- Any event clearly not the focus of the email/page
+
+EXTREMELY IMPORTANT: IF you find multiple events and are unsure which is primary, choose the event with:
+1. The most complete details (date, time, location)
+2. The earliest upcoming date
+3. The most prominence in the content
+
+# MULTI-DAY EVENT HANDLING
+${multiday ? `MULTI-EVENT MODE: The user has checked the multi-event flag. Extract ALL related performances/sessions as SEPARATE events. Each different time slot should be a separate event in the events array. Do NOT combine multiple times into a single event. This applies to multiple concert performances, conference sessions across days, festival events on different dates, etc.` : `SINGLE EVENT MODE: Extract exactly one event. If multiple times are mentioned, choose the primary/first one or create a single event that encompasses the main timeframe.`}
+
+# DATE PARSING RULES
+Today's date is ${todayDate}.
+When parsing dates:
+1. If the year IS explicitly mentioned, use that year
+2. If the year is NOT explicitly mentioned:
+   - Use current year if the date is ON or AFTER today
+   - Use next year if the date is BEFORE today
+3. Use the correct timezone abbreviation based on the date (e.g., PDT vs PST for Pacific)
+4. Be aware that many events are scheduled months in advance; carefully check if dates are in the past relative to today
+5. If multiple dates are mentioned, prioritize dates that are explicitly associated with the primary event
+
+# TIMEZONE INFERENCE
+If a location is specified, infer the appropriate timezone:
+- Eastern Time: New York, Boston, Miami, Atlanta, Washington DC, Florida, etc.
+- Central Time: Chicago, Dallas, Houston, Memphis, Minneapolis, New Orleans, etc.
+- Mountain Time: Denver, Salt Lake City, Phoenix, Albuquerque, etc.
+- Pacific Time: Los Angeles, San Francisco, Seattle, Portland, San Diego, etc.
+- Hawaii-Aleutian Time: Hawaii, Honolulu, etc.
+- Alaska Time: Anchorage, Juneau, etc.
+For international locations, determine the appropriate timezone for that region.
+If no location is found in the content, default to ${defaultTimezone}.
+
+# FIELD INSTRUCTIONS
 - Use ISO 8601 date format (YYYY-MM-DD) and 24-hour time format (HH:MM)
-- For all-day events, set start_time and end_time to null
-- If no end time specified, make reasonable estimate
-- Default timezone is America/New_York unless specified
-- ${multiday ? "MULTI-EVENT MODE: The user has checked the multi-event flag, indicating they want multiple separate calendar events extracted. Extract ALL distinct event times/sessions mentioned on the page as separate events. Each different time slot should be a separate event in the events array. Do NOT combine multiple times into a single event." : "SINGLE EVENT MODE: Extract exactly one event. If multiple times are mentioned, choose the primary/first one or create a single event that encompasses the main timeframe."}
+- For all-day events, set start_time and end_time to null and isAllDay to true
+- Date/Time: Calculate end time if missing (2h default, 3h for opera, 30m for doctor appointments)
 - Event status: ${tentative ? "Tentative" : "Confirmed"} (set status field only; do NOT include a "Status:" line in the description)
-- Title prefix (group/host): Determine the presenting organization from the page/site (prefer <meta property="og:site_name">, the site header/brand, or phrases like "X presents ..."). Set the event summary to "[Group]: [Event Title]". Avoid duplicating the prefix if already present.
-  - Examples: "KQED Live presents \u2026" -> summary "KQED Live: \u2026". If the site is sfsymphony.org or sanfranciscosymphony.org, use "SF Symphony: \u2026".
-  - IMPORTANT: Never use a ticketing/platform brand (e.g., Eventbrite, Ticketmaster) as the group. If the domain is eventbrite.com, identify the organizer from the page (e.g., the Organizer/By section or organizer profile) and use that as the group. If no organizer can be found, omit the prefix rather than using the platform name.
-- Concerts: Include the complete program as listed on the page in the description under a section titled "Program:". Preserve the order, include composer names and full work titles (and movements if listed).
-- Location selection: If both streaming and in-person options are present, ALWAYS use the in-person option. Set the location to the physical venue name AND address (street, city, state) if available. You may include a URL as the location only if no physical venue/address is available anywhere on the page; otherwise, never use a URL for the location. You may mention streaming details in the description, but the location must prefer the physical address.
-- CRITICAL: Always include a link back to the event page in the "url" field. Use the source URL provided below.
-- CRITICAL: Always include a link back to the event page at the bottom of the description. Append it with the format: "\\n\\nEvent page: [URL]" using the source URL provided below.
-- Important: Do NOT fetch or browse the Source URL or any external resources. Only use the provided HTML under "Content to analyze" and the optional screenshot image. The Source URL is for attribution/reference only.`;
+- description: Concise summary with rich details. Use \\n for newlines. Keep under 1000 chars. DO NOT include raw HTML.
+- htmlDescription: HTML formatted version of the description. Use basic HTML tags only (p, a, b, i, ul, ol, li, br). DO NOT include <style> tags or inline style attributes. If a source URL was provided, include it at the bottom as a clickable link.
+- location: The venue name or address.
+- emailSubject: Use the generated event summary.
+- locationLookup: Location string suitable for Google Maps lookup.
+- CRITICAL: Always include the event page link in the "url" field using the source URL provided.
+- CRITICAL: Always include the event page link at the bottom of the description: "\\n\\nEvent page: [URL]"
+- CRITICAL: Always include the event page link at the bottom of the htmlDescription as a clickable <a> tag.
+- Important: Do NOT fetch or browse the Source URL or any external resources. Only use the provided HTML under "Content to analyze" and the optional screenshot image. The Source URL is for attribution/reference only.
+
+# IGNORE SPONSOR OR POLICY DISCLAIMERS
+Do not include details about sponsors or policy disclaimers unless they are explicitly part of the main event content.
+
+# ERROR HANDLING
+IF NO DATES ARE FOUND ANYWHERE IN THE CONTENT, set success to false with errorMessage "Content didn't contain dates or times" and return an empty events array.
+
+# USER PREFERENCES
+${customPrompt}`;
       const userText = `${instructions ? `Special instructions: ${instructions}
 ` : ""}
 Source URL (MUST be included in the url field AND at the bottom of the description as "Event page: ${cleanUrl}"): ${cleanUrl}
@@ -28671,11 +28734,25 @@ ${pageData.html}`;
       const eventSchema = {
         type: "object",
         properties: {
+          success: {
+            type: "boolean",
+            description: "Whether event extraction was successful. False if no dates found."
+          },
+          errorMessage: {
+            type: "string",
+            description: "Error message if success is false, empty string otherwise"
+          },
+          emailSubject: {
+            type: "string",
+            description: "Email subject line using the event summary"
+          },
+          locationLookup: {
+            type: "string",
+            description: "Location string suitable for Google Maps lookup"
+          },
           events: {
             type: "array",
-            description: multiday ? "Array of calendar events (extract ALL distinct event times/sessions as separate events)" : "Array of calendar events (must contain exactly one event)",
-            minItems: multiday ? 2 : 1,
-            maxItems: multiday ? 50 : 1,
+            description: multiday ? "Array of calendar events (extract ALL distinct event times/sessions as separate events)" : "Array of calendar events (exactly one event when success is true)",
             items: {
               type: "object",
               properties: {
@@ -28685,7 +28762,7 @@ ${pageData.html}`;
                 },
                 location: {
                   type: "string",
-                  description: "Physical venue name and address (preferred). If no physical venue/address is available, use a URL. If both streaming and in-person exist, choose the in-person venue address."
+                  description: "Venue name or address"
                 },
                 start_date: {
                   type: "string",
@@ -28709,24 +28786,31 @@ ${pageData.html}`;
                 },
                 description: {
                   type: "string",
-                  description: "Event description. MUST end with a link back to the event page in the format: \\n\\nEvent page: [URL]"
+                  description: "Plain text event description (under 1000 chars). MUST end with Event page: [URL]"
+                },
+                htmlDescription: {
+                  type: "string",
+                  description: "HTML formatted description using basic tags (p, a, b, i, ul, ol, li, br). No style tags. Include event page link at bottom."
                 },
                 timezone: {
                   type: "string",
-                  default: "America/New_York",
-                  description: "Timezone for the event"
+                  description: "IANA timezone identifier (e.g., America/Los_Angeles)"
                 },
                 url: {
                   type: "string",
-                  description: "Link back to the event page (use the source URL provided)"
+                  description: "Link to the event page (source URL)"
+                },
+                isAllDay: {
+                  type: "boolean",
+                  description: "Whether this is an all-day event (true when start_time is null)"
                 }
               },
-              required: ["summary", "location", "start_date", "end_date", "start_time", "end_time", "description", "timezone", "url"],
+              required: ["summary", "location", "start_date", "end_date", "start_time", "end_time", "description", "htmlDescription", "timezone", "url", "isAllDay"],
               additionalProperties: false
             }
           }
         },
-        required: ["events"],
+        required: ["success", "errorMessage", "emailSubject", "locationLookup", "events"],
         additionalProperties: false
       };
       const userContent = [
@@ -28837,13 +28921,14 @@ ${cleanedHtml}`;
           cleaned = cleaned.replace(/```\n?/, "").replace(/\n?```$/, "");
         }
         const parsed = JSON.parse(cleaned);
-        if (!parsed.events || !Array.isArray(parsed.events)) {
-          throw new Error("Response must contain an events array");
+        if (parsed.success === false) {
+          throw new Error(parsed.errorMessage || "AI could not extract event data from the content");
         }
-        if (parsed.events.length === 0) {
-          throw new Error("Events array cannot be empty");
+        const events = Array.isArray(parsed.events) ? parsed.events : Array.isArray(parsed) ? parsed : parsed.eventData ? Array.isArray(parsed.eventData) ? parsed.eventData : [parsed.eventData] : null;
+        if (!events || events.length === 0) {
+          throw new Error("No events found in AI response");
         }
-        for (const event of parsed.events) {
+        for (const event of events) {
           if (!event.summary) {
             throw new Error("Missing required field: summary");
           }
@@ -28851,7 +28936,11 @@ ${cleanedHtml}`;
             throw new Error("Missing required field: start_date");
           }
         }
-        return parsed.events;
+        return {
+          events,
+          emailSubject: parsed.emailSubject || events[0]?.summary || "Calendar Event",
+          locationLookup: parsed.locationLookup || events[0]?.location || ""
+        };
       } catch (error) {
         console.error("Error parsing AI response:", error);
         throw new Error(`Failed to parse AI response: ${error.message}`);
@@ -28863,24 +28952,26 @@ ${cleanedHtml}`;
           return "";
         return text.replace(/(^|\n)\s*Status:\s*(Tentative|Confirmed)\s*(?=\n|$)/gi, "$1").trim();
       };
+      const promptSettings = await chrome.storage.sync.get(["defaultTimezone"]);
+      const fallbackTz = promptSettings.defaultTimezone || "America/Los_Angeles";
       const eventDataArray = events.map((eventData) => ({
         summary: eventData.summary,
         description: sanitizeDescription(eventData.description || ""),
         location: eventData.location || "",
         dtstart: eventData.start_date + (eventData.start_time ? `T${eventData.start_time}:00` : "T00:00:00"),
         dtend: eventData.end_date ? eventData.end_date + (eventData.end_time ? `T${eventData.end_time}:00` : "T23:59:59") : void 0,
-        timezone: eventData.timezone || "America/New_York",
-        isAllDay: eventData.start_time === null,
+        timezone: eventData.timezone || fallbackTz,
+        isAllDay: eventData.isAllDay ?? eventData.start_time === null,
         status: tentative ? "tentative" : "confirmed",
         url: eventData.url
       }));
       const settings = await chrome.storage.sync.get(["fromEmail"]);
       return icsGenerator.generateIcs(eventDataArray, {}, settings.fromEmail);
     }
-    async function showReviewSection(events, icsContent) {
+    async function showReviewSection(events, icsContent, emailSubject) {
       processingView.style.display = "none";
       reviewSection.style.display = "block";
-      reviewData = { eventData: events, icsContent };
+      reviewData = { eventData: events, icsContent, emailSubject };
       const reviewContent = document.getElementById("review-content");
       const reviewRecipient = document.getElementById("review-recipient");
       const reviewSubject = document.getElementById("review-subject");
@@ -29008,7 +29099,7 @@ ${cleanedHtml}`;
         showReviewStatus("Sending email...", "loading");
         disableReviewButtons(true);
         try {
-          await sendEmail(reviewData.eventData, reviewData.icsContent, tentativeToggle.checked);
+          await sendEmail(reviewData.eventData, reviewData.icsContent, tentativeToggle.checked, reviewData.emailSubject);
           console.log("\u2705 Email sent successfully from review section");
           hideReviewStatus();
           reviewSection.style.display = "none";
@@ -29047,6 +29138,10 @@ ${cleanedHtml}`;
       const toConfirmedEmailInput = document.getElementById("toConfirmedEmail");
       const toConfirmedEmail = toConfirmedEmailInput.value.trim();
       const defaultModel = defaultModelSelect.value || DEFAULT_MODEL_ID;
+      const defaultTimezoneInput = document.getElementById("defaultTimezone");
+      const defaultTimezone = defaultTimezoneInput?.value.trim() || "America/Los_Angeles";
+      const customPromptInput = document.getElementById("customPrompt");
+      const customPrompt = customPromptInput?.value ?? '- Summary format for artistic/cultural events: "Venue - Artist/Show" (e.g., "SF Opera - La Boheme", "Stern Grove - The Honeydrips", "Davies Hall - SF Symphony")\n- For concerts with programs: "Venue - Program Title" (e.g., "SF Symphony - Sibelius and Mahler")\n- For general events: Keep the summary concise and descriptive (e.g., "Dr. White Appointment")\n- Title prefix: Determine the presenting organization from the page/site (prefer <meta property="og:site_name">, the site header/brand, or phrases like "X presents...").\n- IMPORTANT: Never use a ticketing/platform brand (e.g., Eventbrite, Ticketmaster) as the group prefix. If the domain is eventbrite.com, identify the organizer from the page (e.g., the Organizer/By section or organizer profile). If no organizer can be found, omit the prefix rather than using the platform name.\n- Concerts: Include the complete program in the description under a "Program:" section. Preserve order, include composer names and full work titles (and movements if listed).\n- For artistic events: Highlight featured artists, performers, and full program/repertoire.\n- For concerts/opera: Include composer names, piece titles, featured soloists.\n- For conferences: Include key speakers and session topics.\n- For flights: Include Flight #, Confirmation #, Departure/Arrival details.\n- Include Eventbrite ticket links prominently if found in the content.\n- Location: Always prefer physical venue name and address over streaming/virtual URLs. If both streaming and in-person options exist, use the in-person venue.';
       if (!openRouterKey) {
         showStatus("OpenRouter API key is required", "error", true);
         return;
@@ -29073,7 +29168,9 @@ ${cleanedHtml}`;
         fromEmail,
         toTentativeEmail,
         toConfirmedEmail,
-        defaultModel
+        defaultModel,
+        defaultTimezone,
+        customPrompt
       });
       showStatus("Settings saved successfully!", "success");
       if (areRequiredSettingsPresent({ openRouterKey, postmarkApiKey, fromEmail, toTentativeEmail, toConfirmedEmail })) {
@@ -29147,11 +29244,12 @@ ${event.data.data.selectedText}`;
       a.click();
       URL.revokeObjectURL(url);
     };
-    async function sendEmail(events, icsContent, tentative) {
+    async function sendEmail(events, icsContent, tentative, emailSubject) {
       console.log("\u{1F4EC} sendEmail function called:", {
         eventCount: events.length,
         icsLength: icsContent.length,
-        tentative
+        tentative,
+        emailSubject
       });
       try {
         console.log("\u2699\uFE0F Loading email settings...");
@@ -29184,7 +29282,7 @@ ${event.data.data.selectedText}`;
           const event = events[i];
           console.log(`\u{1F4E7} Sending email ${i + 1}/${events.length} for event: ${event.summary}`);
           const singleEventIcs = await generateICSContent([event], tentative);
-          const subject = `Calendar Event: ${event.summary}`;
+          const subject = events.length === 1 && emailSubject ? `Calendar Event: ${emailSubject}` : `Calendar Event: ${event.summary}`;
           const cleanDesc = sanitizeDescription(event.description || "");
           const emailBody = `Please find the calendar invitation attached.
 
@@ -29204,11 +29302,15 @@ ${event.location ? `Location: ${event.location}
               }
             ]
           };
+          if (event.htmlDescription) {
+            emailPayload.HtmlBody = event.htmlDescription;
+          }
           console.log(`\u{1F4E4} Sending email ${i + 1}/${events.length} payload to background script:`, {
             from: emailPayload.From,
             to: emailPayload.To,
             subject: emailPayload.Subject,
             bodyLength: emailPayload.TextBody.length,
+            hasHtmlBody: !!emailPayload.HtmlBody,
             attachmentSize: emailPayload.Attachments[0].Content.length
           });
           const response = await chrome.runtime.sendMessage({
