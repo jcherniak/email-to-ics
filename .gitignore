@@ -16,4 +16,5 @@ DerivedData/
 build/
 **/.turbo
 **/*.tsbuildinfo
+**/dist/
 worktrees
