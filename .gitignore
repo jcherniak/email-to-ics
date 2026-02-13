@@ -15,5 +15,5 @@ packages/full-chrome-extension-view/
 DerivedData/
 build/
 **/.turbo
-*.tsbuildinfo
+**/*.tsbuildinfo
 worktrees
