@@ -87,7 +87,7 @@ Extract event details and return ONLY a valid JSON object with this exact struct
       "timezone": "America/Los_Angeles",
       "isAllDay": false,
       "status": "confirmed",
-      "url": "source URL if applicable"
+      "url": "link back to the event page (source URL)"
     }
   ]
 }
@@ -99,7 +99,9 @@ Rules:
 - Preserve original HTML in htmlDescription when available
 - Set status to "tentative" if event seems tentative/unconfirmed
 - Support multi-day events by creating multiple event objects
-- Return empty array if no events found`;
+- Return empty array if no events found
+- CRITICAL: Always include a link back to the event page in the "url" field. Use the source URL if provided.
+- CRITICAL: Always include a link back to the event page at the bottom of the description. Append it with the format: "\\n\\nEvent page: [URL]" using the source URL.`;
 
     let userContent = '';
     
