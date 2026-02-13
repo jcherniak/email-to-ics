@@ -7,7 +7,7 @@
   "scripts": {
     "build": "npm run clean && npm run build:shared-core && npm run build:popup && npm run build:content && npm run copy-assets",
     "build:shared-core": "cd ../shared-core && npm run build",
-    "build:popup": "esbuild src/popup.ts --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --external:chrome --external:fs --external:path --external:ical-generator --define:global=globalThis --platform=browser",
+    "build:popup": "node build-popup.cjs",
     "build:content": "esbuild src/content.ts --bundle --outfile=dist/content.js --format=iife --sourcemap --external:chrome --platform=browser",
     "copy-assets": "bash copy-assets.sh",
     "watch": "npm run build:shared-core && esbuild src/popup.ts --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --watch --external:chrome",
