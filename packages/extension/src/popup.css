@@ -22,3 +22,20 @@ body {
 label {
     font-weight: bold;
 }
+
+/* select2 inside Bootstrap input-group */
+.input-group .select2-container {
+    flex: 1 1 auto;
+    width: auto !important;
+}
+.input-group .select2-container .select2-selection {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+.input-group .select2-container .select2-selection__arrow {
+    top: 50%;
+    transform: translateY(-50%);
+}
