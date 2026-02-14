@@ -26,22 +26,20 @@ type ModelOption = {
 
 const DEFAULT_MODEL_ID = 'google/gemini-3-pro-preview';
 const PRIORITY_MODEL_IDS = [
-  'openai/gpt-5.1',
+  'openai/gpt-5.2',
+  'openai/gpt-5.2-codex',
+  'anthropic/claude-opus-4.6',
   'anthropic/claude-sonnet-4.5',
-  'google/gemini-2.5-flash',
-  'openai/gpt-5-mini',
   'google/gemini-3-pro-preview',
-  'google/gemini-2.5-pro',
-  'anthropic/claude-opus-4.5'
+  'google/gemini-3-flash-preview',
 ];
 const PRIORITY_MODEL_LABELS: Record<string, string> = {
-  'openai/gpt-5.1': 'GPT-5.1',
+  'openai/gpt-5.2': 'GPT-5.2',
+  'openai/gpt-5.2-codex': 'GPT-5.2 Codex',
+  'anthropic/claude-opus-4.6': 'Claude Opus 4.6',
   'anthropic/claude-sonnet-4.5': 'Claude Sonnet 4.5',
-  'google/gemini-2.5-flash': 'Gemini 2.5 Flash',
-  'openai/gpt-5-mini': 'GPT-5 Mini',
-  'google/gemini-3-pro-preview': 'Gemini 3 Pro Preview',
-  'google/gemini-2.5-pro': 'Gemini 2.5 Pro',
-  'anthropic/claude-opus-4.5': 'Claude Opus 4.5'
+  'google/gemini-3-pro-preview': 'Gemini 3 Pro',
+  'google/gemini-3-flash-preview': 'Gemini 3 Flash',
 };
 
 // Global state
@@ -432,12 +430,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         try {
             // Use background script to fetch models to avoid CSP issues
             const response = await chrome.runtime.sendMessage({ action: 'listModels' });
-            
-            if (!response.success) {
-                console.warn('Failed to fetch models from background:', response.error);
+
+            if (!response || !response.success) {
+                console.warn('Failed to fetch models from background:', response?.error);
                 return getOfflinePriorityModels();
             }
-            
+
             const normalizedModels = normalizeModels(response.data || []);
             if (normalizedModels.length === 0) {
                 console.warn('No models returned from API; using offline priority list');
@@ -446,7 +444,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
             console.log("Available models (raw):", normalizedModels);
             return normalizedModels;
-            
+
         } catch (error) {
             console.error("Error fetching models:", error);
             return getOfflinePriorityModels();
@@ -900,6 +898,9 @@ If no location is found in the content, default to ${defaultTimezone}.
 - CRITICAL: Always include the event page link at the bottom of the description: "\\n\\nEvent page: [URL]"
 - CRITICAL: Always include the event page link at the bottom of the htmlDescription as a clickable <a> tag.
 - Important: Do NOT fetch or browse the Source URL or any external resources. Only use the provided HTML under "Content to analyze" and the optional screenshot image. The Source URL is for attribution/reference only.
+
+# SUMMARY FORMATTING
+- For concerts, music performances, and similar events, format the summary as: "Artist/Group - Concert/Show Name" (e.g., "Radiohead - In Rainbows Tour", "NY Philharmonic - Beethoven's 9th"). The artist or performing group comes FIRST, followed by the specific concert or program name.
 
 # IGNORE SPONSOR OR POLICY DISCLAIMERS
 Do not include details about sponsors or policy disclaimers unless they are explicitly part of the main event content.

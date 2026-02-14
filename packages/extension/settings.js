@@ -38,7 +38,7 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('fromEmail').value = settings.fromEmail || '';
             document.getElementById('toTentativeEmail').value = settings.toTentativeEmail || '';
             document.getElementById('toConfirmedEmail').value = settings.toConfirmedEmail || '';
-            document.getElementById('aiModel').value = settings.aiModel || 'google/gemini-2.5-pro';
+            document.getElementById('aiModel').value = settings.aiModel || 'google/gemini-3-pro-preview';
             
             // Load available models
             loadAvailableModels();
@@ -137,15 +137,12 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Define allowed models list
             const allowedModelIds = [
-                'anthropic/claude-3.7-sonnet:thinking',
-                'google/gemini-2.5-flash:thinking',
-                'google/gemini-2.5-flash',
-                'openai/o4-mini-high',
-                'openai/o3',
-                'openai/gpt-4.1',
-                'google/gemini-2.5-pro',
-                'anthropic/claude-opus-4',
-                'openai/o3-pro'
+                'openai/gpt-5.2',
+                'openai/gpt-5.2-codex',
+                'anthropic/claude-opus-4.6',
+                'anthropic/claude-sonnet-4.5',
+                'google/gemini-3-pro-preview',
+                'google/gemini-3-flash-preview',
             ];
             
             let availableAllowedModels = [];
@@ -219,7 +216,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Clear form
             form.reset();
-            document.getElementById('aiModel').value = 'google/gemini-2.5-pro';
+            document.getElementById('aiModel').value = 'google/gemini-3-pro-preview';
             
             showStatus('All settings cleared successfully.', 'success');
             
@@ -232,15 +229,12 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             // Define allowed models as specified
             const allowedModels = [
-                { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-                { id: 'anthropic/claude-opus-4', name: 'Claude Opus 4' },
-                { id: 'anthropic/claude-3.7-sonnet:thinking', name: 'Claude 3.7 Sonnet (Thinking)' },
-                { id: 'google/gemini-2.5-flash:thinking', name: 'Gemini 2.5 Flash (Thinking)' },
-                { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-                { id: 'openai/o4-mini-high', name: 'GPT-4 Mini High' },
-                { id: 'openai/o3', name: 'GPT-O3' },
-                { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
-                { id: 'openai/o3-pro', name: 'GPT-O3 Pro' }
+                { id: 'openai/gpt-5.2', name: 'GPT-5.2' },
+                { id: 'openai/gpt-5.2-codex', name: 'GPT-5.2 Codex' },
+                { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6' },
+                { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
+                { id: 'google/gemini-3-pro-preview', name: 'Gemini 3 Pro' },
+                { id: 'google/gemini-3-flash-preview', name: 'Gemini 3 Flash' },
             ];
             
             const modelSelect = document.getElementById('aiModel');
@@ -261,14 +255,14 @@ document.addEventListener('DOMContentLoaded', function() {
             if (currentValue && allowedModels.find(m => m.id === currentValue)) {
                 modelSelect.value = currentValue;
             } else {
-                modelSelect.value = 'google/gemini-2.5-pro';
+                modelSelect.value = 'google/gemini-3-pro-preview';
             }
-            
+
         } catch (error) {
             console.error('Error loading models:', error);
             // Fallback to default model
             const modelSelect = document.getElementById('aiModel');
-            modelSelect.innerHTML = '<option value="google/gemini-2.5-pro">Gemini 2.5 Pro (fallback)</option>';
+            modelSelect.innerHTML = '<option value="google/gemini-3-pro-preview">Gemini 3 Pro (fallback)</option>';
         }
     }
     

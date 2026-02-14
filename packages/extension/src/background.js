@@ -182,19 +182,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // List available models from OpenRouter
     (async () => {
       console.log('📋 Background: Starting models list request');
-      let controller = new AbortController();
-      
+
       try {
         const { openRouterKey } = await chrome.storage.sync.get(['openRouterKey']);
-        
+
         const response = await fetch('https://openrouter.ai/api/v1/models', {
           headers: openRouterKey ? {
             'Authorization': `Bearer ${openRouterKey}`,
             'Content-Type': 'application/json'
           } : {
             'Content-Type': 'application/json'
-          },
-          signal: controller.signal
+          }
         });
 
         if (!response.ok) {
@@ -207,12 +205,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       } catch (error) {
         console.error('💥 Background: Models list error:', error);
         sendResponse({ success: false, error: error.message });
-      } finally {
-        if (controller) {
-          controller.abort();
-          controller = null;
-        }
-        console.log('🧹 Background: Models request cleanup completed');
       }
     })();
     return true; // Keep message channel open for async response
