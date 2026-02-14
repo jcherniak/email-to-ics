@@ -370,8 +370,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             width: '100%'
         });
 
-        $(modelSelect).off('change');
-        $(modelSelect).on('change', () => {
+        $(modelSelect).off('change.popup');
+        $(modelSelect).on('change.popup', () => {
             selectedModel = modelSelect.value || null;
         });
 
