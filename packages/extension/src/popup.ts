@@ -376,7 +376,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     function syncModelSelectValue() {
         if (!modelSelect) return;
         const value = selectedModel || '';
-        $(modelSelect).val(value).trigger('change.select2');
+        $(modelSelect).val(value).trigger('change');
     }
 
     function getOfflinePriorityModels(): ModelOption[] {
