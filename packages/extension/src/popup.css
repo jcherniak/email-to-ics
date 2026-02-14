@@ -1,10 +1,17 @@
 /* popup.css - Minimal overrides for Chrome extension iframe */
-body {
+html, body {
     margin: 0;
+    overflow: hidden;
 }
 
 .container-fluid {
-    overflow-y: auto;
+    overflow: hidden;
+}
+
+/* Hide empty status divs so they don't add whitespace */
+#status:empty,
+#review-status:empty {
+    display: none;
 }
 
 /* Make labels bold */

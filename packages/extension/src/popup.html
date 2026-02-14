@@ -9,7 +9,7 @@
 </head>
 <body>
     <div class="container-fluid p-0">
-        <div class="d-flex justify-content-between align-items-center p-3 bg-light border-bottom">
+        <div class="d-flex justify-content-between align-items-center px-3 py-2 bg-light border-bottom">
             <h5 class="mb-0">Email to ICS Converter</h5>
             <div class="d-flex align-items-center gap-2">
                 <button type="button" class="btn btn-sm btn-outline-secondary" id="open-settings">Settings</button>
@@ -100,6 +100,13 @@
                     <textarea class="form-control" id="customPrompt" rows="8" placeholder="Add personal formatting preferences for event extraction..."></textarea>
                     <div class="form-text">Extra instructions appended to the AI prompt. Use this for summary formatting, concert programs, flight details, etc.</div>
                 </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch" id="preextract-toggle" checked>
+                        <label class="form-check-label" for="preextract-toggle">Pre-extract main content before AI analysis</label>
+                    </div>
+                    <div class="form-text">When enabled, strips navigation, ads, and boilerplate before sending to the AI. Reduces token usage and improves accuracy.</div>
+                </div>
                 <div class="d-flex gap-2">
                     <button id="test-connection" class="btn btn-outline-primary">Test Connection</button>
                     <button id="save-settings" class="btn btn-primary">Save Settings</button>
@@ -135,10 +142,6 @@
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" role="switch" id="multiday-toggle">
                             <label class="form-check-label" for="multiday-toggle">Multi-day</label>
-                        </div>
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" role="switch" id="preextract-toggle">
-                            <label class="form-check-label" for="preextract-toggle">Extract main content before sending</label>
                         </div>
                     </div>
                     <div class="col-6">
@@ -235,7 +238,7 @@
             
         </div>
     </div>
-    <div id="build-timestamp" style="position:fixed;bottom:4px;right:8px;font-size:10px;color:#aaa;pointer-events:none;"></div>
+    <div id="build-timestamp" style="text-align:right;padding:2px 8px;font-size:10px;color:#aaa;"></div>
     <script src="popup.bundle.js"></script>
 </body>
 </html>

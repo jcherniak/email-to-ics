@@ -85,15 +85,13 @@ class TabStateManager {
         const instructionsInput = document.getElementById('instructions') as HTMLTextAreaElement;
         const tentativeToggle = document.getElementById('tentative-toggle') as HTMLInputElement;
         const multidayToggle = document.getElementById('multiday-toggle') as HTMLInputElement;
-        const preextractToggle = document.getElementById('preextract-toggle') as HTMLInputElement;
-        
+
         const state = {
             formData: {
                 instructions: instructionsInput?.value || '',
                 model: selectedModel || '',
                 tentative: tentativeToggle?.checked || false,
                 multiday: multidayToggle?.checked || false,
-                preextract: preextractToggle?.checked ?? true,
                 reviewOption: (document.querySelector('input[name="review-option"]:checked') as HTMLInputElement)?.value || 'direct'
             },
             processingState: {
@@ -128,13 +126,11 @@ class TabStateManager {
                 const instructionsInput = document.getElementById('instructions') as HTMLTextAreaElement;
                 const tentativeToggle = document.getElementById('tentative-toggle') as HTMLInputElement;
                 const multidayToggle = document.getElementById('multiday-toggle') as HTMLInputElement;
-                const preextractToggle = document.getElementById('preextract-toggle') as HTMLInputElement;
-                
+
                 if (form.instructions && instructionsInput) instructionsInput.value = form.instructions;
                 if (form.model) selectedModel = form.model;
                 if (tentativeToggle) tentativeToggle.checked = form.tentative;
                 if (multidayToggle) multidayToggle.checked = form.multiday;
-                if (preextractToggle && typeof form.preextract === 'boolean') preextractToggle.checked = form.preextract;
                 if (form.reviewOption) {
                     const radio = document.querySelector(`input[name="review-option"][value="${form.reviewOption}"]`) as HTMLInputElement;
                     if (radio) radio.checked = true;
@@ -160,7 +156,16 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     // Check if we're running in an iframe
     const isInIframe = window.self !== window.top;
-    
+
+    // Auto-resize iframe to fit content (no dead space)
+    if (isInIframe) {
+        const resizeObserver = new ResizeObserver(() => {
+            const height = document.body.scrollHeight + 6;
+            window.parent.postMessage({ type: 'RESIZE_IFRAME', height }, '*');
+        });
+        resizeObserver.observe(document.body);
+    }
+
     // Initialize tab state manager
     const tabStateManager = new TabStateManager();
     await tabStateManager.initialize();
@@ -174,7 +179,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     const processingView = document.getElementById('processingView')!;
     const instructionsInput = document.getElementById('instructions') as HTMLTextAreaElement;
     const modelSelect = document.getElementById('model-select') as HTMLSelectElement;
-    const preextractToggle = document.getElementById('preextract-toggle') as HTMLInputElement;
     const tentativeToggle = document.getElementById('tentative-toggle') as HTMLInputElement;
     const multidayToggle = document.getElementById('multiday-toggle') as HTMLInputElement;
     const convertButton = document.getElementById('convert-button') as HTMLButtonElement;
@@ -253,7 +257,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (modelSelect) $(modelSelect).prop('disabled', disable);
         refreshModelsButton.disabled = disable;
         tentativeToggle.disabled = disable;
-        if (preextractToggle) preextractToggle.disabled = disable;
         const reviewRadios = document.querySelectorAll('input[name="review-option"]') as NodeListOf<HTMLInputElement>;
         reviewRadios.forEach(radio => radio.disabled = disable);
     }
@@ -531,7 +534,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         const settings = await chrome.storage.sync.get([
             'openRouterKey', 'postmarkApiKey', 'fromEmail',
             'toTentativeEmail', 'toConfirmedEmail', 'defaultModel',
-            'defaultTimezone', 'customPrompt'
+            'defaultTimezone', 'customPrompt', 'preextract'
         ]);
 
         openRouterKeyInput.value = settings.openRouterKey || '';
@@ -547,6 +550,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         const customPromptInput = document.getElementById('customPrompt') as HTMLTextAreaElement;
         if (defaultTimezoneSelect) defaultTimezoneSelect.value = settings.defaultTimezone || __DEFAULT_TIMEZONE__;
         if (customPromptInput) customPromptInput.value = settings.customPrompt ?? __CUSTOM_PROMPT_DEFAULT__;
+        const preextractToggle = document.getElementById('preextract-toggle') as HTMLInputElement;
+        if (preextractToggle) preextractToggle.checked = settings.preextract !== false; // default true
 
         await populateDefaultModels(settings.defaultModel);
     }
@@ -685,15 +690,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                 selector: pageContent.selector
             });
 
-            // Auto-check pre-extract if HTML > 200 KB; otherwise leave user's toggle
-            const overThreshold = pageContent.html.length > 200 * 1024;
-            const preextract = overThreshold ? true : (preextractToggle?.checked ?? false);
-            if (preextractToggle && preextractToggle.checked !== preextract) {
-                preextractToggle.checked = preextract;
-            }
-            if (overThreshold) {
-                console.log('🧼 Large HTML detected (>200KB). Enabling pre-extraction.');
-            }
+            // Read pre-extract setting from storage (default true)
+            const preextractSetting = await chrome.storage.sync.get(['preextract']);
+            const preextract = preextractSetting.preextract !== false;
             
             // Update request details
             requestData.textContent = JSON.stringify({
@@ -1417,6 +1416,7 @@ ${customPrompt}`;
             return;
         }
 
+        const preextractSetting = (document.getElementById('preextract-toggle') as HTMLInputElement)?.checked ?? true;
         await chrome.storage.sync.set({
             openRouterKey,
             postmarkApiKey,
@@ -1425,7 +1425,8 @@ ${customPrompt}`;
             toConfirmedEmail,
             defaultModel,
             defaultTimezone,
-            customPrompt
+            customPrompt,
+            preextract: preextractSetting
         });
 
         showStatus('Settings saved successfully!', 'success');
