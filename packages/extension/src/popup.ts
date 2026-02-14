@@ -366,7 +366,6 @@ document.addEventListener('DOMContentLoaded', async function() {
 
         $(modelSelect).select2({
             placeholder: $(modelSelect).data('placeholder') || 'Search or select a model',
-            allowClear: true,
             width: '100%'
         });
 
@@ -1369,6 +1368,13 @@ ${customPrompt}`;
     // Settings event handlers
     openSettingsButton?.addEventListener('click', () => {
         showSettings();
+    });
+
+    document.querySelectorAll('.toggle-password').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const input = document.getElementById((btn as HTMLElement).dataset.target!) as HTMLInputElement;
+            if (input) input.type = input.type === 'password' ? 'text' : 'password';
+        });
     });
 
     saveSettingsButton?.addEventListener('click', async () => {
