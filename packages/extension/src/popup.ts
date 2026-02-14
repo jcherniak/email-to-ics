@@ -21,6 +21,7 @@ if (typeof select2Factory === 'function') {
 // Build-time defaults injected from .env.default / .env via build-popup.js
 declare const __DEFAULT_TIMEZONE__: string;
 declare const __CUSTOM_PROMPT_DEFAULT__: string;
+declare const __BUILD_TIMESTAMP__: string;
 
 type ModelOption = {
   id: string;
@@ -149,6 +150,10 @@ class TabStateManager {
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', async function() {
+    // Show build timestamp
+    const buildEl = document.getElementById('build-timestamp');
+    if (buildEl) buildEl.textContent = `Build: ${__BUILD_TIMESTAMP__}`;
+
     // Initialize platform adapters
     adapters = createBrowserAdapters();
     icsGenerator = new BrowserIcsGenerator();

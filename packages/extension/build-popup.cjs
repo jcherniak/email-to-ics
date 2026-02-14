@@ -47,9 +47,15 @@ async function build() {
         customPromptDefault = fs.readFileSync(customPromptPath, 'utf8').trim();
     }
 
+    const buildTimestamp = new Date().toLocaleString('en-US', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+    });
+
     const defines = {
         '__DEFAULT_TIMEZONE__': JSON.stringify(env.DEFAULT_TIMEZONE || 'America/Los_Angeles'),
         '__CUSTOM_PROMPT_DEFAULT__': JSON.stringify(env.CUSTOM_PROMPT || customPromptDefault),
+        '__BUILD_TIMESTAMP__': JSON.stringify(buildTimestamp),
         'global': 'globalThis'
     };
 
