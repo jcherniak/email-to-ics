@@ -11,7 +11,12 @@ import {
 import 'bootstrap';
 import ICAL from 'ical.js';
 import $ from 'jquery';
-import 'select2';
+import select2Factory from 'select2';
+
+// select2's CJS export is a factory that must be called to register $.fn.select2
+if (typeof select2Factory === 'function') {
+  select2Factory(window, $);
+}
 
 // Build-time defaults injected from .env.default / .env via build-popup.js
 declare const __DEFAULT_TIMEZONE__: string;
