@@ -82,6 +82,81 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       active: true
     });
     sendResponse({ success: true });
+  } else if (request.action === 'getPageContent') {
+    // Extract main page content via service worker
+    (async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab || !tab.id) {
+          sendResponse({ success: false, error: 'No active tab' });
+          return;
+        }
+
+        const [result] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            // Find the main content container
+            const selectors = [
+              'main',
+              'article',
+              '[role="main"]',
+              '#content',
+              '#main-content',
+              '#page-content',
+              '#main',
+              '#primary',
+              '.content',
+              '.main-content',
+              '.page-content',
+            ];
+
+            let contentEl = null;
+            for (const sel of selectors) {
+              const el = document.querySelector(sel);
+              // Only use if it has meaningful content (not just a wrapper with nav)
+              if (el && el.textContent.trim().length > 100) {
+                contentEl = el;
+                break;
+              }
+            }
+
+            // Fallback to body
+            if (!contentEl) {
+              contentEl = document.body;
+            }
+
+            // Clone and strip non-content elements
+            const clone = contentEl.cloneNode(true);
+            const stripSelectors = 'script, style, nav, footer, header, [role="navigation"], [role="banner"], [role="contentinfo"], .nav, .navbar, .footer, .header, .sidebar, .ad, .ads, .advertisement, noscript, iframe, svg';
+            clone.querySelectorAll(stripSelectors).forEach(el => el.remove());
+
+            // Remove HTML comments
+            const html = clone.innerHTML
+              .replace(/<!--[\s\S]*?-->/g, '')
+              .replace(/\s{2,}/g, ' ')
+              .trim();
+
+            return {
+              url: window.location.href,
+              html: html,
+              text: contentEl.textContent.trim(),
+              selector: contentEl === document.body ? 'body' : contentEl.tagName.toLowerCase() + (contentEl.id ? '#' + contentEl.id : '')
+            };
+          }
+        });
+
+        console.log('📄 Background: Page content extracted:', {
+          url: result.result?.url,
+          htmlLength: result.result?.html?.length || 0,
+          selector: result.result?.selector
+        });
+        sendResponse({ success: true, data: result.result });
+      } catch (error) {
+        console.error('💥 Background: getPageContent error:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true; // Keep message channel open for async response
   } else if (request.action === 'captureScreenshot') {
     // Privileged screenshot capture with zoom functionality
     (async () => {

@@ -259,15 +259,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     // Screenshot capture functionality
-    async function getActiveTab() {
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tabs && tabs.length > 0) {
-            return tabs[0];
-        } else {
-            throw new Error("Could not get active tab.");
-        }
-    }
-
     async function captureVisibleTabScreenshot(): Promise<string | null> {
         if (isInIframe) {
             // We're in an iframe, request screenshot from background
@@ -677,22 +668,17 @@ document.addEventListener('DOMContentLoaded', async function() {
             // Get current page content and URL
             console.log('📄 Getting page content...');
             statusMessage.textContent = 'Getting page content...';
-            const tab = await getActiveTab();
-            console.log('🔍 Active tab:', { id: tab.id, url: tab.url });
-            
-            const results = await chrome.scripting.executeScript({
-                target: { tabId: tab.id! },
-                func: () => ({
-                    url: window.location.href,
-                    html: document.documentElement.outerHTML,
-                    text: document.body.innerText
-                })
-            });
-            const pageContent = results[0].result;
+            // Extract main content via service worker
+            const contentResponse = await chrome.runtime.sendMessage({ action: 'getPageContent' });
+            if (!contentResponse || !contentResponse.success) {
+                throw new Error(`Failed to extract page content: ${contentResponse?.error || 'unknown error'}`);
+            }
+            const pageContent = contentResponse.data;
             console.log('📄 Page content extracted:', {
                 url: pageContent.url,
                 htmlLength: pageContent.html.length,
-                textLength: pageContent.text.length
+                textLength: pageContent.text.length,
+                selector: pageContent.selector
             });
 
             // Auto-check pre-extract if HTML > 200 KB; otherwise leave user's toggle
@@ -916,7 +902,7 @@ IF NO DATES ARE FOUND ANYWHERE IN THE CONTENT, set success to false with errorMe
 # USER PREFERENCES
 ${customPrompt}`;
 
-        const userText = `${instructions ? `Special instructions: ${instructions}\n` : ''}\nSource URL (MUST be included in the url field AND at the bottom of the description as "Event page: ${cleanUrl}"): ${cleanUrl}\n\nContent to analyze:\n${pageData.html}`;
+        const instructionsText = `${instructions ? `Special instructions: ${instructions}\n` : ''}Source URL (MUST be included in the url field AND at the bottom of the description as "Event page: ${cleanUrl}"): ${cleanUrl}`;
 
         const eventSchema = {
             type: "object",
@@ -1001,12 +987,12 @@ ${customPrompt}`;
             additionalProperties: false
         };
 
-        // Use background script to make API call to avoid CSP issues
-        const userContent: any[] = [
-            { type: 'text', text: userText }
+        // Build content message (HTML + optional screenshot)
+        const contentParts: any[] = [
+            { type: 'text', text: `Content to analyze:\n${pageData.html}` }
         ];
         if (screenshot) {
-            userContent.push({ type: 'image_url', image_url: { url: screenshot } });
+            contentParts.push({ type: 'image_url', image_url: { url: screenshot } });
         }
 
         const payload = {
@@ -1018,7 +1004,11 @@ ${customPrompt}`;
                 },
                 {
                     role: 'user',
-                    content: userContent
+                    content: instructionsText
+                },
+                {
+                    role: 'user',
+                    content: contentParts
                 }
             ],
             response_format: {
