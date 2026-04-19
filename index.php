@@ -1947,7 +1947,7 @@ HasBody:
         $eventSchema = [
             'type' => 'object',
             'properties' => [
-                'summary' => ['type' => 'string', 'description' => 'Concise title for the event.'],
+                'summary' => ['type' => 'string', 'description' => 'Concise title for the event, formatted as "<organization name:optional> - <event name>" and not prefixed with the venue unless the venue is itself the organizer/brand.'],
                 'description' => ['type' => 'string', 'description' => 'Plain text description of the event (use \\n for newlines).'],
                 'htmlDescription' => ['type' => 'string', 'description' => 'HTML formatted version of the description. REQUIRED - convert plain text to HTML if needed.'],
                 'dtstart' => ['type' => 'string', 'description' => 'Start date/time in ISO 8601 format (e.g., 2024-10-28T06:30:00).'],
@@ -1976,7 +1976,7 @@ HasBody:
                 'success' => ['type' => 'boolean'],
                 'errorMessage' => ['type' => 'string'],
                 'eventData' => $eventDataSchema,
-                'emailSubject' => ['type' => 'string', 'description' => 'The generated summary, used for the email subject line.'],
+                'emailSubject' => ['type' => 'string', 'description' => 'The generated summary, used for the email subject line. It should match the summary exactly.'],
                 'locationLookup' => ['type' => 'string', 'description' => 'Location string for Google Maps lookup.'],
             ],
             'required' => ['success', 'errorMessage', 'eventData', 'emailSubject', 'locationLookup'],
@@ -1998,7 +1998,7 @@ When you see multiple performances like:
 - \"Sunday, October 5, 2025 at 2:00PM\"
 
 Create SEPARATE events for each performance, each with:
-- Same summary/title (e.g., \"Davies Symphony Hall - Gimeno Conducts Tchaikovsky 5\")
+- Same summary/title (e.g., \"San Francisco Symphony - Gimeno Conducts Tchaikovsky 5\")
 - Same location and description
 - Different start_date, start_time, end_date, end_time for each performance
 - Same timezone
@@ -2070,7 +2070,7 @@ The JSON object MUST conform EXACTLY to the following schema:
     "eventData": {
       "type": "object",
       "properties": {
-        "summary": { "type": "string", "description": "Concise title for the event." },
+        "summary": { "type": "string", "description": "Concise title for the event, formatted as '<organization name:optional> - <event name>' without unnecessary venue prefixes." },
         "description": { "type": "string", "description": "Plain text description (use \\\\n for newlines)." },
         "htmlDescription": { "type": "string", "description": "HTML formatted version of the description. REQUIRED - convert plain text to HTML if needed." },
         "dtstart": { "type": "string", "description": "Start date/time (ISO 8601: YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD for all-day)." },
@@ -2090,10 +2090,13 @@ The JSON object MUST conform EXACTLY to the following schema:
 ```
 
 # FIELD SPECIFIC INSTRUCTIONS
-- **summary:** Generate a relevant title following these formats:
-  * For artistic/cultural events: "Venue - Artist/Show" (e.g., "SF Opera - La Boheme", "Stern Grove - The Honeydrops", "Davies Hall - SF Symphony")
-  * For concerts with programs: "Venue - Artist - Program" (e.g., "SF Symphony - Sibelius and Mahler", "Taylor Swift Concert")
-  * For general events: Keep concise and descriptive (e.g., "Dr. White Appointment")
+- **summary:** Generate a relevant title in this format: `<organization name:optional> - <event name>`.
+  * Prefer the organizer, presenting institution, series, or artist as the prefix when one is clearly named.
+  * Use the main event/show/program name as the second part.
+  * If there is no distinct organization, just use the event name.
+  * Do NOT prepend the venue, building, hall, pavilion, address, or neighborhood unless that venue name is also the actual organizer/brand of the event.
+  * Good examples: "San Francisco Symphony - Beethoven 5", "San Francisco Art Fair", "San Francisco Art Fair (Sunday Visit)", "SF Opera - La Boheme"
+  * Bad examples: "Fort Mason Festival Pavilion - San Francisco Art Fair", "Davies Symphony Hall - Beethoven 5"
 - **description:** Create a concise plain-text summary with rich details:
   * For artistic events: Highlight featured artists, performers, and full program/repertoire
   * For concerts/opera: Include composer names, piece titles, featured soloists
@@ -3791,4 +3794,3 @@ if (isset($_GET['confirm']) && $_GET['confirm'] === 'true' && $_SERVER['REQUEST_
 // --- End NEW Confirmation Handling ---
 
 // --- Continue with original script logic ---
-
