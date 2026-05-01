@@ -54,14 +54,14 @@ async function init() { // Keep function definition for now, might be removed la
                 
                 availableModels = models;
                 
-                selectedModel = prefs.defaultModel || 'openai/gpt-latest' || (availableModels.length > 0 ? (availableModels.find(model => model.default) || availableModels[0]).id : null);
+                selectedModel = prefs.defaultModel || '~openai/gpt-latest' || (availableModels.length > 0 ? (availableModels.find(model => model.default) || availableModels[0]).id : null);
                 debugMode = prefs.debugMode || false;
                 
                 showForm(prefs); // Calls showForm -> Original logic tried to set contentDiv.innerHTML
             } catch (error) {
                 console.error("Error initializing models:", error); 
                 availableModels = await modelsPromise.catch(() => []);
-                selectedModel = prefs.defaultModel || 'openai/gpt-latest' || null;
+                selectedModel = prefs.defaultModel || '~openai/gpt-latest' || null;
                 showForm(prefs); // Still needs to show form on error
             }
         }
@@ -113,26 +113,26 @@ async function fetchAvailableModels() {
 function getOfflineAllowedModels() {
     // Return allowed models even when offline
     return [
-        { id: 'openai/gpt-latest', name: 'OpenAI GPT Latest' },
-        { id: 'google/gemini-pro-latest', name: 'Gemini Pro Latest' },
-        { id: 'anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
-        { id: 'anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
-        { id: 'openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
-        { id: 'google/gemini-flash-latest', name: 'Gemini Flash Latest' },
-        { id: 'moonshotai/kimi-latest', name: 'Kimi Latest' }
+        { id: '~openai/gpt-latest', name: 'OpenAI GPT Latest' },
+        { id: '~google/gemini-pro-latest', name: 'Gemini Pro Latest' },
+        { id: '~anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
+        { id: '~anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
+        { id: '~openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
+        { id: '~google/gemini-flash-latest', name: 'Gemini Flash Latest' },
+        { id: '~moonshotai/kimi-latest', name: 'Kimi Latest' }
     ];
 }
 
 function filterAllowedModels(allModels) {
     // Define allowed models
     const allowedModelIds = [
-        'openai/gpt-latest',
-        'google/gemini-pro-latest',
-        'anthropic/claude-opus-latest',
-        'anthropic/claude-sonnet-latest',
-        'openai/gpt-mini-latest',
-        'google/gemini-flash-latest',
-        'moonshotai/kimi-latest'
+        '~openai/gpt-latest',
+        '~google/gemini-pro-latest',
+        '~anthropic/claude-opus-latest',
+        '~anthropic/claude-sonnet-latest',
+        '~openai/gpt-mini-latest',
+        '~google/gemini-flash-latest',
+        '~moonshotai/kimi-latest'
     ];
 
     // Filter models to only include allowed ones
@@ -153,13 +153,13 @@ function filterAllowedModels(allModels) {
 
     // Sort models with preferred order
     const preferredOrder = [
-        'openai/gpt-latest',
-        'google/gemini-pro-latest',
-        'anthropic/claude-opus-latest',
-        'anthropic/claude-sonnet-latest',
-        'openai/gpt-mini-latest',
-        'google/gemini-flash-latest',
-        'moonshotai/kimi-latest'
+        '~openai/gpt-latest',
+        '~google/gemini-pro-latest',
+        '~anthropic/claude-opus-latest',
+        '~anthropic/claude-sonnet-latest',
+        '~openai/gpt-mini-latest',
+        '~google/gemini-flash-latest',
+        '~moonshotai/kimi-latest'
     ];
 
     return filteredModels.sort((a, b) => {
@@ -925,7 +925,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const settings = await new Promise((resolve) => {
                 chrome.storage.sync.get(['aiModel'], resolve);
             });
-            const savedModel = settings.aiModel || 'openai/gpt-latest';
+            const savedModel = settings.aiModel || '~openai/gpt-latest';
             
             // Convert models to expected format if needed
             localAvailableModels = models.map(model => ({

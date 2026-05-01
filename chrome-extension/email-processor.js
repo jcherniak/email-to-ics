@@ -7,7 +7,7 @@ class EmailProcessor {
         this.inboundConfirmedEmail = '';
         this.toTentativeEmail = '';
         this.toConfirmedEmail = '';
-        this.aiModel = 'openai/gpt-latest';
+        this.aiModel = '~openai/gpt-latest';
         this.maxTokens = 20000;
         this.availableModels = [];
         this.promptPolicyText = '';
@@ -19,13 +19,13 @@ class EmailProcessor {
     getOfflineAllowedModels() {
         // Return offline list of allowed models as fallback
         return [
-            { id: 'openai/gpt-latest', name: 'OpenAI GPT Latest' },
-            { id: 'google/gemini-pro-latest', name: 'Google Gemini Pro Latest' },
-            { id: 'anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
-            { id: 'anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
-            { id: 'openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
-            { id: 'google/gemini-flash-latest', name: 'Google Gemini Flash Latest' },
-            { id: 'moonshotai/kimi-latest', name: 'Kimi Latest' }
+            { id: '~openai/gpt-latest', name: 'OpenAI GPT Latest' },
+            { id: '~google/gemini-pro-latest', name: 'Google Gemini Pro Latest' },
+            { id: '~anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
+            { id: '~anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
+            { id: '~openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
+            { id: '~google/gemini-flash-latest', name: 'Google Gemini Flash Latest' },
+            { id: '~moonshotai/kimi-latest', name: 'Kimi Latest' }
         ];
     }
 
@@ -42,7 +42,7 @@ class EmailProcessor {
                 this.inboundConfirmedEmail = settings.inboundConfirmedEmail || '';
                 this.toTentativeEmail = settings.toTentativeEmail || '';
                 this.toConfirmedEmail = settings.toConfirmedEmail || '';
-                this.aiModel = settings.aiModel || 'openai/gpt-latest';
+                this.aiModel = settings.aiModel || '~openai/gpt-latest';
             }
             
             console.log('EmailProcessor: Loading available models...');
@@ -132,26 +132,26 @@ class EmailProcessor {
     getAllowedModelsOffline() {
         // Return allowed models even when offline
         return [
-            { id: 'openai/gpt-latest', name: 'OpenAI GPT Latest' },
-            { id: 'google/gemini-pro-latest', name: 'Gemini Pro Latest' },
-            { id: 'anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
-            { id: 'anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
-            { id: 'openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
-            { id: 'google/gemini-flash-latest', name: 'Gemini Flash Latest' },
-            { id: 'moonshotai/kimi-latest', name: 'Kimi Latest' }
+            { id: '~openai/gpt-latest', name: 'OpenAI GPT Latest' },
+            { id: '~google/gemini-pro-latest', name: 'Gemini Pro Latest' },
+            { id: '~anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
+            { id: '~anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
+            { id: '~openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
+            { id: '~google/gemini-flash-latest', name: 'Gemini Flash Latest' },
+            { id: '~moonshotai/kimi-latest', name: 'Kimi Latest' }
         ];
     }
 
     filterAllowedModels(allModels) {
         // Define allowed models
         const allowedModelIds = [
-            'openai/gpt-latest',
-            'google/gemini-pro-latest',
-            'anthropic/claude-opus-latest',
-            'anthropic/claude-sonnet-latest',
-            'openai/gpt-mini-latest',
-            'google/gemini-flash-latest',
-            'moonshotai/kimi-latest'
+            '~openai/gpt-latest',
+            '~google/gemini-pro-latest',
+            '~anthropic/claude-opus-latest',
+            '~anthropic/claude-sonnet-latest',
+            '~openai/gpt-mini-latest',
+            '~google/gemini-flash-latest',
+            '~moonshotai/kimi-latest'
         ];
 
         // Filter models to only include allowed ones
@@ -172,13 +172,13 @@ class EmailProcessor {
 
         // Sort models with preferred order
         const preferredOrder = [
-            'openai/gpt-latest',
-            'google/gemini-pro-latest',
-            'anthropic/claude-opus-latest',
-            'anthropic/claude-sonnet-latest',
-            'openai/gpt-mini-latest',
-            'google/gemini-flash-latest',
-            'moonshotai/kimi-latest'
+            '~openai/gpt-latest',
+            '~google/gemini-pro-latest',
+            '~anthropic/claude-opus-latest',
+            '~anthropic/claude-sonnet-latest',
+            '~openai/gpt-mini-latest',
+            '~google/gemini-flash-latest',
+            '~moonshotai/kimi-latest'
         ];
 
         return filteredModels.sort((a, b) => {

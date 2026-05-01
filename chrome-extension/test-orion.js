@@ -13,7 +13,7 @@ const mockBrowserAPIs = {
             fromEmail: 'test@orion.com',
             toTentativeEmail: 'tentative@orion.com',
             toConfirmedEmail: 'confirmed@orion.com',
-            aiModel: 'openai/gpt-latest'
+            aiModel: '~openai/gpt-latest'
           };
           callback(mockSettings);
         },
@@ -41,8 +41,8 @@ const mockBrowserAPIs = {
             callback({
               success: true,
               models: [
-                { id: 'openai/gpt-latest', name: 'OpenAI GPT Latest' },
-                { id: 'google/gemini-pro-latest', name: 'Gemini Pro Latest' }
+                { id: '~openai/gpt-latest', name: 'OpenAI GPT Latest' },
+                { id: '~google/gemini-pro-latest', name: 'Gemini Pro Latest' }
               ]
             });
           } else {

@@ -100,8 +100,8 @@ final class UrlDetectionTest extends TestCase
 
     public function testUrlDetectionFallsBackToSecondModelForShortFalseResult(): void
     {
-        $_ENV['URL_DETECTION_MODEL'] = 'google/gemini-flash-latest';
-        $_ENV['URL_DETECTION_FALLBACK_MODEL'] = 'openai/gpt-mini-latest';
+        $_ENV['URL_DETECTION_MODEL'] = '~google/gemini-flash-latest';
+        $_ENV['URL_DETECTION_FALLBACK_MODEL'] = '~openai/gpt-mini-latest';
 
         $client = new FakeUrlDetectionClient([
             FakeUrlDetectionClient::openRouterResponse(['containsUrl' => false, 'url' => null]),
@@ -112,13 +112,13 @@ final class UrlDetectionTest extends TestCase
         $url = $this->invokeUrlDetection($processor, 'not a url');
 
         $this->assertSame('https://example.test/event', $url);
-        $this->assertSame(['google/gemini-flash-latest', 'openai/gpt-mini-latest'], $client->requestedModels);
+        $this->assertSame(['~google/gemini-flash-latest', '~openai/gpt-mini-latest'], $client->requestedModels);
     }
 
     public function testUrlDetectionDoesNotUseSecondModelForLongFalseResult(): void
     {
-        $_ENV['URL_DETECTION_MODEL'] = 'google/gemini-flash-latest';
-        $_ENV['URL_DETECTION_FALLBACK_MODEL'] = 'openai/gpt-mini-latest';
+        $_ENV['URL_DETECTION_MODEL'] = '~google/gemini-flash-latest';
+        $_ENV['URL_DETECTION_FALLBACK_MODEL'] = '~openai/gpt-mini-latest';
 
         $client = new FakeUrlDetectionClient([
             FakeUrlDetectionClient::openRouterResponse(['containsUrl' => false, 'url' => null]),
@@ -129,13 +129,13 @@ final class UrlDetectionTest extends TestCase
         $url = $this->invokeUrlDetection($processor, str_repeat('This is not a URL. ', 40));
 
         $this->assertNull($url);
-        $this->assertSame(['google/gemini-flash-latest'], $client->requestedModels);
+        $this->assertSame(['~google/gemini-flash-latest'], $client->requestedModels);
     }
 
     public function testUrlDetectionFallsBackAfterPrimaryModelApiError(): void
     {
-        $_ENV['URL_DETECTION_MODEL'] = 'google/gemini-flash-latest';
-        $_ENV['URL_DETECTION_FALLBACK_MODEL'] = 'openai/gpt-mini-latest';
+        $_ENV['URL_DETECTION_MODEL'] = '~google/gemini-flash-latest';
+        $_ENV['URL_DETECTION_FALLBACK_MODEL'] = '~openai/gpt-mini-latest';
 
         $client = new FakeUrlDetectionClient([
             new Response(400, [], json_encode(['error' => ['message' => 'model unavailable']])),
@@ -146,7 +146,7 @@ final class UrlDetectionTest extends TestCase
         $url = $this->invokeUrlDetection($processor, 'please find the url');
 
         $this->assertSame('https://example.test/fallback', $url);
-        $this->assertSame(['google/gemini-flash-latest', 'openai/gpt-mini-latest'], $client->requestedModels);
+        $this->assertSame(['~google/gemini-flash-latest', '~openai/gpt-mini-latest'], $client->requestedModels);
     }
 
     private function processorWithUrlDetectionClient(FakeUrlDetectionClient $client): EmailProcessor

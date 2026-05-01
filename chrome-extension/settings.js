@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('inboundConfirmedEmail').value = settings.inboundConfirmedEmail || '';
             document.getElementById('toTentativeEmail').value = settings.toTentativeEmail || '';
             document.getElementById('toConfirmedEmail').value = settings.toConfirmedEmail || '';
-            document.getElementById('aiModel').value = settings.aiModel || 'openai/gpt-latest';
+            document.getElementById('aiModel').value = settings.aiModel || '~openai/gpt-latest';
             
             // Load available models
             loadAvailableModels();
@@ -142,13 +142,13 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Define allowed models list
             const allowedModelIds = [
-                'openai/gpt-latest',
-                'google/gemini-pro-latest',
-                'anthropic/claude-opus-latest',
-                'anthropic/claude-sonnet-latest',
-                'openai/gpt-mini-latest',
-                'google/gemini-flash-latest',
-                'moonshotai/kimi-latest'
+                '~openai/gpt-latest',
+                '~google/gemini-pro-latest',
+                '~anthropic/claude-opus-latest',
+                '~anthropic/claude-sonnet-latest',
+                '~openai/gpt-mini-latest',
+                '~google/gemini-flash-latest',
+                '~moonshotai/kimi-latest'
             ];
             
             let availableAllowedModels = [];
@@ -222,7 +222,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Clear form
             form.reset();
-            document.getElementById('aiModel').value = 'openai/gpt-latest';
+            document.getElementById('aiModel').value = '~openai/gpt-latest';
             
             showStatus('All settings cleared successfully.', 'success');
             
@@ -235,13 +235,13 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             // Define allowed models as specified
             const allowedModels = [
-                { id: 'openai/gpt-latest', name: 'OpenAI GPT Latest' },
-                { id: 'google/gemini-pro-latest', name: 'Gemini Pro Latest' },
-                { id: 'anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
-                { id: 'anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
-                { id: 'openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
-                { id: 'google/gemini-flash-latest', name: 'Gemini Flash Latest' },
-                { id: 'moonshotai/kimi-latest', name: 'Kimi Latest' }
+                { id: '~openai/gpt-latest', name: 'OpenAI GPT Latest' },
+                { id: '~google/gemini-pro-latest', name: 'Gemini Pro Latest' },
+                { id: '~anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
+                { id: '~anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
+                { id: '~openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
+                { id: '~google/gemini-flash-latest', name: 'Gemini Flash Latest' },
+                { id: '~moonshotai/kimi-latest', name: 'Kimi Latest' }
             ];
             
             const modelSelect = document.getElementById('aiModel');
@@ -262,14 +262,14 @@ document.addEventListener('DOMContentLoaded', function() {
             if (currentValue && allowedModels.find(m => m.id === currentValue)) {
                 modelSelect.value = currentValue;
             } else {
-                modelSelect.value = 'openai/gpt-latest';
+                modelSelect.value = '~openai/gpt-latest';
             }
             
         } catch (error) {
             console.error('Error loading models:', error);
             // Fallback to default model
             const modelSelect = document.getElementById('aiModel');
-            modelSelect.innerHTML = '<option value="openai/gpt-latest">OpenAI GPT Latest (fallback)</option>';
+            modelSelect.innerHTML = '<option value="~openai/gpt-latest">OpenAI GPT Latest (fallback)</option>';
         }
     }
     

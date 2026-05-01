@@ -12584,24 +12584,24 @@
   }
   function getOfflineAllowedModels() {
     return [
-      { id: "openai/gpt-latest", name: "OpenAI GPT Latest" },
-      { id: "google/gemini-pro-latest", name: "Gemini Pro Latest" },
-      { id: "anthropic/claude-opus-latest", name: "Claude Opus Latest" },
-      { id: "anthropic/claude-sonnet-latest", name: "Claude Sonnet Latest" },
-      { id: "openai/gpt-mini-latest", name: "OpenAI GPT Mini Latest" },
-      { id: "google/gemini-flash-latest", name: "Gemini Flash Latest" },
-      { id: "moonshotai/kimi-latest", name: "Kimi Latest" }
+      { id: "~openai/gpt-latest", name: "OpenAI GPT Latest" },
+      { id: "~google/gemini-pro-latest", name: "Gemini Pro Latest" },
+      { id: "~anthropic/claude-opus-latest", name: "Claude Opus Latest" },
+      { id: "~anthropic/claude-sonnet-latest", name: "Claude Sonnet Latest" },
+      { id: "~openai/gpt-mini-latest", name: "OpenAI GPT Mini Latest" },
+      { id: "~google/gemini-flash-latest", name: "Gemini Flash Latest" },
+      { id: "~moonshotai/kimi-latest", name: "Kimi Latest" }
     ];
   }
   function filterAllowedModels(allModels) {
     const allowedModelIds = [
-      "openai/gpt-latest",
-      "google/gemini-pro-latest",
-      "anthropic/claude-opus-latest",
-      "anthropic/claude-sonnet-latest",
-      "openai/gpt-mini-latest",
-      "google/gemini-flash-latest",
-      "moonshotai/kimi-latest"
+      "~openai/gpt-latest",
+      "~google/gemini-pro-latest",
+      "~anthropic/claude-opus-latest",
+      "~anthropic/claude-sonnet-latest",
+      "~openai/gpt-mini-latest",
+      "~google/gemini-flash-latest",
+      "~moonshotai/kimi-latest"
     ];
     const filteredModels = allModels.filter(
       (model) => allowedModelIds.includes(model.id)
@@ -12615,13 +12615,13 @@
       }
     });
     const preferredOrder = [
-      "openai/gpt-latest",
-      "google/gemini-pro-latest",
-      "anthropic/claude-opus-latest",
-      "anthropic/claude-sonnet-latest",
-      "openai/gpt-mini-latest",
-      "google/gemini-flash-latest",
-      "moonshotai/kimi-latest"
+      "~openai/gpt-latest",
+      "~google/gemini-pro-latest",
+      "~anthropic/claude-opus-latest",
+      "~anthropic/claude-sonnet-latest",
+      "~openai/gpt-mini-latest",
+      "~google/gemini-flash-latest",
+      "~moonshotai/kimi-latest"
     ];
     return filteredModels.sort((a, b) => {
       const aIndex = preferredOrder.indexOf(a.id);
@@ -12964,7 +12964,7 @@
         const settings = await new Promise((resolve) => {
           chrome.storage.sync.get(["aiModel"], resolve);
         });
-        const savedModel = settings.aiModel || "openai/gpt-latest";
+        const savedModel = settings.aiModel || "~openai/gpt-latest";
         localAvailableModels = models.map((model) => ({
           id: model.id,
           name: model.name || model.id,

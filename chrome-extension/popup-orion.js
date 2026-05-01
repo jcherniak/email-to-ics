@@ -263,26 +263,26 @@ async function loadAvailableModels() {
 function getOfflineAllowedModels() {
   // Return allowed models even when offline
   return [
-    { id: 'openai/gpt-latest', name: 'OpenAI GPT Latest' },
-    { id: 'google/gemini-pro-latest', name: 'Gemini Pro Latest' },
-    { id: 'anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
-    { id: 'anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
-    { id: 'openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
-    { id: 'google/gemini-flash-latest', name: 'Gemini Flash Latest' },
-    { id: 'moonshotai/kimi-latest', name: 'Kimi Latest' }
+    { id: '~openai/gpt-latest', name: 'OpenAI GPT Latest' },
+    { id: '~google/gemini-pro-latest', name: 'Gemini Pro Latest' },
+    { id: '~anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
+    { id: '~anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
+    { id: '~openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
+    { id: '~google/gemini-flash-latest', name: 'Gemini Flash Latest' },
+    { id: '~moonshotai/kimi-latest', name: 'Kimi Latest' }
   ];
 }
 
 function filterAllowedModels(allModels) {
   // Define allowed models
   const allowedModelIds = [
-    'openai/gpt-latest',
-    'google/gemini-pro-latest',
-    'anthropic/claude-opus-latest',
-    'anthropic/claude-sonnet-latest',
-    'openai/gpt-mini-latest',
-    'google/gemini-flash-latest',
-    'moonshotai/kimi-latest'
+    '~openai/gpt-latest',
+    '~google/gemini-pro-latest',
+    '~anthropic/claude-opus-latest',
+    '~anthropic/claude-sonnet-latest',
+    '~openai/gpt-mini-latest',
+    '~google/gemini-flash-latest',
+    '~moonshotai/kimi-latest'
   ];
 
   // Filter models to only include allowed ones
@@ -303,13 +303,13 @@ function filterAllowedModels(allModels) {
 
   // Sort models with preferred order
   const preferredOrder = [
-    'openai/gpt-latest',
-    'google/gemini-pro-latest',
-    'anthropic/claude-opus-latest',
-    'anthropic/claude-sonnet-latest',
-    'openai/gpt-mini-latest',
-    'google/gemini-flash-latest',
-    'moonshotai/kimi-latest'
+    '~openai/gpt-latest',
+    '~google/gemini-pro-latest',
+    '~anthropic/claude-opus-latest',
+    '~anthropic/claude-sonnet-latest',
+    '~openai/gpt-mini-latest',
+    '~google/gemini-flash-latest',
+    '~moonshotai/kimi-latest'
   ];
 
   return filteredModels.sort((a, b) => {
@@ -340,11 +340,11 @@ async function populateModelDropdown(models) {
   // Set default from settings
   try {
     const settings = await orionCompat.storage.get(['aiModel']);
-    const savedModel = settings.aiModel || 'openai/gpt-latest';
+    const savedModel = settings.aiModel || '~openai/gpt-latest';
     modelSelect.value = savedModel;
   } catch (error) {
     console.warn('Could not get saved model, using default:', error);
-    modelSelect.value = 'openai/gpt-latest';
+    modelSelect.value = '~openai/gpt-latest';
   }
 }
 

@@ -3097,7 +3097,7 @@ BODY;
         }
 
         // 2. Define and check hardcoded preferred default model (application's preference)
-        $preferredDefault = 'openai/gpt-latest';
+        $preferredDefault = '~openai/gpt-latest';
 
         if (isset($this->availableModels[$preferredDefault])) {
             errlog("Using hardcoded preferred default model: {$preferredDefault}");
@@ -3231,8 +3231,8 @@ BODY;
 		errlog("detectUrlInEmailBody called with text body: " . substr($textBody, 0, 200) . "...");
 
 		$urlDetectionModels = [
-			$_ENV['URL_DETECTION_MODEL'] ?? 'google/gemini-flash-latest',
-			$_ENV['URL_DETECTION_FALLBACK_MODEL'] ?? 'openai/gpt-mini-latest',
+			$_ENV['URL_DETECTION_MODEL'] ?? '~google/gemini-flash-latest',
+			$_ENV['URL_DETECTION_FALLBACK_MODEL'] ?? '~openai/gpt-mini-latest',
 		];
 
 		try {
