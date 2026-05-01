@@ -1,17 +1,28 @@
 {
-  "name": "email-to-ics-extension-popup",
-  "version": "1.0.0",
-  "description": "Handles popup logic for email-to-ics",
+  "name": "@email-to-ics/extension",
+  "version": "2.0.0",
+  "description": "Chrome extension for email-to-ICS with shared core library",
   "private": true,
+  "type": "module",
   "scripts": {
-    "build": "esbuild popup.js --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap && cp node_modules/bootstrap/dist/css/bootstrap.min.css dist/",
-    "watch": "esbuild popup.js --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --watch"
+    "build": "npm run clean && npm run build:popup && npm run build:content && npm run copy-assets",
+    "build:popup": "node build-popup.cjs",
+    "build:content": "esbuild src/content.ts --bundle --outfile=dist/content.js --format=iife --sourcemap --external:chrome --platform=browser",
+    "copy-assets": "bash copy-assets.sh",
+    "watch": "esbuild src/popup.ts --bundle --outfile=dist/popup.bundle.js --format=iife --sourcemap --watch --external:chrome --platform=browser",
+    "clean": "rm -rf dist && mkdir -p dist"
   },
   "devDependencies": {
-    "esbuild": "^0.20.0"
+    "@types/chrome": "^0.1.4",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.0"
   },
   "dependencies": {
+    "@types/jquery": "^3.5.33",
+    "@types/select2": "^4.0.63",
     "bootstrap": "^5.3.7",
-    "ical.js": "^2.2.0"
+    "ical.js": "^2.2.0",
+    "jquery": "^3.7.1",
+    "select2": "^4.1.0-rc.0"
   }
 }

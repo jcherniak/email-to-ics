@@ -1,0 +1,43 @@
+/* popup.css - Minimal overrides for Chrome extension iframe */
+html {
+    margin: 0;
+    overflow: hidden;
+}
+
+body {
+    margin: 0;
+    overflow-y: auto;
+    height: 100vh;
+}
+
+.container-fluid {
+    overflow: visible;
+}
+
+/* Hide empty status divs so they don't add whitespace */
+#status:empty,
+#review-status:empty {
+    display: none;
+}
+
+/* Make labels bold */
+label {
+    font-weight: bold;
+}
+
+/* select2 inside Bootstrap input-group */
+.input-group .select2-container {
+    flex: 1 1 auto;
+    width: auto !important;
+}
+.input-group .select2-container .select2-selection {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+.input-group .select2-container .select2-selection__arrow {
+    top: 50%;
+    transform: translateY(-50%);
+}
