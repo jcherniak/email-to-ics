@@ -1,0 +1,23 @@
+BEGIN:VCALENDAR
+PRODID:-//eluceo/ical//2.0/EN
+VERSION:2.0
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:<uid>
+DTSTAMP:<dtstamp>
+SUMMARY:Opera Parallele - Doubt
+DESCRIPTION:World premiere immersive opera performance of Doubt at the Pres
+ idio Theatre.\n\nSource: https://www.presidiotheatre.org/show-details/oper
+ a-parallele-doubt-at-the-presidio-theatre
+URL:https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-t
+ he-presidio-theatre
+DTSTART;TZID=America/Los_Angeles:20260531T150000
+DTEND;TZID=America/Los_Angeles:20260531T180000
+LOCATION:Presidio Theatre\, 99 Moraga Ave\, San Francisco\, CA
+X-ALT-DESC;FMTTYPE=text/html:<p>World premiere immersive opera performance 
+ of Doubt at the Presidio Theatre.</p><p><a href="https://www.presidiotheat
+ re.org/show-details/opera-parallele-doubt-at-the-presidio-theatre">Source<
+ /a></p>
+END:VEVENT
+END:VCALENDAR

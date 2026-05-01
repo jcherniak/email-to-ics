@@ -55,16 +55,24 @@ error_log('Autoloader loaded');
 
 // Load environment variables early
 use Dotenv\Dotenv;
-$dotenv = Dotenv::createImmutable(__DIR__);
-$dotenv->load();
-error_log('Dotenv loaded'); // Add log to confirm loading
-
 use GuzzleHttp\Client;
 use Spatie\PdfToText\Pdf;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizerConfig;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
 use Opis\JsonSchema\Errors\ValidationError;
 use App\IcalGenerator; // Use the generator from its namespace
+
+global $requestId;
+$requestId = uniqid('request-');
+function errlog($msg)
+{
+	global $requestId;
+	error_log("{$requestId} - {$msg}");
+}
+
+$dotenv = Dotenv::createImmutable(__DIR__);
+$dotenv->load();
+error_log('Dotenv loaded'); // Add log to confirm loading
 
 // Define cache settings
 define('MODEL_CACHE_FILE', sys_get_temp_dir() . '/.models_cache.json');
@@ -104,7 +112,7 @@ register_shutdown_function('log_request_end');
 // Add new endpoint for model info
 // This needs to be handled within the web request path or made CLI accessible if needed.
 // For now, it remains as is, implicitly web-only due to $_GET.
-if (isset($_GET['get_models'])) {
+if (!defined('EMAIL_TO_ICS_SKIP_FRONT_CONTROLLER') && isset($_GET['get_models'])) {
     // Consider adding if (!is_cli()) around this block if it should be strictly web.
     header('Content-Type: application/json');
     header("Access-Control-Allow-Origin: *");
@@ -115,7 +123,7 @@ if (isset($_GET['get_models'])) {
 }
 
 // Test endpoint for auth verification
-if (isset($_GET['test_auth'])) {
+if (!defined('EMAIL_TO_ICS_SKIP_FRONT_CONTROLLER') && isset($_GET['test_auth'])) {
     header('Content-Type: application/json');
     echo json_encode([
         'authenticated' => true,
@@ -380,6 +388,25 @@ class EmailProcessor
 		}
 	}
 
+	public function sendCalendarEmailsForEventData($eventData, string $recipientEmail, string $subject, string $htmlBody): int
+	{
+		$eventItems = $this->eventDataItems($eventData);
+		if (empty($eventItems)) {
+			throw new \InvalidArgumentException('No event data supplied for calendar email generation.');
+		}
+
+		$generator = new IcalGenerator();
+		$eventCount = count($eventItems);
+
+		foreach ($eventItems as $singleEventData) {
+			$singleIcs = $generator->convertJsonToIcs($singleEventData, $this->fromEmail);
+			$singleSubject = $this->eventSubjectWithDate($subject, $singleEventData, $eventCount);
+			$this->sendEmail($singleIcs, $recipientEmail, $singleSubject, $htmlBody);
+		}
+
+		return $eventCount;
+	}
+
 	private function shouldExtractEqualPerformances(string $content, ?string $instructions = null): bool
 	{
 		if ($this->instructionsFocusSpecificDate($instructions)) {
@@ -427,7 +454,7 @@ class EmailProcessor
 		}
 
 		return array_values(array_unique(array_map(
-			fn($candidate) => preg_replace('/\s+/', ' ', $candidate),
+			fn($candidate) => preg_replace('/\s+/', ' ', preg_replace('/\bat\s+/i', '', $candidate)),
 			$candidates
 		)));
 	}
@@ -861,24 +888,14 @@ TEXT;
 <div>{$downloadedText}</div>
 BODY;
 
-		$eventItems = $this->eventDataItems($eventDetails['eventData'] ?? null);
-		if (count($eventItems) > 1) {
-			$generator = new IcalGenerator();
-			foreach ($eventItems as $singleEventData) {
-				$singleIcs = $generator->convertJsonToIcs($singleEventData, $this->fromEmail);
-				$singleSubject = $this->eventSubjectWithDate($subject, $singleEventData, count($eventItems));
-				$this->sendEmail($singleIcs, $recipientEmail, $singleSubject, $htmlBody); // This can throw
-			}
-		} else {
-			$this->sendEmail($ics, $recipientEmail, $subject, $htmlBody); // This can throw
-		}
+		$emailsSent = $this->sendCalendarEmailsForEventData($eventDetails['eventData'] ?? null, $recipientEmail, $subject, $htmlBody);
 
 		// --- Respond based on origin ---
 		if ($fromExtension) {
             $successOutput = [
 				'status' => 'success',
-				'message' => count($eventItems) > 1
-					? count($eventItems) . " emails sent successfully to {$recipientEmail}"
+				'message' => $emailsSent > 1
+					? "{$emailsSent} emails sent successfully to {$recipientEmail}"
 					: "Email sent successfully to {$recipientEmail}",
 				'recipientEmail' => $recipientEmail,
 				'emailSubject' => $subject,
@@ -892,8 +909,8 @@ BODY;
             }
 		} else {
             if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
-                if (count($eventItems) > 1) {
-                    echo count($eventItems) . " emails sent to {$recipientEmail} with ICS files: {$subject}\n";
+                if ($emailsSent > 1) {
+                    echo "{$emailsSent} emails sent to {$recipientEmail} with ICS files: {$subject}\n";
                 } else {
                     echo "Email sent to {$recipientEmail} with ICS file: {$subject}\n";
                 }
@@ -2086,6 +2103,14 @@ HasBody:
         return false;
     }
 
+	protected function postOpenRouterChatCompletion(array $data)
+	{
+		return $this->openaiClient->post('chat/completions', [
+			'json' => $data,
+			'http_errors' => false,
+		]);
+	}
+
     /**
      * Generate an ICS calendar event from text content
      * Uses AI to extract event details and IcalGenerator to create the ICS.
@@ -2427,10 +2452,7 @@ PROMPT;
 
         try {
             // Make direct POST request to OpenRouter
-            $guzzleResponse = $this->openaiClient->post('chat/completions', [
-                'json' => $data,
-                'http_errors' => false, // Don't throw on 4xx/5xx, handle manually
-            ]);
+            $guzzleResponse = $this->postOpenRouterChatCompletion($data);
 
             $api_duration = microtime(true) - $api_start_time;
             $statusCode = $guzzleResponse->getStatusCode();
@@ -3716,6 +3738,10 @@ HTML;
             "screenshot_zoomed::",   // Optional: Base64 zoomed screenshot
             "json",                  // Optional: Output raw JSON response instead of ICS (CLI only)
             "postmark-json-file:", // Optional: Process a local JSON file as a Postmark inbound email
+            "test-email-text:",     // Optional: Process raw email/test text and output JSON only
+            "test-email-file:",     // Optional: Process raw email/test text from a file and output JSON only
+            "current-date:",        // Optional: Override current date for deterministic test runs
+            "test-seed:",           // Optional: Add deterministic model seed for explicit test runs only
             "debug",                 // Optional: Output AI request/response to STDERR (CLI only)
             "output-ics",            // Optional: Output ICS to stdout instead of emailing (CLI only, for Postmark)
             "help"              // Optional: Show help message
@@ -3735,6 +3761,43 @@ HTML;
         }
 
         $processor = new EmailProcessor();
+        if (isset($options['current-date'])) {
+            $processor->setCurrentDateForTesting((string)$options['current-date']);
+        }
+        if (isset($options['test-seed'])) {
+            $processor->setAiSeedForTesting((int)$options['test-seed']);
+        }
+
+        if (isset($options['test-email-text']) || isset($options['test-email-file'])) {
+            $emailText = $options['test-email-text'] ?? '';
+            if (isset($options['test-email-file'])) {
+                $filePath = (string)$options['test-email-file'];
+                if (!is_readable($filePath)) {
+                    throw new \RuntimeException("Test email file not found or not readable: {$filePath}");
+                }
+                $emailText = file_get_contents($filePath);
+                if ($emailText === false) {
+                    throw new \RuntimeException("Could not read test email file: {$filePath}");
+                }
+            }
+
+            $processor->processUrl(
+                '',
+                (string)$emailText,
+                'display',
+                true,
+                $options['instructions'] ?? null,
+                null,
+                null,
+                $options['model'] ?? null,
+                false,
+                false,
+                true,
+                isset($options['debug']),
+                true
+            );
+            exit(0);
+        }
 
         // Check for Postmark JSON file processing first
         if (isset($options['postmark-json-file'])) {
@@ -3792,7 +3855,6 @@ HTML;
         $cliDebugEnabled = isset($options['debug']); // Check for --debug flag
 
         try {
-            $processor = new EmailProcessor();
             $processor->processUrl(
                 $url,
                 $downloadedText,
@@ -3828,6 +3890,8 @@ HTML;
         echo "  --url <url>                      URL of the event page to process. Will be fetched if --html is not provided.\n";
         echo "  --html <string>                  Pre-downloaded HTML content. If --url is also given, this HTML will be used instead of fetching the URL.\n";
         echo "  -i, --instructions <string>      Direct instructions for the AI to create an event. Can be used alone or to supplement --url/--html.\n";
+        echo "  --test-email-text <string>       Test harness: process raw email text and output JSON only; does not email or write calendar output.\n";
+        echo "  --test-email-file <filepath>     Test harness: process raw email text from a file and output JSON only; does not email or write calendar output.\n";
         echo "\n";
         echo "Alternative mode (takes precedence over URL/HTML/Instructions if used):\n";
         echo "  --postmark-json-file <filepath>  Process a local JSON file as if it were an inbound Postmark email. All other processing flags are ignored.\n";
@@ -3845,6 +3909,8 @@ HTML;
         echo "  --screenshot_zoomed <base64>     Base64 encoded zoomed-out/full-page screenshot for vision-capable AI models.\n";
         echo "  --json                           Output the processed event data as JSON instead of ICS (CLI mode only).\n";
         echo "  --debug                          Output detailed AI request and raw response data to STDERR (CLI mode only).\n";
+        echo "  --current-date <YYYY-MM-DD>      Test harness: override the current date for date inference.\n";
+        echo "  --test-seed <integer>            Test harness: pass a deterministic model seed for this explicit test run only.\n";
         echo "  --help                           Display this help message and exit.\n";
         echo "\n";
         echo "Examples:\n";
@@ -3858,6 +3924,7 @@ HTML;
     }
 }
 
+if (!defined('EMAIL_TO_ICS_SKIP_FRONT_CONTROLLER') || !EMAIL_TO_ICS_SKIP_FRONT_CONTROLLER) {
 $dotenv = Dotenv::createImmutable(__DIR__);
 $dotenv->load();
 
@@ -3913,14 +3980,6 @@ function dd($var)
 	die;
 }
 
-global $requestId;
-$requestId = uniqid('request-');
-function errlog($msg)
-{
-	global $requestId;
-	error_log("{$requestId} - {$msg}");
-}
-
 // --- NEW: Handle Confirmation Endpoint ---
 if (isset($_GET['confirm']) && $_GET['confirm'] === 'true' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
@@ -3972,3 +4031,4 @@ if (isset($_GET['confirm']) && $_GET['confirm'] === 'true' && $_SERVER['REQUEST_
 // --- End NEW Confirmation Handling ---
 
 // --- Continue with original script logic ---
+}

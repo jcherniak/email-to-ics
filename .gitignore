@@ -7,3 +7,4 @@ worktrees
 uploads
 processed
 *.local.md
+.phpunit.result.cache

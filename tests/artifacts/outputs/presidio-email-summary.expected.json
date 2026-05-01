@@ -1,0 +1,20 @@
+[
+    {
+        "subject": "Opera Parallele - Doubt - May 29, 2026 7:30 PM",
+        "contentType": "text/calendar; method=PUBLISH; charset=UTF-8",
+        "veventCount": 1,
+        "canonicalIcsFile": "presidio-email-1.expected.ics"
+    },
+    {
+        "subject": "Opera Parallele - Doubt - May 30, 2026 7:30 PM",
+        "contentType": "text/calendar; method=PUBLISH; charset=UTF-8",
+        "veventCount": 1,
+        "canonicalIcsFile": "presidio-email-2.expected.ics"
+    },
+    {
+        "subject": "Opera Parallele - Doubt - May 31, 2026 3:00 PM",
+        "contentType": "text/calendar; method=PUBLISH; charset=UTF-8",
+        "veventCount": 1,
+        "canonicalIcsFile": "presidio-email-3.expected.ics"
+    }
+]
