@@ -2,23 +2,25 @@
 // Used by both popup.js and email-processor.js
 
 const ALLOWED_MODELS = [
-    { id: 'openai/gpt-5.2', name: 'GPT-5.2' },
-    { id: 'openai/gpt-5.2-codex', name: 'GPT-5.2 Codex' },
-    { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6' },
-    { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
-    { id: 'google/gemini-3-pro-preview', name: 'Gemini 3 Pro' },
-    { id: 'google/gemini-3-flash-preview', name: 'Gemini 3 Flash' },
+    { id: '~openai/gpt-mini-latest', name: 'GPT Mini Latest' },
+    { id: '~openai/gpt-latest', name: 'GPT Latest' },
+    { id: '~google/gemini-pro-latest', name: 'Gemini Pro Latest' },
+    { id: '~google/gemini-flash-latest', name: 'Gemini Flash Latest' },
+    { id: '~anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
+    { id: '~anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
+    { id: '~moonshotai/kimi-latest', name: 'Kimi Latest' },
 ];
 
 const ALLOWED_MODEL_IDS = ALLOWED_MODELS.map(m => m.id);
 
 const PREFERRED_ORDER = [
-    'openai/gpt-5.2',
-    'openai/gpt-5.2-codex',
-    'anthropic/claude-opus-4.6',
-    'anthropic/claude-sonnet-4.5',
-    'google/gemini-3-pro-preview',
-    'google/gemini-3-flash-preview',
+    '~openai/gpt-mini-latest',
+    '~openai/gpt-latest',
+    '~google/gemini-pro-latest',
+    '~google/gemini-flash-latest',
+    '~anthropic/claude-opus-latest',
+    '~anthropic/claude-sonnet-latest',
+    '~moonshotai/kimi-latest',
 ];
 
 // ES module exports for popup.js (bundled with esbuild)

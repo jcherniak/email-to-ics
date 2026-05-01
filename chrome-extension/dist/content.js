@@ -230,12 +230,7 @@
   window.addEventListener("message", (event) => {
     if (event.source === emailToIcsFrame?.contentWindow) {
       if (event.data.type === "RESIZE_IFRAME") {
-        const container = document.getElementById("email-to-ics-container");
-        if (container) {
-          const maxHeight = window.innerHeight * 0.9;
-          const desired = event.data.height + 30;
-          container.style.height = Math.min(desired, maxHeight) + "px";
-        }
+        return;
       } else if (event.data.type === "CLOSE_IFRAME") {
         removeIframe();
       }

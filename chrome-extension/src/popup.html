@@ -173,6 +173,20 @@
             </div>
             <div id="review-section" style="display: none;">
                 <h5 class="mb-3">Review Generated Event</h5>
+                <div class="accordion mb-2">
+                    <div class="accordion-item border border-primary">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button collapsed bg-light" type="button" data-bs-toggle="collapse" data-bs-target="#review-accordion-requestData" aria-expanded="false" aria-controls="review-accordion-requestData">
+                                Request Details
+                            </button>
+                        </h2>
+                        <div id="review-accordion-requestData" class="accordion-collapse collapse">
+                            <div class="accordion-body">
+                                <pre id="reviewRequestData"></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             <p><strong>Send to:</strong> <span id="review-recipient"></span></p>
             <p><strong>Subject:</strong> <span id="review-subject"></span></p>
             <div id="review-content" class="ics-details"></div>

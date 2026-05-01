@@ -10934,7 +10934,7 @@
     }
   });
 
-  // ../shared-core/node_modules/zod/v3/external.js
+  // ../node_modules/zod/v3/external.js
   var external_exports = {};
   __export(external_exports, {
     BRAND: () => BRAND,
@@ -11046,7 +11046,7 @@
     void: () => voidType
   });
 
-  // ../shared-core/node_modules/zod/v3/helpers/util.js
+  // ../node_modules/zod/v3/helpers/util.js
   var util;
   (function(util2) {
     util2.assertEqual = (_) => {
@@ -11180,7 +11180,7 @@
     }
   };
 
-  // ../shared-core/node_modules/zod/v3/ZodError.js
+  // ../node_modules/zod/v3/ZodError.js
   var ZodIssueCode = util.arrayToEnum([
     "invalid_type",
     "invalid_literal",
@@ -11298,7 +11298,7 @@
     return error;
   };
 
-  // ../shared-core/node_modules/zod/v3/locales/en.js
+  // ../node_modules/zod/v3/locales/en.js
   var errorMap = (issue, _ctx) => {
     let message;
     switch (issue.code) {
@@ -11401,7 +11401,7 @@
   };
   var en_default = errorMap;
 
-  // ../shared-core/node_modules/zod/v3/errors.js
+  // ../node_modules/zod/v3/errors.js
   var overrideErrorMap = en_default;
   function setErrorMap(map) {
     overrideErrorMap = map;
@@ -11410,7 +11410,7 @@
     return overrideErrorMap;
   }
 
-  // ../shared-core/node_modules/zod/v3/helpers/parseUtil.js
+  // ../node_modules/zod/v3/helpers/parseUtil.js
   var makeIssue = (params) => {
     const { data, path, errorMaps, issueData } = params;
     const fullPath = [...path, ...issueData.path || []];
@@ -11520,14 +11520,14 @@
   var isValid = (x) => x.status === "valid";
   var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
-  // ../shared-core/node_modules/zod/v3/helpers/errorUtil.js
+  // ../node_modules/zod/v3/helpers/errorUtil.js
   var errorUtil;
   (function(errorUtil2) {
     errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
     errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
   })(errorUtil || (errorUtil = {}));
 
-  // ../shared-core/node_modules/zod/v3/types.js
+  // ../node_modules/zod/v3/types.js
   var ParseInputLazyPath = class {
     constructor(parent, value, path, key) {
       this._cachedPath = [];
@@ -27953,22 +27953,24 @@
   if (typeof import_select2.default === "function") {
     (0, import_select2.default)(window, import_jquery.default);
   }
-  var DEFAULT_MODEL_ID = "google/gemini-3-pro-preview";
+  var DEFAULT_MODEL_ID = "~openai/gpt-mini-latest";
   var PRIORITY_MODEL_IDS = [
-    "openai/gpt-5.2",
-    "openai/gpt-5.2-codex",
-    "anthropic/claude-opus-4.6",
-    "anthropic/claude-sonnet-4.5",
-    "google/gemini-3-pro-preview",
-    "google/gemini-3-flash-preview"
+    "~openai/gpt-mini-latest",
+    "~openai/gpt-latest",
+    "~google/gemini-pro-latest",
+    "~google/gemini-flash-latest",
+    "~anthropic/claude-opus-latest",
+    "~anthropic/claude-sonnet-latest",
+    "~moonshotai/kimi-latest"
   ];
   var PRIORITY_MODEL_LABELS = {
-    "openai/gpt-5.2": "GPT-5.2",
-    "openai/gpt-5.2-codex": "GPT-5.2 Codex",
-    "anthropic/claude-opus-4.6": "Claude Opus 4.6",
-    "anthropic/claude-sonnet-4.5": "Claude Sonnet 4.5",
-    "google/gemini-3-pro-preview": "Gemini 3 Pro",
-    "google/gemini-3-flash-preview": "Gemini 3 Flash"
+    "~openai/gpt-mini-latest": "GPT Mini Latest",
+    "~openai/gpt-latest": "GPT Latest",
+    "~google/gemini-pro-latest": "Gemini Pro Latest",
+    "~google/gemini-flash-latest": "Gemini Flash Latest",
+    "~anthropic/claude-opus-latest": "Claude Opus Latest",
+    "~anthropic/claude-sonnet-latest": "Claude Sonnet Latest",
+    "~moonshotai/kimi-latest": "Kimi Latest"
   };
   var adapters;
   var icsGenerator;
@@ -28060,17 +28062,10 @@
   document.addEventListener("DOMContentLoaded", async function() {
     const buildEl = document.getElementById("build-timestamp");
     if (buildEl)
-      buildEl.textContent = `Build: ${"05/01/2026, 15:53:11"}`;
+      buildEl.textContent = `Build: ${"05/01/2026, 16:07:41"}`;
     adapters = createBrowserAdapters();
     icsGenerator = new BrowserIcsGenerator();
     const isInIframe = window.self !== window.top;
-    if (isInIframe) {
-      const resizeObserver = new ResizeObserver(() => {
-        const height = document.body.scrollHeight + 6;
-        window.parent.postMessage({ type: "RESIZE_IFRAME", height }, "*");
-      });
-      resizeObserver.observe(document.body);
-    }
     const tabStateManager = new TabStateManager();
     await tabStateManager.initialize();
     const statusDiv = document.getElementById("status");
@@ -28090,6 +28085,7 @@
     const rejectButton = document.getElementById("reject-button");
     const backToFormButton = document.getElementById("backToFormButton");
     const cancelRequestButton = document.getElementById("cancelRequestButton");
+    const doneCloseButton = document.getElementById("closeButton");
     const closePopupButton = document.getElementById("close-popup");
     const successAlert = document.getElementById("success-alert");
     const successMessage = document.getElementById("success-message");
@@ -28962,6 +28958,11 @@ ${cleanedHtml}`;
       const reviewContent = document.getElementById("review-content");
       const reviewRecipient = document.getElementById("review-recipient");
       const reviewSubject = document.getElementById("review-subject");
+      const reviewRequestData = document.getElementById("reviewRequestData");
+      const requestData = document.getElementById("requestData");
+      if (reviewRequestData && requestData) {
+        reviewRequestData.textContent = requestData.textContent || "";
+      }
       function escapeHtml(s) {
         return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
       }
@@ -29106,6 +29107,13 @@ ${cleanedHtml}`;
       formSection.style.display = "block";
     });
     closePopupButton?.addEventListener("click", () => {
+      if (isInIframe) {
+        window.parent.postMessage({ type: "CLOSE_IFRAME" }, "*");
+      } else {
+        window.close();
+      }
+    });
+    doneCloseButton?.addEventListener("click", () => {
       if (isInIframe) {
         window.parent.postMessage({ type: "CLOSE_IFRAME" }, "*");
       } else {

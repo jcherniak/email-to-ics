@@ -8,7 +8,13 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
 
 ## Current State
 
-- Active work: migrate the newer self-hosted Chrome extension from `node-server-chrome-shared` onto `main`, while preserving `main` as the PHP/prompt source of truth.
+- Active work: none.
+- Completed bugfix: fixed Chrome extension popup regressions on `main`.
+  - [x] Switch preferred/default models to OpenRouter tilde-prefixed latest aliases, with `~openai/gpt-mini-latest` as the default.
+  - [x] Stop the iframe from auto-expanding to screen height after popup open.
+  - [x] Wire the finished-state Close button to remove the injected iframe popup.
+  - [x] Show the request-details accordion on the review screen.
+- Completed migration: moved the newer self-hosted Chrome extension from `node-server-chrome-shared` onto `main`, while preserving `main` as the PHP/prompt source of truth.
   - [x] Restore `PLAN.md` from `github/main` before implementation work.
   - [x] Preserve the current branch's uncommitted extension improvements with a build-verified checkpoint on `node-server-chrome-shared`.
   - [x] Use local `worktrees/main`, already at the current `github/main` tip, for implementation.
@@ -32,6 +38,7 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
 
 ## Recent Verification Baseline
 
+- Chrome extension popup bugfix verification passed: `cd chrome-extension && npm run build`; `node --check chrome-extension/settings.js`; `node --check chrome-extension/models-config.js`; `node --check chrome-extension/src/background.js`; static search confirmed stale concrete preferred-model IDs and `ResizeObserver` popup auto-resize code are absent from source and dist.
 - Corrected extension transplant checkpoint: `cd chrome-extension && npm run build` passed after using branch files directly with only standalone-layout compatibility edits. `shared-core` build artifacts are generated during extension build and ignored under `shared-core/dist/`.
 - Additional extension checks passed: `node --check chrome-extension/email-processor.js`, `node --check chrome-extension/src/background.js`, shared prompt policy `cmp`, and static checks for `eventData`, `dtstart`, source attribution, and screenshot guidance in source/bundle.
 - Full PHP verification passed with `PATH="/opt/homebrew/opt/php@8.4/bin:$PATH" vendor/bin/phpunit`: 59 tests, 183 assertions, 3 expected live-geocoder skips. Dependencies were installed with `composer install --ignore-platform-req=php` because the local `php8` target resolves to PHP 8.5.5 while `eluceo/ical` declares PHP `~8.3.0 || ~8.4.0`.

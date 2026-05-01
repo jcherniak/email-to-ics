@@ -30,22 +30,24 @@ type ModelOption = {
   isSeparator?: boolean;
 };
 
-const DEFAULT_MODEL_ID = 'google/gemini-3-pro-preview';
+const DEFAULT_MODEL_ID = '~openai/gpt-mini-latest';
 const PRIORITY_MODEL_IDS = [
-  'openai/gpt-5.2',
-  'openai/gpt-5.2-codex',
-  'anthropic/claude-opus-4.6',
-  'anthropic/claude-sonnet-4.5',
-  'google/gemini-3-pro-preview',
-  'google/gemini-3-flash-preview',
+  '~openai/gpt-mini-latest',
+  '~openai/gpt-latest',
+  '~google/gemini-pro-latest',
+  '~google/gemini-flash-latest',
+  '~anthropic/claude-opus-latest',
+  '~anthropic/claude-sonnet-latest',
+  '~moonshotai/kimi-latest',
 ];
 const PRIORITY_MODEL_LABELS: Record<string, string> = {
-  'openai/gpt-5.2': 'GPT-5.2',
-  'openai/gpt-5.2-codex': 'GPT-5.2 Codex',
-  'anthropic/claude-opus-4.6': 'Claude Opus 4.6',
-  'anthropic/claude-sonnet-4.5': 'Claude Sonnet 4.5',
-  'google/gemini-3-pro-preview': 'Gemini 3 Pro',
-  'google/gemini-3-flash-preview': 'Gemini 3 Flash',
+  '~openai/gpt-mini-latest': 'GPT Mini Latest',
+  '~openai/gpt-latest': 'GPT Latest',
+  '~google/gemini-pro-latest': 'Gemini Pro Latest',
+  '~google/gemini-flash-latest': 'Gemini Flash Latest',
+  '~anthropic/claude-opus-latest': 'Claude Opus Latest',
+  '~anthropic/claude-sonnet-latest': 'Claude Sonnet Latest',
+  '~moonshotai/kimi-latest': 'Kimi Latest',
 };
 
 // Global state
@@ -160,15 +162,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Check if we're running in an iframe
     const isInIframe = window.self !== window.top;
 
-    // Auto-resize iframe to fit content (no dead space)
-    if (isInIframe) {
-        const resizeObserver = new ResizeObserver(() => {
-            const height = document.body.scrollHeight + 6;
-            window.parent.postMessage({ type: 'RESIZE_IFRAME', height }, '*');
-        });
-        resizeObserver.observe(document.body);
-    }
-
     // Initialize tab state manager
     const tabStateManager = new TabStateManager();
     await tabStateManager.initialize();
@@ -191,6 +184,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     const rejectButton = document.getElementById('reject-button') as HTMLButtonElement;
     const backToFormButton = document.getElementById('backToFormButton') as HTMLButtonElement;
     const cancelRequestButton = document.getElementById('cancelRequestButton') as HTMLButtonElement;
+    const doneCloseButton = document.getElementById('closeButton') as HTMLButtonElement;
     const closePopupButton = document.getElementById('close-popup') as HTMLButtonElement;
     
     // Success alert elements
@@ -1212,6 +1206,12 @@ ${customPrompt}`;
         const reviewContent = document.getElementById('review-content')!;
         const reviewRecipient = document.getElementById('review-recipient')!;
         const reviewSubject = document.getElementById('review-subject')!;
+        const reviewRequestData = document.getElementById('reviewRequestData');
+        const requestData = document.getElementById('requestData');
+
+        if (reviewRequestData && requestData) {
+            reviewRequestData.textContent = requestData.textContent || '';
+        }
         
         function escapeHtml(s: string) {
             return s
@@ -1370,6 +1370,14 @@ ${customPrompt}`;
     });
 
     closePopupButton?.addEventListener('click', () => {
+        if (isInIframe) {
+            window.parent.postMessage({ type: 'CLOSE_IFRAME' }, '*');
+        } else {
+            window.close();
+        }
+    });
+
+    doneCloseButton?.addEventListener('click', () => {
         if (isInIframe) {
             window.parent.postMessage({ type: 'CLOSE_IFRAME' }, '*');
         } else {
