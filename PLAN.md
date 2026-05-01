@@ -124,6 +124,10 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
 
 > and in thr frame showing the downloaded content have the option to load the current page on a frame as "current view <link>" where link opens in a new tab
 
+### Prompt 26
+
+> and then as another item: add MAX_PROCESSED_DIR_SIZE=100M and have rhe script on startup cleanuo old files to stay ubder that. as part of this fhangeset aldo compress the json using zstd. as part of doing these changes, write a small one time throw away scriot to backfill missing keys we just mentjoned and compress the json.  or...if a different compression format such as gz is easier to work with in php, then use that.  youll run the backfill/compress script. it should be standalone.  make sure to make a backup of the folder first (tar.zst of the whole thint in /tmp)
+
 ## Current State
 
 - [x] Inspected the Presidio Theatre page.
@@ -188,6 +192,8 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
 - [x] PHPUnit dev dependencies are installed after removing stale Composer GitHub auth and source-clone cache bloat.
 - [ ] Debug processed-folder browser is planned but not yet implemented.
 - [ ] Saved processed JSON does not yet include the requested downloaded URL/page title/parsed title/parsed dates metadata consistently.
+- [ ] Processed-folder retention/compression/backfill requirement is planned but not yet implemented.
+- [ ] Before running any backfill/compression over `processed/`, create a `/tmp` backup tarball of the whole folder, preferably `tar.zst`.
 
 ## Implementation Plan
 
@@ -262,6 +268,12 @@ This order is mandatory. The detailed backlog below must be executed according t
      - current live page view in the source panel, with a "current view" iframe and a link that opens the URL in a new tab
      - generated JSON viewer using a frontend component loaded from unpkg or similar
      - generated ICS rendered in a `pre`, with syntax highlighting if cheap
+   - Add processed-folder retention and compression:
+     - `MAX_PROCESSED_DIR_SIZE=100M`
+     - cleanup old processed files on startup to stay under the limit
+     - compress processed JSON files using zstd if practical, otherwise gzip
+     - one-time standalone backfill/compress script
+     - backup the whole `processed/` folder to `/tmp` before running backfill/compression
    - Update this file with verification results and any residual risk.
 
 ### 1. Preserve Current Local State
@@ -495,6 +507,23 @@ This order is mandatory. The detailed backlog below must be executed according t
 - [ ] In the source/current live page tab, show a `current view` iframe when the saved URL can be framed, plus a link that opens the URL in a new tab.
 - [ ] Add a replay/retry action that reruns a request from the saved data without manually reconstructing it.
 - [ ] Keep this debug feature out of normal production workflows unless explicitly enabled.
+
+### 9. Processed Folder Retention, Compression, And Backfill
+
+- [ ] Add an env flag, defaulting to `100M`:
+  - `MAX_PROCESSED_DIR_SIZE=100M`
+- [ ] On startup, clean up the oldest processed files until the processed directory stays under the configured max size.
+- [ ] Compress processed JSON files going forward.
+- [ ] Prefer zstd if it is available and easy to invoke safely from PHP; otherwise use gzip because PHP can read/write it portably.
+- [ ] Ensure the debug processed-folder browser can read compressed processed JSON files.
+- [ ] Write a standalone one-time backfill/compress script.
+- [ ] The backfill script must add or derive missing keys where possible:
+  - downloaded URL
+  - page title
+  - parsed event title
+  - parsed event dates
+- [ ] Before running the backfill script, back up the entire `processed/` folder to `/tmp`, preferably as a `tar.zst`; if zstd is unavailable, use a practical compressed tar fallback.
+- [ ] Run the backfill/compress script and record the backup path and result in this plan.
 
 ## Notes For Resume
 
