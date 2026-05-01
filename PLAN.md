@@ -23,6 +23,7 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
 
 ## Recent Verification Baseline
 
+- Completed follow-up: improved OpenRouter response preview logging by trimming leading whitespace/newlines before taking the logged snippet, including URL detection responses. Generated/final ICS content is now logged to Apache logs at generation points and at `sendEmail()` so the exact outgoing attachment content is visible. Verified with `php -l index.php`, `php -l src/UrlDetection/OpenRouterUrlDetector.php`, and `vendor/bin/phpunit` (51 tests, 159 assertions, 1 expected Google skip).
 - Latest full PHP verification: `vendor/bin/phpunit` passed with 51 tests, 159 assertions, and 1 expected Google geocoder skip.
 - Latest focused environment/geocoder verification passed:
   - `php -l src/Config/Environment.php`

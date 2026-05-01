@@ -417,6 +417,7 @@ class EmailProcessor
 
 		foreach ($eventItems as $singleEventData) {
 			$singleIcs = $generator->convertJsonToIcs($singleEventData, $this->fromEmail);
+			$this->logFinalIcs('calendar email split event', $singleIcs);
 			$singleSubject = $this->eventSubjectWithDate($subject, $singleEventData, $eventCount);
 			$this->sendEmail($singleIcs, $recipientEmail, $singleSubject, $htmlBody);
 		}
@@ -781,6 +782,7 @@ TEXT;
 		if (($eventDetails['success'] ?? false) && !empty($eventDetails['eventData'])) {
 			$generator = new IcalGenerator();
 			$ics = $generator->convertJsonToIcs($eventDetails['eventData'], $this->fromEmail);
+			$this->logFinalIcs('web/generated event', $ics);
 		} elseif (($eventDetails['success'] ?? false) === false) {
 			errlog("Skipping ICS generation because AI processing failed: " . ($eventDetails['errorMessage'] ?? 'Unknown AI error'));
 		} else { // Success was true, but eventData was empty/missing
@@ -1524,10 +1526,13 @@ HasBody:
         if (($eventDetails['success'] ?? false) && !empty($eventDetails['eventData'])) {
             $generator = new IcalGenerator();
             $calendarEvent = $generator->convertJsonToIcs($eventDetails['eventData'], $this->fromEmail);
+            $this->logFinalIcs('postmark/generated event', $calendarEvent);
             foreach ($this->eventDataItems($eventDetails['eventData']) as $singleEventData) {
+                $singleIcs = $generator->convertJsonToIcs($singleEventData, $this->fromEmail);
+                $this->logFinalIcs('postmark/generated single event', $singleIcs);
                 $calendarEventItems[] = [
                     'eventData' => $singleEventData,
-                    'ics' => $generator->convertJsonToIcs($singleEventData, $this->fromEmail),
+                    'ics' => $singleIcs,
                 ];
             }
         } elseif (($eventDetails['success'] ?? false) === false) {
@@ -2460,7 +2465,7 @@ PROMPT;
 
             errlog('Received OpenRouter response in ' . number_format($api_duration, 4) . ' seconds');
             errlog('Response status code: ' . $statusCode);
-            errlog('Response body (first 1000 chars): ' . substr($responseBody, 0, 1000));
+            errlog('Response body (first 1000 non-leading-whitespace chars): ' . substr(ltrim($responseBody), 0, 1000));
 
             // Parse JSON response
             $response = json_decode($responseBody, true);
@@ -2745,6 +2750,7 @@ PROMPT;
 
 			$generator = new IcalGenerator();
 			$icsString = $generator->convertJsonToIcs($ret['eventData'], $this->fromEmail);
+			$this->logFinalIcs('ai result', $icsString);
 
 			$ret['ICS'] = $icsString;
 
@@ -2954,9 +2960,20 @@ BODY;
 		}
 	}
 
+	private function logFinalIcs(string $context, ?string $ics): void
+	{
+		if (empty($ics)) {
+			errlog("Final ICS {$context}: empty");
+			return;
+		}
+
+		errlog("Final ICS {$context}:\n{$ics}");
+	}
+
 	public function sendEmail($ics, $toEmail, $subject, $htmlBody, array $otherAttachments = [], $inReplyTo = null) {
 		$attachments = [];
 		if (!empty($ics)) {
+			$this->logFinalIcs("email to {$toEmail} subject '{$subject}'", $ics);
 			$attachments[] = new EmailAttachment(
 				'event.ics',
 				base64_encode($ics),

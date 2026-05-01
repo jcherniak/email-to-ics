@@ -92,7 +92,7 @@ final class OpenRouterUrlDetector implements UrlDetectorInterface
 
             $this->log('URL detection response received in ' . number_format($apiDuration, 4) . ' seconds');
             $this->log('URL detection response status: ' . $statusCode);
-            $this->log('URL detection response body (first 500 chars): ' . substr($responseBody, 0, 500));
+            $this->log('URL detection response body (first 500 non-leading-whitespace chars): ' . substr(ltrim($responseBody), 0, 500));
 
             $decoded = json_decode($responseBody, true);
             if (json_last_error() !== JSON_ERROR_NONE) {
