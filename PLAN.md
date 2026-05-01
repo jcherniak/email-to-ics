@@ -289,6 +289,7 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
   - `php -l index.php` and `php -l` across `src/`, `tests/`, and `scripts/`: no syntax errors.
   - `node --check chrome-extension/email-processor.js`: passed.
   - `composer validate --no-check-publish`: valid with only the existing no-license warning.
+- [x] Updated `AGENTS.md` workflow guidance to require tests to run and pass before every code-changing commit.
 
 ## Implementation Plan
 
