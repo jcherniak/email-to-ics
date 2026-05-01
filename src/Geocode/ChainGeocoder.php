@@ -15,8 +15,11 @@ final class ChainGeocoder implements GeocoderInterface
     /**
      * @param array<string, GeocoderInterface> $geocoders
      */
-    public function __construct(array $geocoders)
-    {
+    public function __construct(
+        array $geocoders,
+        private readonly ?LocationCombinerInterface $locationCombiner = null,
+        private readonly string $defaultCountry = 'US',
+    ) {
         $this->geocoders = $geocoders;
     }
 
@@ -40,7 +43,18 @@ final class ChainGeocoder implements GeocoderInterface
             }
         }
 
-        return new self($geocoders);
+        $combiner = null;
+        $combineModel = trim((string)($env['GEOCODE_COMBINE_MODEL'] ?? '~anthropic/claude-haiku-latest'));
+        $openRouterKey = trim((string)($env['OPENROUTER_KEY'] ?? ''));
+        if ($combineModel !== '' && $openRouterKey !== '' && !str_starts_with($openRouterKey, 'test-')) {
+            $combiner = new AiLocationCombiner(
+                \Jcherniak\EmailToIcs\OpenRouter\OpenRouterChatClient::fromApiKey($openRouterKey),
+                $combineModel,
+                static fn(string $message): null => \function_exists('errlog') ? \errlog($message) : null
+            );
+        }
+
+        return new self($geocoders, $combiner, (string)($env['GEOCODE_DEFAULT_COUNTRY'] ?? 'US'));
     }
 
     public function geocode(string $lookup): ?GeocodingResult
@@ -64,6 +78,7 @@ final class ChainGeocoder implements GeocoderInterface
             try {
                 $result = $geocoder->geocode($lookup);
                 if ($result !== null && $result->formattedLocation !== '') {
+                    $result = $this->combineLocation($lookup, $result);
                     if (\function_exists('errlog')) {
                         \errlog("Successfully geocoded using {$name}: {$result->formattedLocation}");
                     }
@@ -94,6 +109,27 @@ final class ChainGeocoder implements GeocoderInterface
         }
 
         return null;
+    }
+
+    private function combineLocation(string $lookup, GeocodingResult $result): GeocodingResult
+    {
+        if ($this->locationCombiner === null) {
+            return $result;
+        }
+
+        $combined = $this->locationCombiner->combine($lookup, $result->formattedLocation, $this->defaultCountry);
+        if ($combined === null || trim($combined) === '') {
+            return $result;
+        }
+
+        if (\function_exists('errlog') && $combined !== $result->formattedLocation) {
+            \errlog("Geocode combine changed location from '{$result->formattedLocation}' to '{$combined}'");
+        }
+
+        return new GeocodingResult($combined, $result->provider, $result->metadata + [
+            'uncombinedLocation' => $result->formattedLocation,
+            'combinedLocation' => $combined,
+        ]);
     }
 
     public function getLastError(): ?array
