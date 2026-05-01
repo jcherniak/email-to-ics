@@ -2982,6 +2982,17 @@ BODY;
      */
 	private function getGoogleMapsLink($lookup) {
 		$baseUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json";
+		$lookup = trim((string)$lookup);
+
+		if ($lookup === '') {
+			errlog('Google Maps lookup skipped: empty lookup string.');
+			return null;
+		}
+
+		if (empty($this->googleMapsKey)) {
+			errlog("Google Maps lookup skipped for '{$lookup}': GOOGLE_MAPS_API_KEY is empty.");
+			return null;
+		}
 
 		$requestUrl = sprintf(
 			"%s?query=%s&key=%s",
@@ -2989,20 +3000,50 @@ BODY;
 			urlencode($lookup),
 			$this->googleMapsKey
 		);
+		$redactedRequestUrl = sprintf(
+			"%s?query=%s&key=%s",
+			$baseUrl,
+			urlencode($lookup),
+			substr($this->googleMapsKey, 0, 6) . '...'
+		);
+
+		errlog("Google Maps text search starting: lookup='{$lookup}', request='{$redactedRequestUrl}'");
 
 		$ch = curl_init();
 
 		curl_setopt($ch, CURLOPT_URL, $requestUrl);
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		curl_setopt($ch, CURLOPT_TIMEOUT, 15);
 
 		$response = curl_exec($ch);
+		$curlError = curl_error($ch);
+		$curlErrno = curl_errno($ch);
+		$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		$contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
 
 		curl_close($ch);
 
+		if ($response === false) {
+			errlog("Google Maps text search curl failure: lookup='{$lookup}', errno={$curlErrno}, error='{$curlError}', http_code={$httpCode}");
+			return null;
+		}
+
+		errlog("Google Maps text search response: lookup='{$lookup}', http_code={$httpCode}, content_type='" . ($contentType ?? '') . "', bytes=" . strlen((string)$response) . ", body_snippet='" . substr((string)$response, 0, 500) . "'");
+
 		$data = json_decode($response, true);
+		if (json_last_error() !== JSON_ERROR_NONE) {
+			errlog("Google Maps text search JSON decode failed: lookup='{$lookup}', error='" . json_last_error_msg() . "'");
+			return null;
+		}
+
+		$status = $data['status'] ?? 'missing';
+		$errorMessage = $data['error_message'] ?? '';
+		$resultCount = is_countable($data['results'] ?? null) ? count($data['results']) : 0;
+		errlog("Google Maps text search parsed: lookup='{$lookup}', status='{$status}', result_count={$resultCount}, error_message='{$errorMessage}'");
 
 		if (!empty($data['results'])) {
 			$result = $data['results'][0];
+			errlog("Google Maps text search first result: lookup='{$lookup}', place_id='" . ($result['place_id'] ?? '') . "', name='" . ($result['name'] ?? '') . "', formatted_address='" . ($result['formatted_address'] ?? '') . "'");
 
 			return $result['name'] . ' ' . $result['formatted_address'];
 		}
