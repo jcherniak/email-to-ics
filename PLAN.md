@@ -110,6 +110,20 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
 
 > continue work until all done.  add to the plan at the end to update the chrome extension with thesr samr method changes
 
+### Prompt 23
+
+> then at the end add a debug tab to the web view which lets me peruse the processed folder. this should be a separate class / view and have a 4 panel view to view the processed json file, the html as saved, the screenshot as saved (html/api download/screenshot as tabs in one frMe), the generated json woth a json viewer frontend component (via unpkg or similar) and the ics file rendered in a <pre>, in a perfect world with syntax highlights, but this last part isnt a requirement.  link to this from the main web view.  dont "infect" other code with this view. make a .env var to enable it. default to disabled. override to enabled in .env
+
+### Prompt 24
+
+> it should also have a button to "replay / retry" where i can rerun a request from the saved data
+> it should have a table of contents view with the url, page title and parsed dates (if any) and parsed title, all in a table
+> if we arent saving title/dates in the processed json, start doing so with this changeset
+
+### Prompt 25
+
+> and in thr frame showing the downloaded content have the option to load the current page on a frame as "current view <link>" where link opens in a new tab
+
 ## Current State
 
 - [x] Inspected the Presidio Theatre page.
@@ -171,6 +185,9 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
 - [x] Added requirement that the Chrome extension must use the same prompt policy moving forward.
 - [x] Added requirement that generated calendar attachments should default to personal editable events, not RSVP meeting invitations.
 - [x] Updated backend and Chrome extension calendar generation to default to personal editable `METHOD:PUBLISH` events without organizer/attendee RSVP fields.
+- [x] PHPUnit dev dependencies are installed after removing stale Composer GitHub auth and source-clone cache bloat.
+- [ ] Debug processed-folder browser is planned but not yet implemented.
+- [ ] Saved processed JSON does not yet include the requested downloaded URL/page title/parsed title/parsed dates metadata consistently.
 
 ## Implementation Plan
 
@@ -233,6 +250,18 @@ This order is mandatory. The detailed backlog below must be executed according t
    - Run syntax checks.
    - Run focused manual CLI verification only after automated tests pass.
    - Update the Chrome extension with the same calendar method/attachment semantics so browser-generated calendar files are personal editable events, not RSVP invitations. *(Done before tests; keep verified in final checks.)*
+   - Add the isolated debug processed-folder web view after the core/refactor work:
+     - separate class/view
+     - env-gated with disabled default
+     - `.env` override enabled locally
+     - link from main web view only when enabled
+     - table of contents for processed items
+     - replay/retry button
+     - raw processed JSON panel
+     - source panel with tabs for saved HTML, API/download text, and screenshot
+     - current live page view in the source panel, with a "current view" iframe and a link that opens the URL in a new tab
+     - generated JSON viewer using a frontend component loaded from unpkg or similar
+     - generated ICS rendered in a `pre`, with syntax highlighting if cheap
    - Update this file with verification results and any residual risk.
 
 ### 1. Preserve Current Local State
@@ -436,6 +465,36 @@ This order is mandatory. The detailed backlog below must be executed according t
   - no `ORGANIZER`
   - no RSVP/needs-action fields
   - use `PUBLISH` or plain `text/calendar` attachment behavior where applicable
+
+### 8. Debug Processed-Folder Web View
+
+- [ ] Add an isolated debug view class instead of mixing this UI into core processing.
+- [ ] Add an env flag, default disabled:
+  - `DEBUG_PROCESSED_VIEW_ENABLED=false`
+- [ ] Enable it in the local `.env`:
+  - `DEBUG_PROCESSED_VIEW_ENABLED=true`
+- [ ] Link to the debug view from the main web view only when the flag is enabled.
+- [ ] Build a table-of-contents/index view over the processed folder with columns:
+  - saved file/request id
+  - URL downloaded
+  - source page title
+  - parsed event title
+  - parsed event dates, if any
+  - status/error
+  - created/processed timestamp
+- [ ] Store missing metadata in processed JSON during normal processing:
+  - downloaded URL
+  - page title, if extracted from HTML/source
+  - parsed event title
+  - parsed event dates
+- [ ] Add a detail view with four logical panels:
+  - processed JSON file
+  - source capture frame with tabs for saved HTML, API/download text, screenshot, and current live page view
+  - generated JSON with a JSON viewer frontend component loaded from unpkg or similar
+  - generated ICS rendered in a `pre`
+- [ ] In the source/current live page tab, show a `current view` iframe when the saved URL can be framed, plus a link that opens the URL in a new tab.
+- [ ] Add a replay/retry action that reruns a request from the saved data without manually reconstructing it.
+- [ ] Keep this debug feature out of normal production workflows unless explicitly enabled.
 
 ## Notes For Resume
 
