@@ -8,6 +8,14 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
 
 ## Current State
 
+- Active work: migrate the newer self-hosted Chrome extension from `node-server-chrome-shared` onto `main`, while preserving `main` as the PHP/prompt source of truth.
+  - [x] Restore `PLAN.md` from `github/main` before implementation work.
+  - [x] Preserve the current branch's uncommitted extension improvements with a build-verified checkpoint on `node-server-chrome-shared`.
+  - [x] Use local `worktrees/main`, already at the current `github/main` tip, for implementation.
+  - [ ] Move/adapt the newer extension into `main`'s `chrome-extension/` layout.
+  - [ ] Align extension prompt construction, response schema, source URL handling, and multi-event behavior with the PHP flow and shared prompt policy.
+  - [ ] Preserve Chrome-specific screenshot handling and add screenshot-aware prompt guidance.
+  - [ ] Verify with extension build/checks and PHP tests that cover Chrome prompt-policy parity.
 - The main requested Presidio Theatre behavior is implemented: equal peer performances can produce multiple events/emails, while explicit instructions to focus on one date keep output to one event.
 - Prompt policy is shared through `prompt/system_prompt_policy.xml` and mirrored for the Chrome extension via `chrome-extension/system_prompt_policy.xml`.
 - Generated calendar files default to personal editable events, not RSVP meeting invites:
