@@ -35,11 +35,14 @@ final class ChromeExtensionAndCliTest extends TestCase
 
     public function testCliTestHarnessOptionsAreRegistered(): void
     {
-        $index = file_get_contents(__DIR__ . '/../index.php');
+        $command = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../index.php') . ' --help 2>&1';
+        exec($command, $output, $exitCode);
+        $help = implode("\n", $output);
 
-        $this->assertStringContainsString('test-email-text', $index);
-        $this->assertStringContainsString('test-email-file', $index);
-        $this->assertStringContainsString('current-date', $index);
-        $this->assertStringContainsString('test-seed', $index);
+        $this->assertSame(0, $exitCode, $help);
+        $this->assertStringContainsString('test-email-text', $help);
+        $this->assertStringContainsString('test-email-file', $help);
+        $this->assertStringContainsString('current-date', $help);
+        $this->assertStringContainsString('test-seed', $help);
     }
 }

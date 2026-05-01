@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use Jcherniak\EmailToIcs\Fetch\ChainUrlFetcher;
 use Jcherniak\EmailToIcs\Fetch\DummyFetcher;
 use Jcherniak\EmailToIcs\Fetch\FetchResult;
+use Jcherniak\EmailToIcs\Fetch\UrlFetcherInterface;
 use Jcherniak\EmailToIcs\Input\CliInputSource;
 use Jcherniak\EmailToIcs\Input\EmailInputSource;
 use Jcherniak\EmailToIcs\Input\RawEmailTextInputSource;
@@ -50,6 +52,30 @@ final class DependencyInjectionRefactorTest extends TestCase
 
         $this->assertSame('<html><title>Injected Fetch</title><body>Event</body></html>', $content);
         $this->assertSame(['https://example.test/event'], $fetcher->requestedUrls);
+    }
+
+    public function testChainFetcherFallsBackAfterFailure(): void
+    {
+        $failingFetcher = new class implements UrlFetcherInterface {
+            public int $calls = 0;
+
+            public function fetch(string $url): ?FetchResult
+            {
+                $this->calls++;
+                throw new RuntimeException('first fetcher failed');
+            }
+        };
+        $dummyFetcher = new DummyFetcher(new FetchResult('https://example.test/fallback', '<html>Fallback</html>', 'dummy'));
+        $chain = new ChainUrlFetcher([
+            'failing' => $failingFetcher,
+            'dummy' => $dummyFetcher,
+        ]);
+
+        $result = $chain->fetch('https://example.test/fallback');
+
+        $this->assertSame(1, $failingFetcher->calls);
+        $this->assertSame(['https://example.test/fallback'], $dummyFetcher->requestedUrls);
+        $this->assertSame('<html>Fallback</html>', $result?->content);
     }
 
     public function testInputSourcesNormalizeWebCliRawEmailAndPostmarkInputs(): void

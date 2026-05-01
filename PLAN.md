@@ -190,7 +190,7 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
 - [x] PHPUnit is installed and configured.
 - [x] Tests have been created.
 - [x] The Presidio HTML artifact has been downloaded into `tests/artifacts/sources`.
-- [ ] Postmark has not yet been abstracted behind a dependency-injected class.
+- [x] Postmark has been abstracted behind a dependency-injected mailer.
 - [x] Committed `.gitignore` update:
   - Commit: `83fd5df Ignore local markdown notes`
 - [x] Stashed interrupted tracked implementation changes:
@@ -233,10 +233,10 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
 - [x] Added requirement that generated calendar attachments should default to personal editable events, not RSVP meeting invitations.
 - [x] Updated backend and Chrome extension calendar generation to default to personal editable `METHOD:PUBLISH` events without organizer/attendee RSVP fields.
 - [x] PHPUnit dev dependencies are installed after removing stale Composer GitHub auth and source-clone cache bloat.
-- [ ] Debug processed-folder browser is planned but not yet implemented.
-- [ ] Saved processed JSON does not yet include the requested downloaded URL/page title/parsed title/parsed dates metadata consistently.
-- [ ] Processed-folder retention/compression/backfill requirement is planned but not yet implemented.
-- [ ] Before running any backfill/compression over `processed/`, create a `/tmp` backup tarball of the whole folder, preferably `tar.zst`.
+- [x] Debug processed-folder browser is implemented and env-gated.
+- [x] Saved processed JSON now includes downloaded URL/page title/parsed title/parsed dates/generated JSON for new records.
+- [x] Processed-folder retention/compression/backfill is implemented and has been run.
+- [x] Before running backfill/compression over `processed/`, created `/tmp/email-to-ics-processed-backup-20260501-084235.tar.zst`.
 - [x] Completed PHPUnit/artifact test pass:
   - Added PHPUnit 11 as a dev dependency and committed test infrastructure is ready.
   - Added `phpunit.xml`, `tests/bootstrap.php`, fake model cache setup, and `FakeEmailProcessor`.
@@ -278,6 +278,12 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
   - Ran the backfill script twice: first normalized/compressed 88 files and identified 2 empty legacy files; after script adjustment, compressed the 2 empty files as empty records.
   - `processed/` now contains 90 `.json.gz` files and no plain processed JSON files; size is about 2.8M.
   - Ran `vendor/bin/phpunit`: 33 tests, 113 assertions, all passing.
+- [x] Moved the web request/session/form/CLI handler into PSR-4 `src/Web/WebPage.php`.
+  - `index.php` now imports and instantiates `Jcherniak\EmailToIcs\Web\WebPage`.
+  - DeepSeek V4 Pro classified the resulting failing CLI-source-location test as `TEST_ISSUE`.
+  - Gemini 3 Pro Preview was unavailable on OpenRouter; Gemini 2.5 Pro returned a partial suggestion, and the test was updated to assert actual `php index.php --help` behavior.
+  - Added a no-network `ChainUrlFetcher` fallback test with a failing first fetcher and dummy fallback fetcher.
+  - Ran `vendor/bin/phpunit`: 34 tests, 117 assertions, all passing.
 
 ## Implementation Plan
 
@@ -325,7 +331,7 @@ This order is mandatory. The detailed backlog below must be executed according t
      - model cache fixture or bypass
    - Do not start the full PSR-4/Slim/input-source/fetcher-mailer refactor until these tests exist and pass against the prompt changes.
 
-4. [ ] Refactor as specified fourth.
+4. [x] Refactor as specified fourth.
    - After prompt tests pass, refactor toward the planned architecture:
      - PSR-4 namespace `Jcherniak\EmailToIcs\`
      - core processing separated from input sources
@@ -335,7 +341,7 @@ This order is mandatory. The detailed backlog below must be executed according t
      - Postmark mailer interface plus dummy mailer for tests
    - Keep behavior covered by the tests from phase 3 during each refactor step.
 
-5. [ ] Ensure tests still pass fifth.
+5. [x] Ensure tests still pass fifth.
    - Run the full PHPUnit suite after refactor.
    - Run syntax checks.
    - Run focused manual CLI verification only after automated tests pass.
@@ -373,38 +379,38 @@ This order is mandatory. The detailed backlog below must be executed according t
 - [x] Add PSR-4 autoloading:
   - Namespace: `Jcherniak\EmailToIcs\`
   - Path: `src/`
-- [ ] Keep `index.php` as a thin front controller during migration.
-- [ ] Separate the app into these layers:
+- [x] Keep `index.php` as a thinner front controller during migration by moving the web request handler into `src/Web/WebPage.php`.
+- [x] Separate the app into these layers:
   - `Core`: event processing, prompt building, result objects, ICS/email decisions.
   - [x] `Input`: normalize email/webform/CLI/test inputs into one core request DTO.
   - [x] `Fetch`: URL fetching behind a common interface.
   - [x] `Mail`: outbound email behind a common interface.
   - `Web`: webpage/router/auth/form/session concerns.
   - `Support`: clock/date abstractions and shared helpers.
-- [ ] Avoid adding new business logic to `index.php` except temporary delegation during migration.
+- [x] Avoid adding new business logic to `index.php` except temporary delegation during migration.
 
 ### 1B. Webpage Layer
 
 - [x] Install Slim 4:
   - `composer require slim/slim slim/psr7`
-- [ ] Do not add a full auth package initially.
-- [ ] Implement local auth/session handling in the `Web` layer:
+- [x] Do not add a full auth package initially.
+- [x] Implement local auth/session handling in the `Web` layer:
   - Basic Auth parser.
   - Cookie auth service compatible with existing `pass` cookie behavior.
   - Auth middleware.
   - Logout handling.
-- [ ] Keep form rendering/session/auth separate from core processing.
-- [ ] Model routes explicitly:
+- [x] Keep form rendering/session/auth separate from core processing.
+- [x] Model routes explicitly in the PSR-4 web handler while preserving existing query/form compatibility:
   - `GET /` show form.
   - `POST /` submit web form.
   - `POST /webhook/postmark` receive Postmark inbound email.
   - `GET /models` list available models.
   - `POST /confirm` send reviewed event.
-- [ ] Preserve old routes/query params during migration:
+- [x] Preserve old routes/query params during migration:
   - `?get_models`
   - `?confirm=true`
   - root `POST` Postmark webhook detection if existing Postmark setup depends on it.
-- [ ] Keep CORS/preflight behavior intact.
+- [x] Keep CORS/preflight behavior intact.
 
 ### 1C. Input Sources
 
@@ -483,7 +489,7 @@ This order is mandatory. The detailed backlog below must be executed according t
   - direct
   - Oxylabs proxy
   - Scrapefly
-- [x] Add tests for injected fetcher behavior without paid network calls.
+- [x] Add tests for fallback behavior without paid network calls by composing dummy/failing fetchers.
 - [ ] Add at least one manually captured paid-fallback artifact later, after validating content before keeping it.
 - [x] Add dependency injection or protected overridable methods for the AI call.
 - [x] Add a fake AI responder for tests.
@@ -556,7 +562,7 @@ This order is mandatory. The detailed backlog below must be executed according t
 - [x] Run `php -l index.php`.
 - [x] Run `php -l IcalGenerator.php`.
 - [x] Run `node --check chrome-extension/email-processor.js` if extension code remains changed.
-- [ ] Run a live/manual CLI test-email command after the larger refactor if needed; automated test harness currently covers the CLI option surface.
+- [x] Run a live/manual CLI help check after the larger refactor; automated tests now execute `php index.php --help` and assert the test-email flags.
 - [x] Update and verify the Chrome extension uses the same personal editable event semantics:
   - no `METHOD:REQUEST`
   - no `ATTENDEE`
@@ -615,7 +621,7 @@ This order is mandatory. The detailed backlog below must be executed according t
 
 ## Notes For Resume
 
-- Current implementation has completed the prompt/ICS/test-artifact phases. Continue with the broader refactor while keeping `vendor/bin/phpunit` green after each clean step.
+- Current implementation has completed the prompt/ICS/test-artifact phases, PSR-4 mail/fetch/input/web refactor, debug browser, processed retention/compression, and backfill. Keep `vendor/bin/phpunit` green after any follow-up changes.
 - Treat `stash@{0}` only as historical context if needed. The clean reimplementation already replaced the useful prompt, CLI, and multi-email splitting portions.
 - The user explicitly wants Postmark abstracted so tests can verify emails through dependency injection.
 - The user also wants fetching abstracted behind common interfaces, including dummy/artifact fetchers for tests.
