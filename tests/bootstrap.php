@@ -11,6 +11,8 @@ $_ENV['INBOUND_CONFIRMED_EMAIL'] ??= 'confirmed-inbound@example.test';
 $_ENV['TO_TENTATIVE_EMAIL'] ??= 'tentative@example.test';
 $_ENV['TO_CONFIRMED_EMAIL'] ??= 'confirmed@example.test';
 $_ENV['GOOGLE_MAPS_API_KEY'] ??= 'test-google-maps-key';
+$_ENV['MAPBOX_API_KEY'] ??= 'test-mapbox-key';
+$_ENV['GEOCODER_ORDER'] ??= 'mapbox,google';
 $_ENV['DEFAULT_MODEL'] = 'test/model';
 $_ENV['LOG_LEVEL'] ??= 'error';
 

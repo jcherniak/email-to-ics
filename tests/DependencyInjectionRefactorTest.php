@@ -6,6 +6,9 @@ use Jcherniak\EmailToIcs\Fetch\ChainUrlFetcher;
 use Jcherniak\EmailToIcs\Fetch\DummyFetcher;
 use Jcherniak\EmailToIcs\Fetch\FetchResult;
 use Jcherniak\EmailToIcs\Fetch\UrlFetcherInterface;
+use Jcherniak\EmailToIcs\Geocode\ChainGeocoder;
+use Jcherniak\EmailToIcs\Geocode\GeocoderInterface;
+use Jcherniak\EmailToIcs\Geocode\GeocodingResult;
 use Jcherniak\EmailToIcs\Input\CliInputSource;
 use Jcherniak\EmailToIcs\Input\EmailInputSource;
 use Jcherniak\EmailToIcs\Input\RawEmailTextInputSource;
@@ -78,7 +81,56 @@ final class DependencyInjectionRefactorTest extends TestCase
         $this->assertSame('<html>Fallback</html>', $result?->content);
     }
 
-    public function testGoogleMapsLookupFailureSendsDiagnosticEmailAndPreservesOriginalLocation(): void
+    public function testChainGeocoderFallsBackAfterFailure(): void
+    {
+        $failingGeocoder = new class implements GeocoderInterface {
+            public int $calls = 0;
+
+            public function geocode(string $lookup): ?GeocodingResult
+            {
+                $this->calls++;
+                return null;
+            }
+
+            public function getLastError(): ?array
+            {
+                return [
+                    'provider' => 'first',
+                    'lookup' => 'Presidio Theatre',
+                    'reason' => 'api_error',
+                ];
+            }
+        };
+
+        $successfulGeocoder = new class implements GeocoderInterface {
+            public int $calls = 0;
+
+            public function geocode(string $lookup): ?GeocodingResult
+            {
+                $this->calls++;
+                return new GeocodingResult('Presidio Theatre 99 Moraga Ave, San Francisco, CA', 'second');
+            }
+
+            public function getLastError(): ?array
+            {
+                return null;
+            }
+        };
+
+        $chain = new ChainGeocoder([
+            'first' => $failingGeocoder,
+            'second' => $successfulGeocoder,
+        ]);
+
+        $result = $chain->geocode('Presidio Theatre');
+
+        $this->assertSame(1, $failingGeocoder->calls);
+        $this->assertSame(1, $successfulGeocoder->calls);
+        $this->assertSame('second', $result?->provider);
+        $this->assertSame('Presidio Theatre 99 Moraga Ave, San Francisco, CA', $result?->formattedLocation);
+    }
+
+    public function testGeocoderLookupFailureSendsDiagnosticEmailAndPreservesOriginalLocation(): void
     {
         $previousErrorEmail = $_ENV['ERROR_EMAIL'] ?? null;
         $_ENV['ERROR_EMAIL'] = 'errors@example.test';
@@ -86,17 +138,34 @@ final class DependencyInjectionRefactorTest extends TestCase
         try {
             $mailer = new DummyMailer();
             $processor = new EmailProcessor($mailer);
-            $method = new ReflectionMethod($processor, 'sendGoogleMapsLookupErrorEmail');
+            $method = new ReflectionMethod($processor, 'sendGeocoderLookupErrorEmail');
             $method->setAccessible(true);
 
             $method->invoke($processor, [
-                'lookup' => 'Presidio Theatre, 99 Moraga Avenue, San Francisco, CA 94129',
-                'reason' => 'api_error',
-                'httpCode' => 200,
-                'status' => 'REQUEST_DENIED',
-                'errorMessage' => 'You must enable Billing on the Google Cloud Project',
-                'resultCount' => 0,
-                'bodySnippet' => '{"status":"REQUEST_DENIED"}',
+                'provider' => 'chain',
+                'reason' => 'all_failed',
+                'errors' => [
+                    [
+                        'provider' => 'mapbox',
+                        'lookup' => 'Presidio Theatre, 99 Moraga Avenue, San Francisco, CA 94129',
+                        'reason' => 'zero_results',
+                        'httpCode' => 200,
+                        'status' => null,
+                        'errorMessage' => null,
+                        'resultCount' => 0,
+                        'bodySnippet' => '{"features":[]}',
+                    ],
+                    [
+                        'provider' => 'google',
+                        'lookup' => 'Presidio Theatre, 99 Moraga Avenue, San Francisco, CA 94129',
+                        'reason' => 'api_error',
+                        'httpCode' => 200,
+                        'status' => 'REQUEST_DENIED',
+                        'errorMessage' => 'You must enable Billing on the Google Cloud Project',
+                        'resultCount' => 0,
+                        'bodySnippet' => '{"status":"REQUEST_DENIED"}',
+                    ],
+                ],
             ], [
                 'emailSubject' => 'Opera Parallele - Doubt',
                 'eventData' => [
@@ -108,10 +177,12 @@ final class DependencyInjectionRefactorTest extends TestCase
             $this->assertCount(1, $mailer->messages);
             $message = $mailer->messages[0];
             $this->assertSame('errors@example.test', $message->to);
-            $this->assertSame('Email-to-ICS Google Maps Lookup Failed: Opera Parallele - Doubt', $message->subject);
+            $this->assertSame('Email-to-ICS Geocoder Lookup Failed: Opera Parallele - Doubt', $message->subject);
             $this->assertSame([], $message->attachments);
             $this->assertStringContainsString('The calendar event was still generated and sent with the original location preserved.', $message->htmlBody);
             $this->assertStringContainsString('Presidio Theatre, 99 Moraga Ave, San Francisco, CA', $message->htmlBody);
+            $this->assertStringContainsString('mapbox', $message->htmlBody);
+            $this->assertStringContainsString('google', $message->htmlBody);
             $this->assertStringContainsString('REQUEST_DENIED', $message->htmlBody);
             $this->assertStringContainsString('You must enable Billing on the Google Cloud Project', $message->htmlBody);
         } finally {
