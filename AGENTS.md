@@ -142,7 +142,13 @@ The server returns different response formats:
 
 ### Workflow Guidance
 - For each logical todo part (so for example, all multiday tasks as one), create a git commit.
-- Tests MUST run and pass before every code-changing commit. A code-changing commit includes changes to application code, tests, scripts, runtime configuration, build configuration, dependency manifests, or generated artifacts that affect behavior.
+- Relevant tests MUST run and pass before every code-changing commit. A code-changing commit includes changes to application code, tests, scripts, runtime configuration, build configuration, dependency manifests, or generated artifacts that affect behavior.
+- Scope required verification to the changed area:
+  - When editing PHP/backend code, PHP tests and relevant PHP lint checks must run and pass before the commit.
+  - When editing Chrome extension JavaScript or extension build inputs, run the relevant JavaScript syntax checks and rebuild the extension bundle before the commit.
+  - Do not run the Chrome extension build for PHP-only changes.
+  - Do not run the full PHP test suite for JavaScript-only changes unless the change affects shared contracts or backend behavior.
+  - When a change crosses both PHP/backend and Chrome extension code, run both relevant PHP verification and extension verification.
 - Do not create a code-changing commit with failing tests, skipped required tests, or tests that were not run. Fix the issue first, or explicitly separate the work into a documentation-only commit when no code/runtime/test behavior changed.
 - Documentation-only commits do not require running the test suite, but they must not be mixed with code changes. When tests are not run because a commit is documentation-only, say that clearly in the final status.
 - Every coding-agent commit must include an `Assisted-by` trailer in this exact form: `Assisted-by: AGENT_NAME:MODEL_VERSION`.
