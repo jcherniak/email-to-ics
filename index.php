@@ -333,6 +333,7 @@ class EmailProcessor
 	private MailerInterface $mailer;
 	private UrlFetcherInterface $urlFetcher;
 	private $googleMapsKey;
+	private ?array $lastGoogleMapsLookupError = null;
 
 	private $aiModel;
 	private $openRouterKey;
@@ -2732,6 +2733,8 @@ PROMPT;
 								$ret['eventData'][$key]['location'] = $place;
 							}
 						}
+					} elseif ($this->lastGoogleMapsLookupError !== null) {
+						$this->sendGoogleMapsLookupErrorEmail($this->lastGoogleMapsLookupError, $ret);
 					}
 				} catch (Throwable $e) {
 					errlog("Error(s) doing google maps lookup: " . var_export($e, true));
@@ -2926,7 +2929,23 @@ BODY;
 		$messageId = $originalEmailData['MessageID'] ?? null;
 
 		try {
-			return $this->sendEmail(null, $_ENV['ERROR_EMAIL'], $subject, $htmlBody, [], $messageId);
+			$headers = [];
+			if (!empty($messageId)) {
+				$headers[] = [
+					'Name' => 'In-Reply-To',
+					'Value' => $messageId,
+				];
+			}
+
+			$this->mailer->send(new EmailMessage(
+				$this->fromEmail,
+				$_ENV['ERROR_EMAIL'],
+				$subject,
+				$htmlBody,
+				[],
+				$headers
+			));
+			return true;
 		} catch (\Exception $e) {
 			errlog("Failed to send error email: " . $e->getMessage());
 			return false;
@@ -2974,6 +2993,60 @@ BODY;
 		));
 	}
 
+	private function rememberGoogleMapsLookupError(
+		string $lookup,
+		string $reason,
+		?int $httpCode = null,
+		?string $status = null,
+		?string $errorMessage = null,
+		?int $resultCount = null,
+		?string $bodySnippet = null
+	): void {
+		$this->lastGoogleMapsLookupError = [
+			'lookup' => $lookup,
+			'reason' => $reason,
+			'httpCode' => $httpCode,
+			'status' => $status,
+			'errorMessage' => $errorMessage,
+			'resultCount' => $resultCount,
+			'bodySnippet' => $bodySnippet,
+		];
+	}
+
+	private function sendGoogleMapsLookupErrorEmail(array $lookupError, array $aiResponse): void
+	{
+		$eventItems = $this->eventDataItems($aiResponse['eventData'] ?? null);
+		$eventTitle = $aiResponse['emailSubject'] ?? ($eventItems[0]['summary'] ?? 'Unknown Event');
+		$originalLocation = $eventItems[0]['location'] ?? '(not provided)';
+		$details = [
+			'Google Maps lookup failed. The calendar event was still generated and sent with the original location preserved.',
+			'',
+			'Event: ' . $eventTitle,
+			'Original location preserved: ' . $originalLocation,
+			'Lookup: ' . ($lookupError['lookup'] ?? ''),
+			'Reason: ' . ($lookupError['reason'] ?? ''),
+			'HTTP code: ' . ($lookupError['httpCode'] ?? ''),
+			'Google Maps status: ' . ($lookupError['status'] ?? ''),
+			'Google Maps error: ' . ($lookupError['errorMessage'] ?? ''),
+			'Result count: ' . ($lookupError['resultCount'] ?? ''),
+		];
+
+		if (!empty($lookupError['bodySnippet'])) {
+			$details[] = '';
+			$details[] = 'Response body snippet:';
+			$details[] = $lookupError['bodySnippet'];
+		}
+
+		try {
+			$this->sendErrorEmail(
+				'Email-to-ICS Google Maps Lookup Failed: ' . $eventTitle,
+				implode("\n", $details)
+			);
+		} catch (Throwable $e) {
+			errlog("Failed to send Google Maps lookup error email: " . $e->getMessage());
+		}
+	}
+
     /**
      * Query Google Maps API to get a formatted location string
      * 
@@ -2983,14 +3056,17 @@ BODY;
 	private function getGoogleMapsLink($lookup) {
 		$baseUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json";
 		$lookup = trim((string)$lookup);
+		$this->lastGoogleMapsLookupError = null;
 
 		if ($lookup === '') {
 			errlog('Google Maps lookup skipped: empty lookup string.');
+			$this->rememberGoogleMapsLookupError($lookup, 'empty_lookup');
 			return null;
 		}
 
 		if (empty($this->googleMapsKey)) {
 			errlog("Google Maps lookup skipped for '{$lookup}': GOOGLE_MAPS_API_KEY is empty.");
+			$this->rememberGoogleMapsLookupError($lookup, 'empty_api_key');
 			return null;
 		}
 
@@ -3025,6 +3101,13 @@ BODY;
 
 		if ($response === false) {
 			errlog("Google Maps text search curl failure: lookup='{$lookup}', errno={$curlErrno}, error='{$curlError}', http_code={$httpCode}");
+			$this->rememberGoogleMapsLookupError(
+				$lookup,
+				'curl_error',
+				$httpCode ?: null,
+				null,
+				$curlError
+			);
 			return null;
 		}
 
@@ -3033,6 +3116,15 @@ BODY;
 		$data = json_decode($response, true);
 		if (json_last_error() !== JSON_ERROR_NONE) {
 			errlog("Google Maps text search JSON decode failed: lookup='{$lookup}', error='" . json_last_error_msg() . "'");
+			$this->rememberGoogleMapsLookupError(
+				$lookup,
+				'invalid_json',
+				$httpCode ?: null,
+				null,
+				json_last_error_msg(),
+				null,
+				substr((string)$response, 0, 500)
+			);
 			return null;
 		}
 
@@ -3047,6 +3139,16 @@ BODY;
 
 			return $result['name'] . ' ' . $result['formatted_address'];
 		}
+
+		$this->rememberGoogleMapsLookupError(
+			$lookup,
+			$status === 'ZERO_RESULTS' ? 'zero_results' : 'api_error',
+			$httpCode ?: null,
+			$status,
+			$errorMessage,
+			$resultCount,
+			substr((string)$response, 0, 500)
+		);
 
 		return null;
 	}

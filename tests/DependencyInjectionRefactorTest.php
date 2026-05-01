@@ -78,6 +78,51 @@ final class DependencyInjectionRefactorTest extends TestCase
         $this->assertSame('<html>Fallback</html>', $result?->content);
     }
 
+    public function testGoogleMapsLookupFailureSendsDiagnosticEmailAndPreservesOriginalLocation(): void
+    {
+        $previousErrorEmail = $_ENV['ERROR_EMAIL'] ?? null;
+        $_ENV['ERROR_EMAIL'] = 'errors@example.test';
+
+        try {
+            $mailer = new DummyMailer();
+            $processor = new EmailProcessor($mailer);
+            $method = new ReflectionMethod($processor, 'sendGoogleMapsLookupErrorEmail');
+            $method->setAccessible(true);
+
+            $method->invoke($processor, [
+                'lookup' => 'Presidio Theatre, 99 Moraga Avenue, San Francisco, CA 94129',
+                'reason' => 'api_error',
+                'httpCode' => 200,
+                'status' => 'REQUEST_DENIED',
+                'errorMessage' => 'You must enable Billing on the Google Cloud Project',
+                'resultCount' => 0,
+                'bodySnippet' => '{"status":"REQUEST_DENIED"}',
+            ], [
+                'emailSubject' => 'Opera Parallele - Doubt',
+                'eventData' => [
+                    'summary' => 'Opera Parallele - Doubt',
+                    'location' => 'Presidio Theatre, 99 Moraga Ave, San Francisco, CA',
+                ],
+            ]);
+
+            $this->assertCount(1, $mailer->messages);
+            $message = $mailer->messages[0];
+            $this->assertSame('errors@example.test', $message->to);
+            $this->assertSame('Email-to-ICS Google Maps Lookup Failed: Opera Parallele - Doubt', $message->subject);
+            $this->assertSame([], $message->attachments);
+            $this->assertStringContainsString('The calendar event was still generated and sent with the original location preserved.', $message->htmlBody);
+            $this->assertStringContainsString('Presidio Theatre, 99 Moraga Ave, San Francisco, CA', $message->htmlBody);
+            $this->assertStringContainsString('REQUEST_DENIED', $message->htmlBody);
+            $this->assertStringContainsString('You must enable Billing on the Google Cloud Project', $message->htmlBody);
+        } finally {
+            if ($previousErrorEmail === null) {
+                unset($_ENV['ERROR_EMAIL']);
+            } else {
+                $_ENV['ERROR_EMAIL'] = $previousErrorEmail;
+            }
+        }
+    }
+
     public function testInputSourcesNormalizeWebCliRawEmailAndPostmarkInputs(): void
     {
         $web = (new WebFormInputSource([
