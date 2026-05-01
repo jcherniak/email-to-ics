@@ -31,6 +31,18 @@ final class IcalGeneratorPersonalEventTest extends TestCase
         $this->assertStringContainsString('BEGIN:VEVENT', $this->ics);
     }
 
+    public function testIcsContainsNamedTimezoneDefinition(): void
+    {
+        $this->assertStringContainsString('BEGIN:VTIMEZONE', $this->ics);
+        $this->assertStringContainsString('TZID:America/Los_Angeles', $this->ics);
+    }
+
+    public function testIcsUsesNamedTimezoneForTimedEvent(): void
+    {
+        $this->assertStringContainsString('DTSTART;TZID=America/Los_Angeles:20260529T193000', $this->ics);
+        $this->assertStringContainsString('DTEND;TZID=America/Los_Angeles:20260529T223000', $this->ics);
+    }
+
     public function testIcsContainsSummary(): void
     {
         $this->assertStringContainsString('SUMMARY:Opera Parallele - Doubt', $this->ics);

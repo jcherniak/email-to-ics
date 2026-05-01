@@ -3,6 +3,7 @@
 namespace Jcherniak\EmailToIcs\Calendar;
 
 use Eluceo\iCal\Domain\Entity\Calendar;
+use Eluceo\iCal\Domain\Entity\TimeZone as ICalTimeZone;
 use Eluceo\iCal\Domain\Entity\Event as BaseEvent;
 use Eluceo\iCal\Presentation\Factory\CalendarFactory;
 use Eluceo\iCal\Presentation\Factory\EventFactory as BaseEventFactory;
@@ -95,6 +96,9 @@ class IcalGenerator {
 
             // Create a calendar domain entity and add all events
             $calendar = new Calendar($events);
+            foreach ($this->timeZonesForEventData($eventData) as $timeZone) {
+                $calendar->addTimeZone($timeZone);
+            }
 
             // Use Custom Factories
             $eventFactory = new CustomEventFactory();
@@ -115,6 +119,42 @@ class IcalGenerator {
             error_log("Error creating iCalendar: " . $e->getMessage() . "\nEvent Data: " . json_encode($eventData) . "\nTrace: " . $e->getTraceAsString());
             throw new Exception("Error creating iCalendar: " . $e->getMessage(), 0, $e);
         }
+    }
+
+    /**
+     * @return ICalTimeZone[]
+     */
+    private function timeZonesForEventData(array $eventData): array
+    {
+        $items = isset($eventData[0]) && is_array($eventData[0]) ? $eventData : [$eventData];
+        $timeZones = [];
+
+        foreach ($items as $singleEventData) {
+            if (!is_array($singleEventData) || !empty($singleEventData['isAllDay'])) {
+                continue;
+            }
+
+            $tzid = (string)($singleEventData['timezone'] ?? 'America/Los_Angeles');
+            if ($tzid === '' || strtoupper($tzid) === 'UTC' || isset($timeZones[$tzid])) {
+                continue;
+            }
+
+            $phpTimeZone = new DateTimeZone($tzid);
+            $start = new DateTimeImmutable((string)($singleEventData['dtstart'] ?? 'now'), $phpTimeZone);
+            $end = !empty($singleEventData['dtend'])
+                ? new DateTimeImmutable((string)$singleEventData['dtend'], $phpTimeZone)
+                : $start->modify('+1 day');
+            $transitionBegin = (new DateTimeImmutable($start->format('Y') . '-01-01 00:00:00', $phpTimeZone))->modify('-1 year');
+            $transitionEnd = (new DateTimeImmutable($end->format('Y') . '-01-01 00:00:00', $phpTimeZone))->modify('+2 years');
+
+            $timeZones[$tzid] = ICalTimeZone::createFromPhpDateTimeZone(
+                $phpTimeZone,
+                $transitionBegin,
+                $transitionEnd
+            );
+        }
+
+        return array_values($timeZones);
     }
 
     /**

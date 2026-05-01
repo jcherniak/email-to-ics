@@ -23,8 +23,9 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
 
 ## Recent Verification Baseline
 
+- Completed follow-up: fixed Google Calendar timezone preservation by embedding `VTIMEZONE` components for timed ICS events that use named timezones such as `America/Los_Angeles`. Latest processed Presidio record showed correct AI data and `DTSTART;TZID=America/Los_Angeles`, but no matching `VTIMEZONE`, causing Google Calendar to preserve the instant while showing GMT as the editable timezone. Updated Presidio expected ICS artifacts and verified with `php -l src/Calendar/IcalGenerator.php`, `php -l tests/IcalGeneratorPersonalEventTest.php`, and `vendor/bin/phpunit` (55 tests, 167 assertions, 1 expected Google geocoder skip).
 - Completed follow-up: improved OpenRouter response preview logging by trimming leading whitespace/newlines before taking the logged snippet, including URL detection responses. Generated/final ICS content is now logged to Apache logs at generation points and at `sendEmail()` so the exact outgoing attachment content is visible. Verified with `php -l index.php`, `php -l src/UrlDetection/OpenRouterUrlDetector.php`, and `vendor/bin/phpunit` (51 tests, 159 assertions, 1 expected Google skip).
-- Latest full PHP verification: `vendor/bin/phpunit` passed with 51 tests, 159 assertions, and 1 expected Google geocoder skip.
+- Latest full PHP verification: `vendor/bin/phpunit` passed with 55 tests, 167 assertions, and 1 expected Google geocoder skip.
 - Latest focused environment/geocoder verification passed:
   - `php -l src/Config/Environment.php`
   - `php -l index.php`
