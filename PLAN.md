@@ -269,6 +269,15 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
   - Enabled `DEBUG_PROCESSED_VIEW_ENABLED=true` in local `.env`; default remains disabled when the env var is absent.
   - Added PHPUnit coverage for legacy record parsing and debug-view enable/render behavior.
   - Ran `vendor/bin/phpunit`: 32 tests, 109 assertions, all passing.
+- [x] Implemented processed-folder retention, gzip compression, and backfill:
+  - Added `MAX_PROCESSED_DIR_SIZE=100M` support, defaulting to 100M when unset.
+  - Startup now trims oldest processed files through `ProcessedRecordStore::enforceMaxSize`.
+  - New processed records are written as `.json.gz`.
+  - Added `scripts/backfill-processed.php` to normalize legacy backtick ICS, add derivable metadata, and gzip processed JSON.
+  - Created backup before backfill: `/tmp/email-to-ics-processed-backup-20260501-084235.tar.zst`.
+  - Ran the backfill script twice: first normalized/compressed 88 files and identified 2 empty legacy files; after script adjustment, compressed the 2 empty files as empty records.
+  - `processed/` now contains 90 `.json.gz` files and no plain processed JSON files; size is about 2.8M.
+  - Ran `vendor/bin/phpunit`: 33 tests, 113 assertions, all passing.
 
 ## Implementation Plan
 
@@ -587,20 +596,22 @@ This order is mandatory. The detailed backlog below must be executed according t
 
 ### 9. Processed Folder Retention, Compression, And Backfill
 
-- [ ] Add an env flag, defaulting to `100M`:
+- [x] Add an env flag, defaulting to `100M`:
   - `MAX_PROCESSED_DIR_SIZE=100M`
-- [ ] On startup, clean up the oldest processed files until the processed directory stays under the configured max size.
-- [ ] Compress processed JSON files going forward.
-- [ ] Prefer zstd if it is available and easy to invoke safely from PHP; otherwise use gzip because PHP can read/write it portably.
-- [ ] Ensure the debug processed-folder browser can read compressed processed JSON files.
-- [ ] Write a standalone one-time backfill/compress script.
-- [ ] The backfill script must add or derive missing keys where possible:
+- [x] On startup, clean up the oldest processed files until the processed directory stays under the configured max size.
+- [x] Compress processed JSON files going forward.
+- [x] Prefer zstd if it is available and easy to invoke safely from PHP; otherwise use gzip because PHP can read/write it portably.
+  - Decision: use gzip for processed JSON because PHP can read/write it natively; use zstd for the one-time backup tarball because `/usr/bin/zstd` is available.
+- [x] Ensure the debug processed-folder browser can read compressed processed JSON files.
+- [x] Write a standalone one-time backfill/compress script.
+- [x] The backfill script must add or derive missing keys where possible:
   - downloaded URL
   - page title
   - parsed event title
   - parsed event dates
-- [ ] Before running the backfill script, back up the entire `processed/` folder to `/tmp`, preferably as a `tar.zst`; if zstd is unavailable, use a practical compressed tar fallback.
-- [ ] Run the backfill/compress script and record the backup path and result in this plan.
+- [x] Before running the backfill script, back up the entire `processed/` folder to `/tmp`, preferably as a `tar.zst`; if zstd is unavailable, use a practical compressed tar fallback.
+  - Backup path: `/tmp/email-to-ics-processed-backup-20260501-084235.tar.zst`.
+- [x] Run the backfill/compress script and record the backup path and result in this plan.
 
 ## Notes For Resume
 

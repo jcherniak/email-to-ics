@@ -85,6 +85,8 @@ $dotenv = Dotenv::createImmutable(__DIR__);
 $dotenv->load();
 error_log('Dotenv loaded'); // Add log to confirm loading
 
+(new ProcessedRecordStore(__DIR__ . '/processed'))->enforceMaxSize($_ENV['MAX_PROCESSED_DIR_SIZE'] ?? '100M');
+
 // Define cache settings
 define('MODEL_CACHE_FILE', sys_get_temp_dir() . '/.models_cache.json');
 define('MODEL_CACHE_DURATION', 7 * 24 * 60 * 60); // 7 days in seconds
@@ -1213,7 +1215,7 @@ HasBody:
 			$safeSubject = 'no_subject';
 		}
 
-		return $this->getProcessedFolder() . '/' . $date . '-' . $safeMessageId . '-' . $safeSubject . '.json';
+		return $this->getProcessedFolder() . '/' . $date . '-' . $safeMessageId . '-' . $safeSubject . '.json.gz';
 	}
 
 	/**
@@ -1225,9 +1227,10 @@ HasBody:
 		$folder = $this->getProcessedFolder();
 		$safeMessageId = preg_replace('/[^a-zA-Z0-9\-_]/', '_', $messageId);
 
-		// Search for files matching *-MESSAGEID-*.json pattern
-		$pattern = $folder . '/*-' . $safeMessageId . '-*.json';
-		$files = glob($pattern);
+		$files = array_merge(
+			glob($folder . '/*-' . $safeMessageId . '-*.json') ?: [],
+			glob($folder . '/*-' . $safeMessageId . '-*.json.gz') ?: []
+		);
 
 		// Return the most recent file (last in sorted order)
 		if (!empty($files)) {
@@ -1300,6 +1303,10 @@ HasBody:
 
 		// Read existing content
 		$content = stream_get_contents($fp);
+		if (str_ends_with($filename, '.gz') && $content !== '') {
+			$decodedGz = gzdecode($content);
+			$content = $decodedGz === false ? '' : $decodedGz;
+		}
 		$data = [];
 		if (!empty($content)) {
 			$normalizedContent = preg_replace_callback(
@@ -1338,7 +1345,8 @@ HasBody:
 
 		$json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
-		fwrite($fp, $json);
+		$bytes = str_ends_with($filename, '.gz') ? gzencode($json, 6) : $json;
+		fwrite($fp, $bytes === false ? $json : $bytes);
 
 		// Release lock and close
 		flock($fp, LOCK_UN);

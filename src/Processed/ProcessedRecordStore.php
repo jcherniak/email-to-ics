@@ -15,6 +15,71 @@ final class ProcessedRecordStore
         return $this->directory;
     }
 
+    public static function parseSizeToBytes(string|int $size): int
+    {
+        if (is_int($size)) {
+            return max(0, $size);
+        }
+
+        $size = trim($size);
+        if ($size === '') {
+            return 0;
+        }
+
+        if (!preg_match('/^(\d+(?:\.\d+)?)\s*([kmgt]?b?|)$/i', $size, $matches)) {
+            return (int)$size;
+        }
+
+        $value = (float)$matches[1];
+        $unit = strtolower($matches[2] ?: 'b');
+        $multipliers = [
+            'b' => 1,
+            'k' => 1024,
+            'kb' => 1024,
+            'm' => 1024 ** 2,
+            'mb' => 1024 ** 2,
+            'g' => 1024 ** 3,
+            'gb' => 1024 ** 3,
+            't' => 1024 ** 4,
+            'tb' => 1024 ** 4,
+        ];
+
+        return (int)round($value * ($multipliers[$unit] ?? 1));
+    }
+
+    public function enforceMaxSize(string|int $maxSize): void
+    {
+        $maxBytes = self::parseSizeToBytes($maxSize);
+        if ($maxBytes <= 0 || !is_dir($this->directory)) {
+            return;
+        }
+
+        $files = array_map(
+            static fn(string $path): array => [
+                'path' => $path,
+                'size' => filesize($path) ?: 0,
+                'mtime' => filemtime($path) ?: 0,
+            ],
+            $this->files()
+        );
+
+        $total = array_sum(array_column($files, 'size'));
+        if ($total <= $maxBytes) {
+            return;
+        }
+
+        usort($files, static fn(array $a, array $b): int => ($a['mtime'] ?? 0) <=> ($b['mtime'] ?? 0));
+        foreach ($files as $file) {
+            if ($total <= $maxBytes) {
+                break;
+            }
+
+            if (@unlink($file['path'])) {
+                $total -= $file['size'];
+            }
+        }
+    }
+
     /**
      * @return array<int, array<string, mixed>>
      */

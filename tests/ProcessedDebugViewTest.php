@@ -80,4 +80,28 @@ JSON);
         $this->assertStringContainsString('https://example.test/event', $html);
         $this->assertStringContainsString('Parsed Event', $html);
     }
+
+    public function testProcessedStoreReadsGzipAndEnforcesMaxSize(): void
+    {
+        $old = $this->dir . '/2026-05-01.10.00.00-old-Test.json.gz';
+        $new = $this->dir . '/2026-05-01.11.00.00-new-Test.json.gz';
+
+        file_put_contents($old, gzencode(json_encode([
+            '2026-05-01 10:00:00' => ['status' => 'success', 'parsedTitle' => 'Old Event'],
+        ], JSON_PRETTY_PRINT)));
+        file_put_contents($new, gzencode(json_encode([
+            '2026-05-01 11:00:00' => ['status' => 'success', 'parsedTitle' => 'New Event'],
+        ], JSON_PRETTY_PRINT)));
+        touch($old, time() - 100);
+        touch($new, time());
+
+        $store = new ProcessedRecordStore($this->dir);
+        $this->assertSame(100 * 1024 * 1024, ProcessedRecordStore::parseSizeToBytes('100M'));
+        $this->assertSame('New Event', $store->listRecords()[0]['parsedTitle']);
+
+        $store->enforceMaxSize(filesize($new) + 1);
+
+        $this->assertFileDoesNotExist($old);
+        $this->assertFileExists($new);
+    }
 }
