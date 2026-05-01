@@ -35,7 +35,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["popup.html", "popup.css", "dist/popup.bundle.js", "settings.html", "settings.js"],
+      "resources": ["popup.html", "popup.css", "dist/popup.bundle.js", "settings.html", "settings.js", "system_prompt_policy.xml"],
       "matches": ["<all_urls>"]
     }
   ],

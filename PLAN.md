@@ -80,6 +80,20 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
 
 > rename plan.local.md to PLAN.md. Update agents.md / claude.md if its a symlink to say in very strong language that that file is the authorative todo and tracking list.  it should be updated as you go with things done, todos, plans, etc.  it should be committed.  every 5 commits, earlier entries should be summarizrd.  do this then commit the agents and plan and stop
 
+### Prompt 17
+
+> I want you to adjust the plan so you, in order
+> - make system prompt changes
+> - create tests with artifacts. run the models with a constant seed during testing to get consistent output.  put the testing seed as a const in the test class. do the absolute bare minimum refactor to allow for comprehensive testing.
+> - refactor as specified
+> - ensure rhe tests still pass
+>
+> dont stop until 100% complete
+
+### Prompt 18
+
+> and ensure that chrome extension uses new prompt, but i believe that is already hanfled. if it isnt shared already, make sure it is moving forward
+
 ## Current State
 
 - [x] Inspected the Presidio Theatre page.
@@ -132,8 +146,57 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
 - [x] Updated `CLAUDE.md` to make `PLAN.md` the authoritative todo and tracking list.
 - [x] Confirmed no `AGENTS.md`/`agents.md` file exists in this repo.
 - [x] Confirmed `CLAUDE.md` is a regular tracked file, not a symlink.
+- [x] Updated active execution order per Prompt 17:
+  - system prompt changes first
+  - tests and artifacts second, with deterministic model seed
+  - larger refactor third
+  - final verification fourth
+- [x] Added requirement that the Chrome extension must use the same prompt policy moving forward.
 
 ## Implementation Plan
+
+### Active Execution Order
+
+This order is mandatory. The detailed backlog below must be executed according to this sequence, even if older section numbering appears to mention architecture or refactoring earlier.
+
+1. [x] Make the system prompt changes first. *(In progress in current implementation pass.)*
+   - Update the prompt to distinguish equal peer performances from related/secondary events.
+   - Equal peer performances of one event/show/concert/opera should produce one calendar event per performance date/time.
+   - Explicit user/email/page instructions focusing a specific date must override multi-performance extraction.
+   - A page with one clearly primary/selected date plus additional related dates must keep the current primary-date behavior.
+   - Keep this change narrowly scoped; do not do the larger architecture refactor in this phase.
+   - Ensure backend and Chrome extension prompt policy cannot drift silently. If code cannot literally share a runtime prompt file, add tests that check both contain the same required equal-performance policy text.
+
+2. [ ] Create tests with artifacts second.
+   - Create PHPUnit infrastructure and tests before the larger refactor.
+   - Download/store the Presidio Theatre HTML fixture under `tests/artifacts`.
+   - Add other live or artificial artifacts needed for important prompt clauses.
+   - Use live pages only to create fixtures; tests must use artifacts and must not depend on live network access.
+   - Add a constant testing seed in the relevant test class, for example `private const TESTING_SEED = 12345;`.
+   - When tests call models, pass the constant seed so output is as consistent as the provider/model supports.
+   - Use the absolute bare minimum refactor required to make these tests comprehensive:
+     - fixed current date injection/emulation
+     - artifact HTML input
+     - deterministic model call options including seed
+     - dummy email sending or recorded outbound messages
+     - model cache fixture or bypass
+   - Do not start the full PSR-4/Slim/input-source/fetcher-mailer refactor until these tests exist and pass against the prompt changes.
+
+3. [ ] Refactor as specified third.
+   - After prompt tests pass, refactor toward the planned architecture:
+     - PSR-4 namespace `Jcherniak\EmailToIcs\`
+     - core processing separated from input sources
+     - email/webform/CLI as input sources
+     - webpage as separate Slim-based web layer
+     - fetcher interface and chain implementations
+     - Postmark mailer interface plus dummy mailer for tests
+   - Keep behavior covered by the tests from phase 2 during each refactor step.
+
+4. [ ] Ensure tests still pass fourth.
+   - Run the full PHPUnit suite after refactor.
+   - Run syntax checks.
+   - Run focused manual CLI verification only after automated tests pass.
+   - Update this file with verification results and any residual risk.
 
 ### 1. Preserve Current Local State
 

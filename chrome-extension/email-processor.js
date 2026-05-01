@@ -10,6 +10,7 @@ class EmailProcessor {
         this.aiModel = 'google/gemini-2.5-pro';
         this.maxTokens = 20000;
         this.availableModels = [];
+        this.promptPolicyText = '';
         
         // Load settings from storage
         this.initializeFromStorage();
@@ -54,11 +55,27 @@ class EmailProcessor {
                 new Promise((_, reject) => setTimeout(() => reject(new Error('Models loading timeout')), 10000))
             ]);
             console.log('EmailProcessor: Models loaded successfully, count:', this.availableModels.length);
+            this.promptPolicyText = await this.loadPromptPolicy();
         } catch (error) {
             console.error('EmailProcessor: Initialization error:', error);
             // Use fallback models on error
             this.availableModels = this.getOfflineAllowedModels();
+            this.promptPolicyText = await this.loadPromptPolicy();
             console.log('EmailProcessor: Using fallback models, count:', this.availableModels.length);
+        }
+    }
+
+    async loadPromptPolicy() {
+        try {
+            const policyUrl = chrome.runtime.getURL('system_prompt_policy.xml');
+            const response = await fetch(policyUrl);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return (await response.text()).trim();
+        } catch (error) {
+            console.error('EmailProcessor: Failed to load shared prompt policy:', error);
+            return '';
         }
     }
 
@@ -301,7 +318,9 @@ class EmailProcessor {
         const cleanUrl = url ? this.stripTrackingParameters(url) : url;
         
         const multiDayInstructions = multiday ? 
-            `MULTI-DAY MODE ENABLED: Extract ALL related performances/sessions as SEPARATE events.
+            `MULTI-DAY MODE ENABLED: Extract each equal related performance/session as a SEPARATE event.
+
+Follow the shared prompt policy exactly, especially the tagged equal-performance and exception rules.
 
 When you see multiple performances like:
 - "Friday, October 3, 2025 at 7:30PM"
@@ -321,7 +340,9 @@ This applies to:
 - Conference sessions across days
 - Festival events on different dates
 - Any scheduled performances of the same show` :
-            `SINGLE EVENT MODE: Focus on extracting ONLY the main/primary event. Ignore secondary or related events.`;
+            `SINGLE EVENT MODE: Focus on extracting ONLY the main/primary event. Ignore secondary or related events.
+
+However, follow the shared prompt policy exactly: if the content is clearly one event/show with multiple equal peer performance date/time options and no selected or primary date, extract each equal performance as its own event when multi-event output is available.`;
             
         const basePrompt = `You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
 
@@ -329,6 +350,9 @@ CRITICAL: You must respond with valid JSON only. No markdown, no explanations, j
 
 # PRIMARY EVENT IDENTIFICATION
 Your primary task is to identify and extract events described in the content.
+
+# SHARED EVENT SELECTION POLICY
+${this.promptPolicyText || '<prompt-policy unavailable="true">Use the equal-performance rules from the packaged shared prompt policy file.</prompt-policy>'}
 
 ${multiDayInstructions}
 

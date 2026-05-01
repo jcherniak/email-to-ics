@@ -312,9 +312,125 @@ class EmailProcessor
 	private $aiModel;
 	private $openRouterKey;
 	private $maxTokens = 20000;
+	private ?\DateTimeImmutable $currentDateOverride = null;
+	private ?int $aiSeed = null;
 
 	// Available models will be loaded dynamically
 	private $availableModels = [];
+
+	public function setCurrentDateForTesting(\DateTimeImmutable|string|null $date): void
+	{
+		if ($date === null) {
+			$this->currentDateOverride = null;
+			return;
+		}
+
+		$this->currentDateOverride = $date instanceof \DateTimeImmutable ? $date : new \DateTimeImmutable($date);
+	}
+
+	public function setAiSeedForTesting(?int $seed): void
+	{
+		$this->aiSeed = $seed;
+	}
+
+	private function getCurrentDate(): \DateTimeImmutable
+	{
+		return $this->currentDateOverride ?? new \DateTimeImmutable('now');
+	}
+
+	private function getSharedPromptPolicyText(): string
+	{
+		$path = __DIR__ . '/prompt/system_prompt_policy.xml';
+		$policy = file_get_contents($path);
+		if ($policy === false || trim($policy) === '') {
+			throw new \RuntimeException("Shared prompt policy file is missing or empty: {$path}");
+		}
+
+		return trim($policy);
+	}
+
+	private function eventDataItems($eventData): array
+	{
+		if (!is_array($eventData)) {
+			return [];
+		}
+
+		if (isset($eventData[0]) && is_array($eventData[0])) {
+			return $eventData;
+		}
+
+		return [$eventData];
+	}
+
+	private function eventSubjectWithDate(string $subject, array $eventData, int $eventCount): string
+	{
+		if ($eventCount <= 1 || empty($eventData['dtstart'])) {
+			return $subject;
+		}
+
+		try {
+			$timezone = new \DateTimeZone($eventData['timezone'] ?? 'America/Los_Angeles');
+			$date = new \DateTimeImmutable($eventData['dtstart'], $timezone);
+			$dateText = !empty($eventData['isAllDay'])
+				? $date->format('M j, Y')
+				: $date->format('M j, Y g:i A');
+			return str_contains($subject, $dateText) ? $subject : "{$subject} - {$dateText}";
+		} catch (\Throwable $e) {
+			return $subject;
+		}
+	}
+
+	private function shouldExtractEqualPerformances(string $content, ?string $instructions = null): bool
+	{
+		if ($this->instructionsFocusSpecificDate($instructions)) {
+			return false;
+		}
+
+		if (!preg_match('/\b(ticket|tickets|buy tickets|performance|performances|session|sessions|showtime|showtimes|concert|opera|theatre|theater|screening|show)\b/i', $content)) {
+			return false;
+		}
+
+		return count($this->extractDateTimeCandidates($content)) >= 2;
+	}
+
+	private function instructionsFocusSpecificDate(?string $instructions): bool
+	{
+		if (empty($instructions)) {
+			return false;
+		}
+
+		return preg_match('/\b(only|focus|specific|particular|just|choose|use)\b.{0,80}\b(date|performance|session|show|event|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}[\/-]\d{1,2})\b/i', $instructions) === 1;
+	}
+
+	private function extractDateTimeCandidates(string $content): array
+	{
+		$normalized = html_entity_decode(strip_tags($content, '<span><li><a><div><p><time>'), ENT_QUOTES | ENT_HTML5);
+		$normalized = preg_replace('/\s+/', ' ', $normalized);
+		$candidates = [];
+
+		if (preg_match_all('/\b(?:Mon|Tue|Tues|Wed|Thu|Thurs|Fri|Sat|Sun)(?:day)?[,]?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4}\s+(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:AM|PM|A\.M\.|P\.M\.)\b/i', $normalized, $matches)) {
+			foreach ($matches[0] as $match) {
+				$candidates[] = strtolower(trim($match));
+			}
+		}
+
+		if (preg_match_all('/\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4}\s+(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:AM|PM|A\.M\.|P\.M\.)\b/i', $normalized, $matches)) {
+			foreach ($matches[0] as $match) {
+				$candidates[] = strtolower(trim($match));
+			}
+		}
+
+		if (preg_match_all('/\b((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4})\b.{0,80}?\b(\d{1,2}(?::\d{2})?\s*(?:AM|PM|A\.M\.|P\.M\.))\b/i', $normalized, $matches, PREG_SET_ORDER)) {
+			foreach ($matches as $match) {
+				$candidates[] = strtolower(trim($match[1] . ' ' . $match[2]));
+			}
+		}
+
+		return array_values(array_unique(array_map(
+			fn($candidate) => preg_replace('/\s+/', ' ', $candidate),
+			$candidates
+		)));
+	}
 
     public function __construct()
     {
@@ -564,6 +680,11 @@ class EmailProcessor
 {$downloadedText}
 TEXT;
 
+		if (!$allowMultiDay && $this->shouldExtractEqualPerformances($combinedText, $instructions)) {
+			$allowMultiDay = true;
+			errlog("Multi-day mode enabled automatically for equal performance schedule");
+		}
+
 		$eventDetails = $this->generateIcalEvent($combinedText, $instructions, $screenshotViewport, $screenshotZoomed, $requestedModel, $cliDebug, $allowMultiDay, $url);
 
 		// Handle --json flag for CLI output if requested - This takes precedence over other CLI outputs.
@@ -740,13 +861,25 @@ TEXT;
 <div>{$downloadedText}</div>
 BODY;
 
-		$this->sendEmail($ics, $recipientEmail, $subject, $htmlBody); // This can throw
+		$eventItems = $this->eventDataItems($eventDetails['eventData'] ?? null);
+		if (count($eventItems) > 1) {
+			$generator = new IcalGenerator();
+			foreach ($eventItems as $singleEventData) {
+				$singleIcs = $generator->convertJsonToIcs($singleEventData, $this->fromEmail);
+				$singleSubject = $this->eventSubjectWithDate($subject, $singleEventData, count($eventItems));
+				$this->sendEmail($singleIcs, $recipientEmail, $singleSubject, $htmlBody); // This can throw
+			}
+		} else {
+			$this->sendEmail($ics, $recipientEmail, $subject, $htmlBody); // This can throw
+		}
 
 		// --- Respond based on origin ---
 		if ($fromExtension) {
             $successOutput = [
 				'status' => 'success',
-				'message' => "Email sent successfully to {$recipientEmail}",
+				'message' => count($eventItems) > 1
+					? count($eventItems) . " emails sent successfully to {$recipientEmail}"
+					: "Email sent successfully to {$recipientEmail}",
 				'recipientEmail' => $recipientEmail,
 				'emailSubject' => $subject,
 				'icsContent' => $ics
@@ -759,11 +892,17 @@ BODY;
             }
 		} else {
             if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
-                echo "Email sent to {$recipientEmail} with ICS file: {$subject}\n";
+                if (count($eventItems) > 1) {
+                    echo count($eventItems) . " emails sent to {$recipientEmail} with ICS files: {$subject}\n";
+                } else {
+                    echo "Email sent to {$recipientEmail} with ICS file: {$subject}\n";
+                }
                 // Optionally print ICS content or path if useful for CLI
             } else {
 			    http_response_code(200);
-			    echo "<h1>Email sent to {$recipientEmail} with ICS file:</h1><pre>";
+			    echo count($eventItems) > 1
+                    ? "<h1>" . count($eventItems) . " emails sent to {$recipientEmail} with ICS files:</h1><pre>"
+                    : "<h1>Email sent to {$recipientEmail} with ICS file:</h1><pre>";
 			    echo htmlspecialchars($this->unescapeNewlines($ics));
 			    echo '</pre>';
             }
@@ -1336,9 +1475,16 @@ HasBody:
         // If not outputting JSON directly, proceed with standard logic
         // Generate ICS only if not outputting JSON and if eventData is present and AI was successful
         $calendarEvent = null;
+        $calendarEventItems = [];
         if (($eventDetails['success'] ?? false) && !empty($eventDetails['eventData'])) {
             $generator = new IcalGenerator();
             $calendarEvent = $generator->convertJsonToIcs($eventDetails['eventData'], $this->fromEmail);
+            foreach ($this->eventDataItems($eventDetails['eventData']) as $singleEventData) {
+                $calendarEventItems[] = [
+                    'eventData' => $singleEventData,
+                    'ics' => $generator->convertJsonToIcs($singleEventData, $this->fromEmail),
+                ];
+            }
         } elseif (($eventDetails['success'] ?? false) === false) {
             errlog("Skipping ICS generation for Postmark email because AI processing failed: " . ($eventDetails['errorMessage'] ?? 'Unknown AI error'));
         } else { // Success was true, but eventData was empty/missing
@@ -1360,14 +1506,29 @@ HasBody:
                 $recipientEmail = $this->toConfirmedEmail;
             }
 
-            $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body, $eventDetails, $pdfText, $downloadedUrlContent);
+            if (count($calendarEventItems) > 1) {
+                foreach ($calendarEventItems as $calendarEventItem) {
+                    $singleSubject = $this->eventSubjectWithDate($subject, $calendarEventItem['eventData'], count($calendarEventItems));
+                    $singleEventDetails = $eventDetails;
+                    $singleEventDetails['eventData'] = $calendarEventItem['eventData'];
+                    $singleEventDetails['emailSubject'] = $singleSubject;
+                    $this->sendEmailWithAttachment($recipientEmail, $calendarEventItem['ics'], $singleSubject, $body, $singleEventDetails, $pdfText, $downloadedUrlContent);
+                }
+            } else {
+                $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body, $eventDetails, $pdfText, $downloadedUrlContent);
+            }
 
             // Record successful processing
             if ($messageId) {
                 $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'success', $calendarEvent, null, null, $downloadedUrlContent, $this->scrapeflyScreenshot, $pdfText, $htmlBodyForAI);
             }
 
-            echo json_encode(['status' => 'success', 'message' => 'Email processed successfully']);
+            echo json_encode([
+                'status' => 'success',
+                'message' => count($calendarEventItems) > 1
+                    ? count($calendarEventItems) . ' calendar emails processed successfully'
+                    : 'Email processed successfully'
+            ]);
         } else {
             // Send error email since ICS generation failed
             errlog("Sending error email because ICS generation failed");
@@ -1872,6 +2033,9 @@ HasBody:
         } elseif (!empty($instructions) && stripos($instructions, 'MULTI') !== false) {
             $allowMultiDay = true;
             errlog("Multi-day mode enabled via MULTI in Instructions field");
+        } elseif ($this->shouldExtractEqualPerformances($combinedText, $instructions)) {
+            $allowMultiDay = true;
+            errlog("Multi-day mode enabled automatically for equal performance schedule");
         }
 
         // Try all models ONCE with the provided content
@@ -1983,14 +2147,18 @@ HasBody:
             'additionalProperties' => false,
         ];
 
-        $curYear = date('Y');
-        $curDate = date('m/d');
+        $currentDate = $this->getCurrentDate();
+        $curYear = $currentDate->format('Y');
+        $curDate = $currentDate->format('m/d');
         $nextYear = $curYear + 1;
+        $sharedPromptPolicy = $this->getSharedPromptPolicyText();
 
         // Determine multi-day handling instructions
         $multiDayInstructions = $allowMultiDay ?
             "## Multi-Day Mode (ENABLED):
-CRITICAL: Extract ALL related performances/sessions as SEPARATE events.
+CRITICAL: Extract each equal related performance/session as a SEPARATE event.
+
+Follow the shared prompt policy exactly, especially the tagged equal-performance and exception rules.
 
 When you see multiple performances like:
 - \"Friday, October 3, 2025 at 7:30PM\"
@@ -2014,7 +2182,9 @@ This applies to:
 - Festival events on different dates
 - Any scheduled performances of the same show" :
             "## Single Event Mode (DEFAULT):
-Focus on extracting ONLY the main/primary event. Ignore secondary or related events.";
+Focus on extracting ONLY the main/primary event. Ignore secondary or related events.
+
+However, follow the shared prompt policy exactly: if the content is clearly one event/show with multiple equal peer performance date/time options and no selected or primary date, extract each equal performance as its own event when multi-event output is available.";
 
         // Primary event identification instructions - only in single-event mode
         $primaryEventInstructions = $allowMultiDay ? "" :
@@ -2046,6 +2216,10 @@ You are an AI assistant that extracts event information from web content and con
 CRITICAL: You must respond with valid JSON only. No markdown, no explanations, just pure JSON.
 
 {$primaryEventInstructions}
+# SHARED EVENT SELECTION POLICY
+
+{$sharedPromptPolicy}
+
 # MULTI-DAY EVENT HANDLING MODES
 
 {$multiDayInstructions}
@@ -2237,6 +2411,10 @@ PROMPT;
             'max_tokens' => $this->maxTokens,
 						'provider' 
         ];
+
+		if ($this->aiSeed !== null) {
+			$data['seed'] = $this->aiSeed;
+		}
 
         if ($cliDebug && defined('IS_CLI_RUN') && IS_CLI_RUN) {
             fwrite(STDERR, "\n--- AI REQUEST DATA (DEBUG) ---\n");
