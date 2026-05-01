@@ -6,3 +6,4 @@ confirm_cache
 worktrees
 uploads
 processed
+*.local.md
