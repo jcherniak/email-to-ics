@@ -16,9 +16,7 @@ use Eluceo\iCal\Domain\ValueObject\SingleDay;
 use Eluceo\iCal\Domain\ValueObject\MultiDay;
 use Eluceo\iCal\Domain\ValueObject\TimeSpan;
 use Eluceo\iCal\Domain\ValueObject\Location;
-use Eluceo\iCal\Domain\ValueObject\Organizer;
 use Eluceo\iCal\Domain\ValueObject\Uri;
-use Eluceo\iCal\Domain\ValueObject\EmailAddress;
 use DateTimeImmutable;
 use DateTimeZone;
 use Exception;
@@ -74,7 +72,7 @@ class IcalGenerator {
      * Handles both single events and arrays of events for multi-day support.
      *
      * @param array $eventData Associative array conforming to the eventSchema, or array of such arrays.
-     * @param string $fromEmail The sender email address for the organizer field.
+     * @param string $fromEmail Retained for backward-compatible call sites. Normal generated files are not invitations and do not set an organizer.
      * @return string The generated ICS content.
      * @throws Exception If required fields are missing or dates are invalid.
      */
@@ -104,6 +102,9 @@ class IcalGenerator {
 
             // Transform the calendar domain entity to an iCalendar component
             $calendarComponent = $calendarFactory->createCalendar($calendar);
+            $calendarComponent = $calendarComponent->withProperty(
+                new Property('METHOD', new TextValue('PUBLISH'))
+            );
 
             // Return the rendered iCalendar component as a string
             return (string) $calendarComponent;
@@ -120,7 +121,7 @@ class IcalGenerator {
      * Creates a single CustomEvent from event data array.
      *
      * @param array $eventData Single event data array
-     * @param string $fromEmail The sender email address for the organizer field
+     * @param string $fromEmail Retained for backward-compatible call sites. Normal generated files are not invitations and do not set an organizer.
      * @return CustomEvent The created event
      * @throws Exception If required fields are missing or dates are invalid
      */
@@ -156,10 +157,6 @@ class IcalGenerator {
         if (!empty($eventData['url'])) {
             $event->setUrl(new Uri($eventData['url']));
         }
-
-        // Set organizer
-        $organizer = new Organizer(new EmailAddress($fromEmail), 'Email-to-ICS');
-        $event->setOrganizer($organizer);
 
         // Create DateTime objects with the correct timezone for start and end
         $timezone = new DateTimeZone($tzid);

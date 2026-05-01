@@ -505,7 +505,7 @@ ${html}`;
             'VERSION:2.0',
             'PRODID:-//Email to ICS Extension//EN',
             'CALSCALE:GREGORIAN',
-            'METHOD:REQUEST'
+            'METHOD:PUBLISH'
         ];
         
         // Add each event
@@ -573,11 +573,6 @@ ${html}`;
                 icsContent.push('STATUS:CONFIRMED');
             }
             
-            // Add organizer if configured
-            if (this.fromEmail) {
-                icsContent.push(`ORGANIZER:mailto:${this.fromEmail}`);
-            }
-            
             icsContent.push('END:VEVENT');
         }
         
@@ -591,7 +586,7 @@ ${html}`;
     }
 
     generateEmailSubject(eventData) {
-        return `Calendar Invite: ${eventData.summary}`;
+        return `Calendar Event: ${eventData.summary}`;
     }
 
     generateConfirmationToken() {
@@ -621,13 +616,13 @@ ${html}`;
             throw new Error('Postmark API key not configured');
         }
 
-        const emailBody = `Please find the calendar invitation attached.
+        const emailBody = `Please find the calendar event attached.
 
 Event: ${eventData.summary}
 ${eventData.location ? `Location: ${eventData.location}` : ''}
 ${eventData.description ? `Description: ${eventData.description}` : ''}
 
-This invitation was generated automatically.`;
+This calendar event was generated automatically.`;
 
         const response = await fetch('https://api.postmarkapp.com/email', {
             method: 'POST',
@@ -643,9 +638,9 @@ This invitation was generated automatically.`;
                 TextBody: emailBody,
                 Attachments: [
                     {
-                        Name: 'invite.ics',
+                        Name: 'event.ics',
                         Content: btoa(unescape(encodeURIComponent(icsContent))),
-                        ContentType: 'text/calendar'
+                        ContentType: 'text/calendar; method=PUBLISH; charset=UTF-8'
                     }
                 ]
             })

@@ -816,7 +816,7 @@ TEXT;
                     exit;
                 }
                 if ($display == 'download') {
-                    header('Content-Type: text/calendar; charset=utf-8');
+                    header('Content-Type: text/calendar; method=PUBLISH; charset=utf-8');
                     header('Content-Disposition: attachment; filename="' . $filename . '"');
                 } else { // display
                     header('Content-Type: text/plain; charset=utf-8');
@@ -2917,7 +2917,7 @@ BODY;
 				[
 					'Name' => 'event.ics',
 					'Content' => base64_encode($ics),
-					'ContentType' => 'text/calendar',
+					'ContentType' => 'text/calendar; method=PUBLISH; charset=UTF-8',
 				],
 			], $otherAttachments);
 		} else {
