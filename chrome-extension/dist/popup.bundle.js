@@ -28062,7 +28062,7 @@
   document.addEventListener("DOMContentLoaded", async function() {
     const buildEl = document.getElementById("build-timestamp");
     if (buildEl)
-      buildEl.textContent = `Build: ${"05/01/2026, 16:07:41"}`;
+      buildEl.textContent = `Build: ${"05/01/2026, 16:56:14"}`;
     adapters = createBrowserAdapters();
     icsGenerator = new BrowserIcsGenerator();
     const isInIframe = window.self !== window.top;
@@ -28210,6 +28210,14 @@
         }
       });
     }
+    function modelSupportsImageInput(model) {
+      const inputModalities = model?.architecture?.input_modalities;
+      if (Array.isArray(inputModalities)) {
+        return inputModalities.includes("image");
+      }
+      const modality = model?.architecture?.modality;
+      return typeof modality === "string" && modality.includes("image");
+    }
     function normalizeModels(allModels) {
       const unique = /* @__PURE__ */ new Map();
       (allModels || []).forEach((model) => {
@@ -28293,12 +28301,18 @@
           console.warn("Failed to fetch models from background:", response?.error);
           return getOfflinePriorityModels();
         }
-        const normalizedModels = normalizeModels(response.data || []);
+        const apiModels = response.data || [];
+        const imageCapableModels = apiModels.filter(modelSupportsImageInput);
+        const normalizedModels = normalizeModels(imageCapableModels);
         if (normalizedModels.length === 0) {
-          console.warn("No models returned from API; using offline priority list");
+          console.warn("No image-capable models returned from API; using offline priority list");
           return getOfflinePriorityModels();
         }
-        console.log("Available models (raw):", normalizedModels);
+        console.log("Available image-capable models:", {
+          imageCapableCount: normalizedModels.length,
+          totalCount: apiModels.length,
+          models: normalizedModels
+        });
         return normalizedModels;
       } catch (error) {
         console.error("Error fetching models:", error);
