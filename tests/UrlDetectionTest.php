@@ -5,6 +5,7 @@ declare(strict_types=1);
 use GuzzleHttp\Psr7\Response;
 use Jcherniak\EmailToIcs\Input\EmailInputSource;
 use Jcherniak\EmailToIcs\Mail\DummyMailer;
+use Jcherniak\EmailToIcs\UrlDetection\LocalUrlDetector;
 use PHPUnit\Framework\TestCase;
 
 final class UrlDetectionTest extends TestCase
@@ -64,6 +65,39 @@ final class UrlDetectionTest extends TestCase
         $this->assertSame('Use this override instruction.', $email['instructions']);
     }
 
+    public function testLocalUrlDetectorFindsUrlOnlyBodyWithoutApi(): void
+    {
+        $client = new FakeUrlDetectionClient([
+            FakeUrlDetectionClient::openRouterResponse(['containsUrl' => true, 'url' => 'https://wrong.example.test']),
+        ]);
+        $processor = $this->processorWithUrlDetectionClient($client);
+
+        $url = $this->invokeUrlDetection($processor, "\xEF\xBB\xBFhttps://example.test/local?\n");
+
+        $this->assertSame('https://example.test/local', $url);
+        $this->assertSame([], $client->requestedModels);
+    }
+
+    public function testLocalUrlDetectorFindsDirectiveFormatBeforeApi(): void
+    {
+        $detector = new LocalUrlDetector();
+
+        $this->assertSame(
+            'https://example.test/directive',
+            $detector->detect("URL: https://example.test/directive\nInstructions: Use Saturday only")
+        );
+    }
+
+    public function testLocalUrlDetectorFindsDashedOverrideFormatBeforeApi(): void
+    {
+        $detector = new LocalUrlDetector();
+
+        $this->assertSame(
+            'https://example.test/separator',
+            $detector->detect("https://example.test/separator\n\n---\nUse Saturday only")
+        );
+    }
+
     public function testUrlDetectionFallsBackToSecondModelForShortFalseResult(): void
     {
         $_ENV['URL_DETECTION_MODEL'] = 'google/gemini-flash-latest';
@@ -109,7 +143,7 @@ final class UrlDetectionTest extends TestCase
         ]);
         $processor = $this->processorWithUrlDetectionClient($client);
 
-        $url = $this->invokeUrlDetection($processor, 'https://example.test/fallback');
+        $url = $this->invokeUrlDetection($processor, 'please find the url');
 
         $this->assertSame('https://example.test/fallback', $url);
         $this->assertSame(['google/gemini-flash-latest', 'openai/gpt-mini-latest'], $client->requestedModels);
