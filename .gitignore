@@ -3,6 +3,9 @@ vendor
 .models_cache.json
 confirm_cache
 **/node_modules/
+shared-core/dist/
+shared-core/.turbo/
+shared-core/*.tsbuildinfo
 worktrees
 uploads
 processed

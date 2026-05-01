@@ -1,4 +1,6 @@
 // EmailProcessor - Ported from PHP to JavaScript
+// Shared model configuration will be imported by background.js before this script
+
 class EmailProcessor {
     constructor() {
         this.openRouterKey = '';
@@ -7,8 +9,9 @@ class EmailProcessor {
         this.inboundConfirmedEmail = '';
         this.toTentativeEmail = '';
         this.toConfirmedEmail = '';
-        this.aiModel = '~openai/gpt-latest';
+        this.aiModel = 'google/gemini-2.5-pro';
         this.maxTokens = 20000;
+        this.requestTimeout = 120000; // 2 minutes timeout
         this.availableModels = [];
         this.promptPolicyText = '';
         
@@ -17,16 +20,10 @@ class EmailProcessor {
     }
 
     getOfflineAllowedModels() {
-        // Return offline list of allowed models as fallback
-        return [
-            { id: '~openai/gpt-latest', name: 'OpenAI GPT Latest' },
-            { id: '~google/gemini-pro-latest', name: 'Google Gemini Pro Latest' },
-            { id: '~anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
-            { id: '~anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
-            { id: '~openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
-            { id: '~google/gemini-flash-latest', name: 'Google Gemini Flash Latest' },
-            { id: '~moonshotai/kimi-latest', name: 'Kimi Latest' }
-        ];
+        if (typeof ALLOWED_MODELS === 'undefined') {
+            throw new Error('Shared model configuration not loaded - models-config.js import failed');
+        }
+        return ALLOWED_MODELS;
     }
 
     async initializeFromStorage() {
@@ -42,14 +39,14 @@ class EmailProcessor {
                 this.inboundConfirmedEmail = settings.inboundConfirmedEmail || '';
                 this.toTentativeEmail = settings.toTentativeEmail || '';
                 this.toConfirmedEmail = settings.toConfirmedEmail || '';
-                this.aiModel = settings.aiModel || '~openai/gpt-latest';
+                this.aiModel = settings.aiModel || 'google/gemini-2.5-pro';
             }
             
             console.log('EmailProcessor: Loading available models...');
             // Load available models with timeout
             this.availableModels = await Promise.race([
                 this.loadAvailableModels(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Models loading timeout')), 10000))
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Models loading timeout')), 30000))
             ]);
             console.log('EmailProcessor: Models loaded successfully, count:', this.availableModels.length);
             this.promptPolicyText = await this.loadPromptPolicy();
@@ -130,60 +127,34 @@ class EmailProcessor {
     }
 
     getAllowedModelsOffline() {
-        // Return allowed models even when offline
-        return [
-            { id: '~openai/gpt-latest', name: 'OpenAI GPT Latest' },
-            { id: '~google/gemini-pro-latest', name: 'Gemini Pro Latest' },
-            { id: '~anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
-            { id: '~anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
-            { id: '~openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
-            { id: '~google/gemini-flash-latest', name: 'Gemini Flash Latest' },
-            { id: '~moonshotai/kimi-latest', name: 'Kimi Latest' }
-        ];
+        return this.getOfflineAllowedModels();
     }
 
     filterAllowedModels(allModels) {
-        // Define allowed models
-        const allowedModelIds = [
-            '~openai/gpt-latest',
-            '~google/gemini-pro-latest',
-            '~anthropic/claude-opus-latest',
-            '~anthropic/claude-sonnet-latest',
-            '~openai/gpt-mini-latest',
-            '~google/gemini-flash-latest',
-            '~moonshotai/kimi-latest'
-        ];
+        if (typeof ALLOWED_MODEL_IDS === 'undefined' || typeof PREFERRED_ORDER === 'undefined') {
+            throw new Error('Shared model configuration not loaded - models-config.js import failed');
+        }
 
         // Filter models to only include allowed ones
         const filteredModels = allModels.filter(model => 
-            allowedModelIds.includes(model.id)
+            ALLOWED_MODEL_IDS.includes(model.id)
         );
 
         // Add any missing models with fallback names
         const foundIds = filteredModels.map(m => m.id);
-        const missingIds = allowedModelIds.filter(id => !foundIds.includes(id));
+        const missingIds = ALLOWED_MODEL_IDS.filter(id => !foundIds.includes(id));
         
         missingIds.forEach(id => {
-            const fallbackModel = this.getOfflineAllowedModels().find(m => m.id === id);
+            const fallbackModel = ALLOWED_MODELS.find(m => m.id === id);
             if (fallbackModel) {
                 filteredModels.push(fallbackModel);
             }
         });
 
         // Sort models with preferred order
-        const preferredOrder = [
-            '~openai/gpt-latest',
-            '~google/gemini-pro-latest',
-            '~anthropic/claude-opus-latest',
-            '~anthropic/claude-sonnet-latest',
-            '~openai/gpt-mini-latest',
-            '~google/gemini-flash-latest',
-            '~moonshotai/kimi-latest'
-        ];
-
         return filteredModels.sort((a, b) => {
-            const aIndex = preferredOrder.indexOf(a.id);
-            const bIndex = preferredOrder.indexOf(b.id);
+            const aIndex = PREFERRED_ORDER.indexOf(a.id);
+            const bIndex = PREFERRED_ORDER.indexOf(b.id);
             return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
         });
     }
@@ -215,15 +186,20 @@ class EmailProcessor {
             screenshot = null,
             tentative = true,
             multiday = false,
-            reviewMode = 'direct'
+            reviewMode = 'direct',
+            aiModel = null
         } = params;
 
         try {
+            // Use the model from params if provided, otherwise use stored model
+            const modelToUse = aiModel || this.aiModel;
+            console.log('🤖 Using AI model:', modelToUse);
+            
             // Build the prompt
             const prompt = this.buildPrompt(html, instructions, url, screenshot, tentative, multiday);
             
-            // Call AI model
-            const aiResponse = await this.callAiModel(prompt);
+            // Call AI model with the specified model
+            const aiResponse = await this.callAiModel(prompt, modelToUse, multiday);
             
             // Parse and validate response
             const parsedData = this.parseAiResponse(aiResponse);
@@ -305,115 +281,64 @@ class EmailProcessor {
     }
     
     buildPrompt(html, instructions, url, screenshot, tentative, multiday) {
+        console.log('🔧 EmailProcessor buildPrompt v3.0 - System prompt separation');
+        console.log('📅 Multi-day mode:', multiday);
+        
         // Strip tracking parameters from URL
         const cleanUrl = url ? this.stripTrackingParameters(url) : url;
         
-        const multiDayInstructions = multiday ? 
-            `MULTI-DAY MODE ENABLED: Extract each equal related performance/session as a SEPARATE event.
+        // Build user content that will be sent separately from system prompt
+        let userContent = '';
+        
+        // Add mode-specific instructions
+        if (multiday) {
+            userContent += 'MULTI-DAY MODE: Extract ALL related performances/sessions as SEPARATE events.\n\n';
+        } else {
+            userContent += 'SINGLE EVENT MODE: Focus on extracting ONLY the main/primary event.\n\n';
+        }
+        
+        // Add event status
+        userContent += `Event status: ${tentative ? 'Tentative' : 'Confirmed'}\n\n`;
+        
+        // Add special instructions if provided
+        if (instructions) {
+            userContent += `Special instructions: ${instructions}\n\n`;
+        }
+        
+        // Add source URL if provided
+        if (cleanUrl) {
+            userContent += `Source URL: ${cleanUrl}\n\n`;
+        }
+        
+        // Add the main content to analyze
+        userContent += 'Content to analyze:\n' + html;
 
-Follow the shared prompt policy exactly, especially the tagged equal-performance and exception rules.
-
-When you see multiple performances like:
-- "Friday, October 3, 2025 at 7:30PM"
-- "Saturday, October 4, 2025 at 7:30PM" 
-- "Sunday, October 5, 2025 at 2:00PM"
-
-Create SEPARATE events for each performance, each with:
-- Same summary/title (e.g., "Gimeno Conducts Tchaikovsky 5")
-- Same location and description
-- Different start_date, start_time, end_date, end_time for each performance
-- Same timezone
-
-RETURN FORMAT FOR MULTI-DAY MODE: Return an ARRAY of event objects: [{event1}, {event2}, {event3}]
-
-This applies to:
-- Multiple concert performances  
-- Conference sessions across days
-- Festival events on different dates
-- Any scheduled performances of the same show` :
-            `SINGLE EVENT MODE: Focus on extracting ONLY the main/primary event. Ignore secondary or related events.
-
-However, follow the shared prompt policy exactly: if the content is clearly one event/show with multiple equal peer performance date/time options and no selected or primary date, extract each equal performance as its own event when multi-event output is available.`;
-            
-        const basePrompt = `You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
-
-CRITICAL: You must respond with valid JSON only. No markdown, no explanations, just pure JSON.
-
-# PRIMARY EVENT IDENTIFICATION
-Your primary task is to identify and extract events described in the content.
-
-# SHARED EVENT SELECTION POLICY
-${this.promptPolicyText || '<prompt-policy unavailable="true">Use the equal-performance rules from the packaged shared prompt policy file.</prompt-policy>'}
-
-${multiDayInstructions}
-
-# OUTPUT FORMAT
-${multiday ? 
-    `Return an ARRAY of event objects (one for each performance):
-[
-    {
-        "summary": "Event 1 title",
-        "location": "Event location",
-        "start_date": "2025-10-03",
-        "start_time": "19:30",
-        "end_date": "2025-10-03", 
-        "end_time": "21:30",
-        "description": "Event 1 description",
-        "timezone": "America/Los_Angeles",
-        "url": "Event URL"
-    },
-    {
-        "summary": "Event 2 title", 
-        "location": "Event location",
-        "start_date": "2025-10-04",
-        "start_time": "19:30",
-        "end_date": "2025-10-04",
-        "end_time": "21:30", 
-        "description": "Event 2 description",
-        "timezone": "America/Los_Angeles",
-        "url": "Event URL"
-    }
-]` :
-    `Return a single event object:
-{
-    "summary": "Event title",
-    "location": "Event location or empty string",
-    "start_date": "YYYY-MM-DD",
-    "start_time": "HH:MM" or null for all-day,
-    "end_date": "YYYY-MM-DD", 
-    "end_time": "HH:MM" or null for all-day,
-    "description": "Event description",
-    "timezone": "America/New_York",
-    "url": "Event URL or source URL"
-}`
-}
-
-Guidelines:
-- Use ISO 8601 date format (YYYY-MM-DD)
-- Use 24-hour time format (HH:MM)
-- If no end time specified, make reasonable estimate (2h default, 3h opera)
-- Default timezone is America/Los_Angeles unless specified
-- For all-day events, set start_time and end_time to null
-- Event status: ${tentative ? 'Tentative' : 'Confirmed'}
-- IMPORTANT: If a source URL is provided, include it in the "url" field
-- IMPORTANT: If a source URL is provided, also add it at the bottom of the description field with text "\\n\\nSource: [URL]"
-
-${instructions ? `Special instructions: ${instructions}\n` : ''}
-
-${cleanUrl ? `Source URL: ${cleanUrl}\n` : ''}
-
-Content to analyze:
-${html}`;
-
-        return basePrompt;
+        return userContent;
     }
 
-    async callAiModel(prompt) {
+    async callAiModel(prompt, modelToUse = null, multiday = false) {
         if (!this.openRouterKey) {
             throw new Error('OpenRouter API key not configured');
         }
+        
+        const model = modelToUse || this.aiModel;
+        console.log('🔧 callAiModel - Sending system + user messages to model:', model);
+        console.log('📅 Multi-day mode in callAiModel:', multiday);
 
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        // Use the injected system prompt from build time
+        const systemPrompt = INJECTED_SYSTEM_PROMPT;
+        console.log('✅ System prompt loaded from build injection, length:', systemPrompt.length);
+        
+        // Format the user content with the specific parameters
+        const userContent = `${prompt}`;
+
+        // Create timeout promise
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`Request timed out after ${this.requestTimeout}ms`)), this.requestTimeout)
+        );
+        
+        // Create fetch promise
+        const fetchPromise = fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${this.openRouterKey}`,
@@ -422,17 +347,62 @@ ${html}`;
                 'X-Title': 'Email to ICS Chrome Extension'
             },
             body: JSON.stringify({
-                model: this.aiModel,
+                model: model,
                 messages: [
                     {
-                        role: 'user',
-                        content: prompt
+                        role: 'system',
+                        content: systemPrompt
+                    },
+                    {
+                        role: 'user', 
+                        content: userContent
                     }
                 ],
                 max_tokens: this.maxTokens,
-                temperature: 0.1
+                temperature: 0.1,
+                response_format: { 
+                    type: "json_schema",
+                    json_schema: {
+                        name: "chrome_extension_response",
+                        strict: true,
+                        schema: {
+                            type: "object",
+                            properties: {
+                                "events": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "summary": { "type": "string" },
+                                            "location": { "type": "string" },
+                                            "start_date": { "type": "string" },
+                                            "start_time": { "type": ["string", "null"] },
+                                            "end_date": { "type": "string" },
+                                            "end_time": { "type": ["string", "null"] },
+                                            "description": { "type": "string" },
+                                            "timezone": { "type": "string" },
+                                            "url": { "type": "string" }
+                                        },
+                                        "required": ["summary", "location", "start_date", "end_date", "description", "timezone", "url"],
+                                        "additionalProperties": false
+                                    },
+                                    "minItems": 1,
+                                    "maxItems": multiday ? 50 : 1
+                                }
+                            },
+                            required: ["events"],
+                            additionalProperties: false
+                        }
+                    }
+                }
             })
         });
+        
+        console.log(`🕒 Making API request to ${model} with ${this.requestTimeout/1000}s timeout...`);
+        const startTime = Date.now();
+        const response = await Promise.race([fetchPromise, timeoutPromise]);
+        const duration = Date.now() - startTime;
+        console.log(`⚡ API request completed in ${duration}ms`);
 
         if (!response.ok) {
             const errorText = await response.text();
@@ -455,12 +425,45 @@ ${html}`;
             
             const parsed = JSON.parse(cleaned);
             
-            // Validate required fields
-            if (!parsed.summary) {
-                throw new Error('Missing required field: summary');
+            // Expect "events" array in all cases
+            if (!parsed.events) {
+                throw new Error('Missing required field: events');
             }
             
-            return parsed;
+            if (!Array.isArray(parsed.events)) {
+                throw new Error('events field must be an array');
+            }
+            
+            if (parsed.events.length === 0) {
+                throw new Error('events array cannot be empty');
+            }
+            
+            // Validate each event
+            for (const event of parsed.events) {
+                if (!event.summary) {
+                    throw new Error('Missing required field: summary in event');
+                }
+                if (!event.location) {
+                    throw new Error('Missing required field: location in event');
+                }
+                if (!event.start_date) {
+                    throw new Error('Missing required field: start_date in event');
+                }
+                if (!event.end_date) {
+                    throw new Error('Missing required field: end_date in event');
+                }
+                if (!event.description) {
+                    throw new Error('Missing required field: description in event');
+                }
+                if (!event.timezone) {
+                    throw new Error('Missing required field: timezone in event');
+                }
+                if (!event.url) {
+                    throw new Error('Missing required field: url in event');
+                }
+            }
+            
+            return parsed.events;
         } catch (error) {
             console.error('Error parsing AI response:', error);
             console.error('Raw response:', response);
@@ -469,6 +472,11 @@ ${html}`;
     }
 
     async generateICS(eventData, tentative, multiday) {
+        console.log('🎫 EmailProcessor generateICS v2.0 - Multi-day ICS generation');
+        console.log('📊 Event data received:', eventData);
+        console.log('🔢 Is array?', Array.isArray(eventData));
+        console.log('📝 Event count:', Array.isArray(eventData) ? eventData.length : 1);
+        
         // Handle both single events and arrays of events
         const events = Array.isArray(eventData) ? eventData : [eventData];
         
@@ -577,7 +585,13 @@ ${html}`;
     }
 
     generateEmailSubject(eventData) {
-        return `Calendar Event: ${eventData.summary}`;
+        // eventData is now always an array of events
+        const events = Array.isArray(eventData) ? eventData : [eventData];
+        if (events.length === 1) {
+            return `Calendar Invite: ${events[0].summary}`;
+        } else {
+            return `Calendar Invites: ${events.length} events`;
+        }
     }
 
     generateConfirmationToken() {
@@ -607,13 +621,26 @@ ${html}`;
             throw new Error('Postmark API key not configured');
         }
 
-        const emailBody = `Please find the calendar event attached.
-
-Event: ${eventData.summary}
-${eventData.location ? `Location: ${eventData.location}` : ''}
-${eventData.description ? `Description: ${eventData.description}` : ''}
-
-This calendar event was generated automatically.`;
+        // eventData is now always an array of events
+        const events = Array.isArray(eventData) ? eventData : [eventData];
+        
+        let emailBody = `Please find the calendar invitation${events.length > 1 ? 's' : ''} attached.\n\n`;
+        
+        if (events.length === 1) {
+            const event = events[0];
+            emailBody += `Event: ${event.summary}\n`;
+            emailBody += event.location ? `Location: ${event.location}\n` : '';
+            emailBody += event.description ? `Description: ${event.description}\n` : '';
+        } else {
+            emailBody += `Events (${events.length}):\n`;
+            events.forEach((event, index) => {
+                emailBody += `\n${index + 1}. ${event.summary}\n`;
+                emailBody += event.location ? `   Location: ${event.location}\n` : '';
+                emailBody += event.start_date ? `   Date: ${event.start_date}\n` : '';
+            });
+        }
+        
+        emailBody += '\nThis invitation was generated automatically.';
 
         const response = await fetch('https://api.postmarkapp.com/email', {
             method: 'POST',
@@ -629,9 +656,9 @@ This calendar event was generated automatically.`;
                 TextBody: emailBody,
                 Attachments: [
                     {
-                        Name: 'event.ics',
+                        Name: 'invite.ics',
                         Content: btoa(unescape(encodeURIComponent(icsContent))),
-                        ContentType: 'text/calendar; method=PUBLISH; charset=UTF-8'
+                        ContentType: 'text/calendar'
                     }
                 ]
             })
@@ -667,4 +694,48 @@ This calendar event was generated automatically.`;
 // Export for use in background script
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = EmailProcessor;
+}
+
+// Make globally available for service worker importScripts
+console.log('EmailProcessor: Setting up global exports...');
+console.log('EmailProcessor: typeof self =', typeof self);
+console.log('EmailProcessor: typeof globalThis =', typeof globalThis);
+console.log('EmailProcessor: self === globalThis =', self === globalThis);
+
+// Robust global assignment with error handling
+try {
+    // In service workers, self is the primary global object
+    if (typeof self !== 'undefined') {
+        self.EmailProcessor = EmailProcessor;
+        console.log('EmailProcessor: ✅ Assigned to self.EmailProcessor');
+    }
+    
+    if (typeof globalThis !== 'undefined') {
+        globalThis.EmailProcessor = EmailProcessor;
+        console.log('EmailProcessor: ✅ Assigned to globalThis.EmailProcessor');
+    }
+    
+    if (typeof global !== 'undefined') {
+        global.EmailProcessor = EmailProcessor;
+        console.log('EmailProcessor: ✅ Assigned to global.EmailProcessor');
+    }
+    
+    // Immediate verification after assignment
+    const selfAssigned = typeof self?.EmailProcessor === 'function';
+    const globalThisAssigned = typeof globalThis?.EmailProcessor === 'function';
+    const anyAssigned = selfAssigned || globalThisAssigned;
+    
+    console.log('EmailProcessor: Assignment verification:');
+    console.log('  - self.EmailProcessor:', selfAssigned ? '✅ function' : '❌ ' + typeof (self?.EmailProcessor));
+    console.log('  - globalThis.EmailProcessor:', globalThisAssigned ? '✅ function' : '❌ ' + typeof (globalThis?.EmailProcessor));
+    console.log('  - Any assignment successful:', anyAssigned ? '✅ YES' : '❌ NO');
+    
+    if (!anyAssigned) {
+        throw new Error('Failed to assign EmailProcessor to any global object');
+    }
+    
+} catch (error) {
+    console.error('EmailProcessor: ❌ Global assignment failed:', error);
+    // Still throw to make the error visible
+    throw error;
 }

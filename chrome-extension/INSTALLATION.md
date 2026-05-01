@@ -77,7 +77,7 @@ Before using the extension, you need to configure these API keys:
 
 3. **Select AI Model**
    - Choose your preferred AI model from the dropdown
-   - Recommended: OpenAI GPT Latest, Gemini Pro Latest, or Claude Opus Latest
+   - Recommended: Claude 3.5 Sonnet or GPT-4o
 
 4. **Save Settings**
    - Click "Save Settings"

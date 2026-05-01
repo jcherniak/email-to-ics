@@ -3,6 +3,13 @@
 import ICAL from 'ical.js';
 // Import Bootstrap JS
 import 'bootstrap';
+// Import shared models configuration
+import { ALLOWED_MODELS, ALLOWED_MODEL_IDS, PREFERRED_ORDER } from './models-config.js';
+// Import system prompt
+import systemPromptData from './system_prompt.json';
+
+// Set up window.ModelsConfig for compatibility with existing code
+window.ModelsConfig = { ALLOWED_MODELS, ALLOWED_MODEL_IDS, PREFERRED_ORDER };
 
 // Make ICAL globally available for the functions that use it
 window.ICAL = ICAL;
@@ -54,14 +61,14 @@ async function init() { // Keep function definition for now, might be removed la
                 
                 availableModels = models;
                 
-                selectedModel = prefs.defaultModel || '~openai/gpt-latest' || (availableModels.length > 0 ? (availableModels.find(model => model.default) || availableModels[0]).id : null);
+                selectedModel = prefs.defaultModel || 'openai/gpt-5' || (availableModels.length > 0 ? (availableModels.find(model => model.default) || availableModels[0]).id : null);
                 debugMode = prefs.debugMode || false;
                 
                 showForm(prefs); // Calls showForm -> Original logic tried to set contentDiv.innerHTML
             } catch (error) {
                 console.error("Error initializing models:", error); 
                 availableModels = await modelsPromise.catch(() => []);
-                selectedModel = prefs.defaultModel || '~openai/gpt-latest' || null;
+                selectedModel = prefs.defaultModel || 'openai/gpt-5' || null;
                 showForm(prefs); // Still needs to show form on error
             }
         }
@@ -111,60 +118,39 @@ async function fetchAvailableModels() {
 }
 
 function getOfflineAllowedModels() {
-    // Return allowed models even when offline
-    return [
-        { id: '~openai/gpt-latest', name: 'OpenAI GPT Latest' },
-        { id: '~google/gemini-pro-latest', name: 'Gemini Pro Latest' },
-        { id: '~anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
-        { id: '~anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
-        { id: '~openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
-        { id: '~google/gemini-flash-latest', name: 'Gemini Flash Latest' },
-        { id: '~moonshotai/kimi-latest', name: 'Kimi Latest' }
-    ];
+    if (typeof window.ModelsConfig === 'undefined' || !window.ModelsConfig.ALLOWED_MODELS) {
+        throw new Error('Shared model configuration not loaded - models-config.js import failed');
+    }
+    return window.ModelsConfig.ALLOWED_MODELS;
 }
 
 function filterAllowedModels(allModels) {
-    // Define allowed models
-    const allowedModelIds = [
-        '~openai/gpt-latest',
-        '~google/gemini-pro-latest',
-        '~anthropic/claude-opus-latest',
-        '~anthropic/claude-sonnet-latest',
-        '~openai/gpt-mini-latest',
-        '~google/gemini-flash-latest',
-        '~moonshotai/kimi-latest'
-    ];
+    if (typeof window.ModelsConfig === 'undefined' || !window.ModelsConfig.ALLOWED_MODEL_IDS || !window.ModelsConfig.PREFERRED_ORDER) {
+        throw new Error('Shared model configuration not loaded - models-config.js import failed');
+    }
+    
+    const { ALLOWED_MODEL_IDS, PREFERRED_ORDER, ALLOWED_MODELS } = window.ModelsConfig;
 
     // Filter models to only include allowed ones
     const filteredModels = allModels.filter(model => 
-        allowedModelIds.includes(model.id)
+        ALLOWED_MODEL_IDS.includes(model.id)
     );
 
     // Add any missing models with fallback names
     const foundIds = filteredModels.map(m => m.id);
-    const missingIds = allowedModelIds.filter(id => !foundIds.includes(id));
+    const missingIds = ALLOWED_MODEL_IDS.filter(id => !foundIds.includes(id));
     
     missingIds.forEach(id => {
-        const fallbackModel = getOfflineAllowedModels().find(m => m.id === id);
+        const fallbackModel = ALLOWED_MODELS.find(m => m.id === id);
         if (fallbackModel) {
             filteredModels.push(fallbackModel);
         }
     });
 
     // Sort models with preferred order
-    const preferredOrder = [
-        '~openai/gpt-latest',
-        '~google/gemini-pro-latest',
-        '~anthropic/claude-opus-latest',
-        '~anthropic/claude-sonnet-latest',
-        '~openai/gpt-mini-latest',
-        '~google/gemini-flash-latest',
-        '~moonshotai/kimi-latest'
-    ];
-
     return filteredModels.sort((a, b) => {
-        const aIndex = preferredOrder.indexOf(a.id);
-        const bIndex = preferredOrder.indexOf(b.id);
+        const aIndex = PREFERRED_ORDER.indexOf(a.id);
+        const bIndex = PREFERRED_ORDER.indexOf(b.id);
         return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
     });
 }
@@ -925,7 +911,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const settings = await new Promise((resolve) => {
                 chrome.storage.sync.get(['aiModel'], resolve);
             });
-            const savedModel = settings.aiModel || '~openai/gpt-latest';
+            const savedModel = settings.aiModel || 'google/gemini-2.5-pro';
             
             // Convert models to expected format if needed
             localAvailableModels = models.map(model => ({
@@ -1512,13 +1498,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Updated iCal Parser Helper (using ical.js) ---
     function parseAndDisplayIcs(icsString) {
-        console.log("parseAndDisplayIcs (using ical.js) called - icsString length:", icsString ? icsString.length : 'none');
+        console.log("🎨 parseAndDisplayIcs v2.0 - Multi-day display support");
+        console.log("📏 ICS string length:", icsString ? icsString.length : 'none');
         if (!icsString) return '<p>No ICS data available.</p>';
 
         try {
             const jcalData = ICAL.parse(icsString);
             const vcalendar = new ICAL.Component(jcalData);
             const vevents = vcalendar.getAllSubcomponents('vevent');
+            console.log('🔍 Found VEVENT components:', vevents.length);
 
             if (!vevents || vevents.length === 0) {
                 throw new Error('Could not find VEVENT component(s) in ICS data.');
@@ -1528,9 +1516,12 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Handle multiple events (multi-day support)
             if (vevents.length > 1) {
+                console.log('🎭 Multi-event display mode activated');
                 html += `<div class="alert alert-info mb-3">
                     <strong>Multiple Events:</strong> ${vevents.length} events found
                 </div>`;
+            } else {
+                console.log('📅 Single event display mode');
             }
 
             // Helper to add property if it exists

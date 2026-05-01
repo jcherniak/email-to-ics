@@ -52,11 +52,27 @@ function stripTrackingParameters(url) {
 
 // Import EmailProcessor synchronously at module level
 try {
+    console.log('Importing models-config.js...');
+    importScripts('dist/models-config.js');
+    console.log('models-config.js imported successfully');
+    
     console.log('Importing EmailProcessor...');
-    importScripts('email-processor.js');
+    importScripts('dist/email-processor.js');
     console.log('EmailProcessor imported successfully');
+    
+    // Check both self and globalThis for EmailProcessor
+    const emailProcessorAvailable = typeof self?.EmailProcessor !== 'undefined' || typeof globalThis?.EmailProcessor !== 'undefined';
+    console.log('EmailProcessor availability check:');
+    console.log('  - self.EmailProcessor:', typeof self?.EmailProcessor);
+    console.log('  - globalThis.EmailProcessor:', typeof globalThis?.EmailProcessor);
+    console.log('  - Overall available:', emailProcessorAvailable);
+    
+    if (!emailProcessorAvailable) {
+        throw new Error('EmailProcessor class not found after import - possible syntax error in dist/email-processor.js');
+    }
 } catch (error) {
     console.error('Failed to import EmailProcessor:', error);
+    console.error('Check Chrome DevTools for syntax errors in dist/email-processor.js');
 }
 
 // Initialize EmailProcessor with proper error handling
@@ -69,13 +85,24 @@ async function initializeEmailProcessor() {
     initializationPromise = (async () => {
         try {
             if (!emailProcessor) {
-                // Check if EmailProcessor class is available
-                if (typeof EmailProcessor === 'undefined') {
+                // Check all possible locations for EmailProcessor class (LLM multi-analysis approach)
+                const EmailProcessorClass = (typeof EmailProcessor !== 'undefined') ? EmailProcessor :
+                                           (typeof self.EmailProcessor !== 'undefined') ? self.EmailProcessor :
+                                           (typeof globalThis.EmailProcessor !== 'undefined') ? globalThis.EmailProcessor : null;
+                
+                if (!EmailProcessorClass) {
+                    console.error('EmailProcessor class not found in any context');
+                    console.error('Comprehensive availability check:', {
+                        'direct scope EmailProcessor': typeof EmailProcessor,
+                        'self.EmailProcessor': typeof self?.EmailProcessor,
+                        'globalThis.EmailProcessor': typeof globalThis?.EmailProcessor
+                    });
                     throw new Error('EmailProcessor class not available - import failed');
                 }
                 
-                console.log('Creating new EmailProcessor instance...');
-                emailProcessor = new EmailProcessor();
+                console.log('Creating new EmailProcessor instance with class from:', 
+                    globalThis.EmailProcessor ? 'globalThis' : 'self');
+                emailProcessor = new EmailProcessorClass();
                 console.log('EmailProcessor created, initializing from storage...');
                 await emailProcessor.initializeFromStorage();
                 console.log('EmailProcessor initialization completed');

@@ -30,16 +30,15 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const settings = await chrome.storage.sync.get([
                 'openRouterKey', 'postmarkApiKey', 'fromEmail', 
-                'inboundConfirmedEmail', 'toTentativeEmail', 'toConfirmedEmail', 'aiModel'
+                'toTentativeEmail', 'toConfirmedEmail', 'aiModel'
             ]);
             
             document.getElementById('openRouterKey').value = settings.openRouterKey || '';
             document.getElementById('postmarkApiKey').value = settings.postmarkApiKey || '';
             document.getElementById('fromEmail').value = settings.fromEmail || '';
-            document.getElementById('inboundConfirmedEmail').value = settings.inboundConfirmedEmail || '';
             document.getElementById('toTentativeEmail').value = settings.toTentativeEmail || '';
             document.getElementById('toConfirmedEmail').value = settings.toConfirmedEmail || '';
-            document.getElementById('aiModel').value = settings.aiModel || '~openai/gpt-latest';
+            document.getElementById('aiModel').value = settings.aiModel || 'google/gemini-3-pro-preview';
             
             // Load available models
             loadAvailableModels();
@@ -57,7 +56,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 openRouterKey: document.getElementById('openRouterKey').value.trim(),
                 postmarkApiKey: document.getElementById('postmarkApiKey').value.trim(),
                 fromEmail: document.getElementById('fromEmail').value.trim(),
-                inboundConfirmedEmail: document.getElementById('inboundConfirmedEmail').value.trim(),
                 toTentativeEmail: document.getElementById('toTentativeEmail').value.trim(),
                 toConfirmedEmail: document.getElementById('toConfirmedEmail').value.trim(),
                 aiModel: document.getElementById('aiModel').value
@@ -90,9 +88,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             if (!emailRegex.test(settings.toConfirmedEmail)) {
                 throw new Error('Invalid Confirmed Events Recipient email format');
-            }
-            if (settings.inboundConfirmedEmail && !emailRegex.test(settings.inboundConfirmedEmail)) {
-                throw new Error('Invalid Inbound Confirmed Email format');
             }
             
             // Save to storage and notify background script
@@ -142,13 +137,12 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Define allowed models list
             const allowedModelIds = [
-                '~openai/gpt-latest',
-                '~google/gemini-pro-latest',
-                '~anthropic/claude-opus-latest',
-                '~anthropic/claude-sonnet-latest',
-                '~openai/gpt-mini-latest',
-                '~google/gemini-flash-latest',
-                '~moonshotai/kimi-latest'
+                'openai/gpt-5.2',
+                'openai/gpt-5.2-codex',
+                'anthropic/claude-opus-4.6',
+                'anthropic/claude-sonnet-4.5',
+                'google/gemini-3-pro-preview',
+                'google/gemini-3-flash-preview',
             ];
             
             let availableAllowedModels = [];
@@ -222,7 +216,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Clear form
             form.reset();
-            document.getElementById('aiModel').value = '~openai/gpt-latest';
+            document.getElementById('aiModel').value = 'google/gemini-3-pro-preview';
             
             showStatus('All settings cleared successfully.', 'success');
             
@@ -235,13 +229,12 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             // Define allowed models as specified
             const allowedModels = [
-                { id: '~openai/gpt-latest', name: 'OpenAI GPT Latest' },
-                { id: '~google/gemini-pro-latest', name: 'Gemini Pro Latest' },
-                { id: '~anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
-                { id: '~anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
-                { id: '~openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
-                { id: '~google/gemini-flash-latest', name: 'Gemini Flash Latest' },
-                { id: '~moonshotai/kimi-latest', name: 'Kimi Latest' }
+                { id: 'openai/gpt-5.2', name: 'GPT-5.2' },
+                { id: 'openai/gpt-5.2-codex', name: 'GPT-5.2 Codex' },
+                { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6' },
+                { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
+                { id: 'google/gemini-3-pro-preview', name: 'Gemini 3 Pro' },
+                { id: 'google/gemini-3-flash-preview', name: 'Gemini 3 Flash' },
             ];
             
             const modelSelect = document.getElementById('aiModel');
@@ -262,14 +255,14 @@ document.addEventListener('DOMContentLoaded', function() {
             if (currentValue && allowedModels.find(m => m.id === currentValue)) {
                 modelSelect.value = currentValue;
             } else {
-                modelSelect.value = '~openai/gpt-latest';
+                modelSelect.value = 'google/gemini-3-pro-preview';
             }
-            
+
         } catch (error) {
             console.error('Error loading models:', error);
             // Fallback to default model
             const modelSelect = document.getElementById('aiModel');
-            modelSelect.innerHTML = '<option value="~openai/gpt-latest">OpenAI GPT Latest (fallback)</option>';
+            modelSelect.innerHTML = '<option value="google/gemini-3-pro-preview">Gemini 3 Pro (fallback)</option>';
         }
     }
     

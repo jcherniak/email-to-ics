@@ -74,16 +74,13 @@
                 <div class="mb-3">
                     <label for="aiModel" class="form-label">AI Model</label>
                     <select class="form-select" id="aiModel">
-                        <option value="~openai/gpt-latest">OpenAI GPT Latest</option>
-                        <option value="~google/gemini-pro-latest">Gemini Pro Latest</option>
-                        <option value="~anthropic/claude-opus-latest">Claude Opus Latest</option>
-                        <option value="~anthropic/claude-sonnet-latest">Claude Sonnet Latest</option>
-                        <option value="~openai/gpt-mini-latest">OpenAI GPT Mini Latest</option>
-                        <option value="~google/gemini-flash-latest">Gemini Flash Latest</option>
-                        <option value="~moonshotai/kimi-latest">Kimi Latest</option>
+                        <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                        <option value="anthropic/claude-3-haiku">Claude 3 Haiku</option>
+                        <option value="openai/gpt-4o">GPT-4o</option>
+                        <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
                     </select>
                     <div class="help-text">
-                        Choose the AI model for processing calendar events.
+                        Choose the AI model for processing calendar events. Claude models generally work better for this task.
                     </div>
                 </div>
             </div>
@@ -117,13 +114,6 @@
                     </div>
                 </div>
                 
-                <div class="mb-3">
-                    <label for="inboundConfirmedEmail" class="form-label">Inbound Confirmed Email</label>
-                    <input type="email" class="form-control" id="inboundConfirmedEmail">
-                    <div class="help-text">
-                        Optional: Email address for inbound confirmed events (advanced usage).
-                    </div>
-                </div>
             </div>
             
             <!-- Actions -->
