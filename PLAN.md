@@ -284,6 +284,11 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
   - Gemini 3 Pro Preview was unavailable on OpenRouter; Gemini 2.5 Pro returned a partial suggestion, and the test was updated to assert actual `php index.php --help` behavior.
   - Added a no-network `ChainUrlFetcher` fallback test with a failing first fetcher and dummy fallback fetcher.
   - Ran `vendor/bin/phpunit`: 34 tests, 117 assertions, all passing.
+- [x] Final verification after all implementation commits:
+  - `vendor/bin/phpunit`: 34 tests, 117 assertions, all passing.
+  - `php -l index.php` and `php -l` across `src/`, `tests/`, and `scripts/`: no syntax errors.
+  - `node --check chrome-extension/email-processor.js`: passed.
+  - `composer validate --no-check-publish`: valid with only the existing no-license warning.
 
 ## Implementation Plan
 
@@ -342,11 +347,11 @@ This order is mandatory. The detailed backlog below must be executed according t
    - Keep behavior covered by the tests from phase 3 during each refactor step.
 
 5. [x] Ensure tests still pass fifth.
-   - Run the full PHPUnit suite after refactor.
-   - Run syntax checks.
-   - Run focused manual CLI verification only after automated tests pass.
-   - Update the Chrome extension with the same calendar method/attachment semantics so browser-generated calendar files are personal editable events, not RSVP invitations. *(Done before tests; keep verified in final checks.)*
-   - Add the isolated debug processed-folder web view after the core/refactor work:
+   - [x] Run the full PHPUnit suite after refactor.
+   - [x] Run syntax checks.
+   - [x] Run focused manual CLI verification only after automated tests pass.
+   - [x] Update the Chrome extension with the same calendar method/attachment semantics so browser-generated calendar files are personal editable events, not RSVP invitations. *(Done before tests; kept verified in final checks.)*
+   - [x] Add the isolated debug processed-folder web view after the core/refactor work:
      - separate class/view
      - env-gated with disabled default
      - `.env` override enabled locally
@@ -358,7 +363,7 @@ This order is mandatory. The detailed backlog below must be executed according t
      - current live page view in the source panel, with a "current view" iframe and a link that opens the URL in a new tab
      - generated JSON viewer using a frontend component loaded from unpkg or similar
      - generated ICS rendered in a `pre`, with syntax highlighting if cheap
-   - Add processed-folder retention and compression:
+   - [x] Add processed-folder retention and compression:
      - `MAX_PROCESSED_DIR_SIZE=100M`
      - cleanup old processed files on startup to stay under the limit
      - compress processed JSON files using zstd if practical, otherwise gzip
