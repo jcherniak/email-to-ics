@@ -13,7 +13,7 @@ const mockBrowserAPIs = {
             fromEmail: 'test@orion.com',
             toTentativeEmail: 'tentative@orion.com',
             toConfirmedEmail: 'confirmed@orion.com',
-            aiModel: 'anthropic/claude-3.5-sonnet'
+            aiModel: 'openai/gpt-latest'
           };
           callback(mockSettings);
         },
@@ -41,8 +41,8 @@ const mockBrowserAPIs = {
             callback({
               success: true,
               models: [
-                { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
-                { id: 'openai/gpt-4o', name: 'GPT-4o' }
+                { id: 'openai/gpt-latest', name: 'OpenAI GPT Latest' },
+                { id: 'google/gemini-pro-latest', name: 'Gemini Pro Latest' }
               ]
             });
           } else {

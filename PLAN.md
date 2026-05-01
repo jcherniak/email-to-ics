@@ -627,6 +627,8 @@ This order is mandatory. The detailed backlog below must be executed according t
 
 ## Notes For Resume
 
+- Completed follow-up: updated all backend/env/Chrome extension model defaults to the OpenRouter `*-latest` aliases. Preferred order is `openai/gpt-latest`, `google/gemini-pro-latest`, `anthropic/claude-opus-latest`, `anthropic/claude-sonnet-latest`, `openai/gpt-mini-latest`, `google/gemini-flash-latest`, `moonshotai/kimi-latest`. URL detection uses `google/gemini-flash-latest` first and `openai/gpt-mini-latest` as a fallback; if the first model returns a valid "no URL" result, only run the fallback for bodies under 500 characters. Verified with `php -l index.php`, `php -l src/Web/WebPage.php`, `node --check` for changed extension scripts, `npm run build`, and `vendor/bin/phpunit` (34 tests, 117 assertions).
+- Next separate commit: add URL-detection tests for BOM-prefixed URL-only email bodies, trailing bare query delimiters, HTML/plain-text variants, and fallback model behavior.
 - Current implementation has completed the prompt/ICS/test-artifact phases, PSR-4 mail/fetch/input/web refactor, debug browser, processed retention/compression, and backfill. Keep `vendor/bin/phpunit` green after any follow-up changes.
 - Treat `stash@{0}` only as historical context if needed. The clean reimplementation already replaced the useful prompt, CLI, and multi-email splitting portions.
 - The user explicitly wants Postmark abstracted so tests can verify emails through dependency injection.

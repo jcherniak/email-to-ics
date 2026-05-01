@@ -263,30 +263,26 @@ async function loadAvailableModels() {
 function getOfflineAllowedModels() {
   // Return allowed models even when offline
   return [
-    { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-    { id: 'anthropic/claude-opus-4', name: 'Claude Opus 4' },
-    { id: 'anthropic/claude-3.7-sonnet:thinking', name: 'Claude 3.7 Sonnet (Thinking)' },
-    { id: 'google/gemini-2.5-flash:thinking', name: 'Gemini 2.5 Flash (Thinking)' },
-    { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-    { id: 'openai/o4-mini-high', name: 'GPT-4 Mini High' },
-    { id: 'openai/o3', name: 'GPT-O3' },
-    { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
-    { id: 'openai/o3-pro', name: 'GPT-O3 Pro' }
+    { id: 'openai/gpt-latest', name: 'OpenAI GPT Latest' },
+    { id: 'google/gemini-pro-latest', name: 'Gemini Pro Latest' },
+    { id: 'anthropic/claude-opus-latest', name: 'Claude Opus Latest' },
+    { id: 'anthropic/claude-sonnet-latest', name: 'Claude Sonnet Latest' },
+    { id: 'openai/gpt-mini-latest', name: 'OpenAI GPT Mini Latest' },
+    { id: 'google/gemini-flash-latest', name: 'Gemini Flash Latest' },
+    { id: 'moonshotai/kimi-latest', name: 'Kimi Latest' }
   ];
 }
 
 function filterAllowedModels(allModels) {
   // Define allowed models
   const allowedModelIds = [
-    'anthropic/claude-3.7-sonnet:thinking',
-    'google/gemini-2.5-flash:thinking',
-    'google/gemini-2.5-flash',
-    'openai/o4-mini-high',
-    'openai/o3',
-    'openai/gpt-4.1',
-    'google/gemini-2.5-pro',
-    'anthropic/claude-opus-4',
-    'openai/o3-pro'
+    'openai/gpt-latest',
+    'google/gemini-pro-latest',
+    'anthropic/claude-opus-latest',
+    'anthropic/claude-sonnet-latest',
+    'openai/gpt-mini-latest',
+    'google/gemini-flash-latest',
+    'moonshotai/kimi-latest'
   ];
 
   // Filter models to only include allowed ones
@@ -307,15 +303,13 @@ function filterAllowedModels(allModels) {
 
   // Sort models with preferred order
   const preferredOrder = [
-    'google/gemini-2.5-pro',
-    'anthropic/claude-opus-4',
-    'anthropic/claude-3.7-sonnet:thinking',
-    'google/gemini-2.5-flash:thinking',
-    'google/gemini-2.5-flash',
-    'openai/o4-mini-high',
-    'openai/o3',
-    'openai/gpt-4.1',
-    'openai/o3-pro'
+    'openai/gpt-latest',
+    'google/gemini-pro-latest',
+    'anthropic/claude-opus-latest',
+    'anthropic/claude-sonnet-latest',
+    'openai/gpt-mini-latest',
+    'google/gemini-flash-latest',
+    'moonshotai/kimi-latest'
   ];
 
   return filteredModels.sort((a, b) => {
@@ -346,11 +340,11 @@ async function populateModelDropdown(models) {
   // Set default from settings
   try {
     const settings = await orionCompat.storage.get(['aiModel']);
-    const savedModel = settings.aiModel || 'google/gemini-2.5-pro';
+    const savedModel = settings.aiModel || 'openai/gpt-latest';
     modelSelect.value = savedModel;
   } catch (error) {
     console.warn('Could not get saved model, using default:', error);
-    modelSelect.value = 'google/gemini-2.5-pro';
+    modelSelect.value = 'openai/gpt-latest';
   }
 }
 

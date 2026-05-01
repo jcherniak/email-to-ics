@@ -15,7 +15,7 @@ global.chrome = {
                     fromEmail: 'test@example.com',
                     toTentativeEmail: 'tentative@example.com',
                     toConfirmedEmail: 'confirmed@example.com',
-                    aiModel: 'anthropic/claude-3.5-sonnet'
+                    aiModel: 'openai/gpt-latest'
                 };
                 callback(mockSettings);
             },
@@ -76,8 +76,8 @@ global.fetch = async (url, options) => {
             ok: true,
             json: async () => ({
                 data: [
-                    { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
-                    { id: 'openai/gpt-4o', name: 'GPT-4o' }
+                    { id: 'openai/gpt-latest', name: 'OpenAI GPT Latest' },
+                    { id: 'google/gemini-pro-latest', name: 'Gemini Pro Latest' }
                 ]
             })
         };

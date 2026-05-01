@@ -480,7 +480,7 @@ HTML;
         echo "                                     'download': Outputs ICS to STDOUT (intended for HTTP downloads, shows raw ICS in CLI).\n";
         echo "                                     'email': Sends the ICS file via Postmark to the configured recipient.\n";
         echo "  -t, --tentative <1|0>            Mark event as tentative (1 for true, 0 for false). Default: 1 (true).\n";
-        echo "  -m, --model <model_id>           Specify the AI model ID to use (e.g., 'anthropic/claude-3-haiku').\n";
+        echo "  -m, --model <model_id>           Specify the AI model ID to use (e.g., 'openai/gpt-latest').\n";
         echo "  -r, --review <1|0>               Flag if the event needs review (1 for true, 0 for false). Default: 0 (false).\n";
         echo "                                     If true, outputs JSON for review to STDOUT instead of ICS/email.\n";
         echo "  --screenshot_viewport <base64>   Base64 encoded viewport screenshot for vision-capable AI models.\n";
@@ -497,7 +497,7 @@ HTML;
         echo "  php " . $script . " --html \"<html><body>Event at 2pm</body></html>\"\n";
         echo "  php " . $script . " --instructions \"Lunch with Bob tomorrow at 1pm at The Cafe\"\n";
         echo "  php " . $script . " --url https://www.example.com/event --instructions \"Focus on the main speaker schedule.\"\n";
-        echo "  php " . $script . " --url https://www.example.com/event --display email --model anthropic/claude-3-sonnet\n";
+        echo "  php " . $script . " --url https://www.example.com/event --display email --model openai/gpt-latest\n";
         echo "  php " . $script . " --url https://www.example.com/event --review 1\n";
     }
 }

@@ -3094,7 +3094,7 @@ BODY;
         }
 
         // 2. Define and check hardcoded preferred default model (application's preference)
-        $preferredDefault = 'anthropic/claude-3.7-sonnet:thinking';
+        $preferredDefault = 'openai/gpt-latest';
 
         if (isset($this->availableModels[$preferredDefault])) {
             errlog("Using hardcoded preferred default model: {$preferredDefault}");
@@ -3225,131 +3225,125 @@ BODY;
 	}
 
 	private function detectUrlInEmailBody($textBody) {
-		// Use gemini-2.5-flash to detect if email body contains just a URL
+		// Use the current lightweight model aliases to detect if email body contains just a URL
 		errlog("detectUrlInEmailBody called with text body: " . substr($textBody, 0, 200) . "...");
 		
+		$originalModel = $this->aiModel;
+		$urlDetectionModels = array_values(array_unique(array_filter(array_map('trim', [
+			$_ENV['URL_DETECTION_MODEL'] ?? 'google/gemini-flash-latest',
+			$_ENV['URL_DETECTION_FALLBACK_MODEL'] ?? 'openai/gpt-mini-latest',
+		]))));
+		$textBodyLength = strlen($textBody);
+
 		try {
-			// Set the model temporarily
-			$originalModel = $this->aiModel;
-			$urlDetectionModel = $_ENV['URL_DETECTION_MODEL'] ?? 'google/gemini-2.5-flash';
-			$this->aiModel = $urlDetectionModel;
-			
-			errlog("Using model {$this->aiModel} for URL detection");
-			
-			$messages = [
-				[
-					'role' => 'system',
-					'content' => 'You are a helpful assistant that detects URLs in email bodies. Respond only with valid JSON.'
-				],
-				[
-					'role' => 'user',
-					'content' => "Analyze this email body text and determine if it contains just a URL (possibly with minimal text like 'Sent from iPhone/iPad' or similar signatures). If so, extract the URL. If not, return null.\n\nEmail body:\n{$textBody}\n\nRespond with JSON in this format:\n{\"containsUrl\": true/false, \"url\": \"extracted_url_or_null\"}"
-				]
-			];
-			
-			$data = [
-				'model' => $this->aiModel,
-				'messages' => $messages,
-				'temperature' => 0.1,
-				'max_tokens' => 500
-			];
-			
-			errlog("Sending URL detection request to OpenRouter");
-			$api_start_time = microtime(true);
+			foreach ($urlDetectionModels as $modelIndex => $urlDetectionModel) {
+				$this->aiModel = $urlDetectionModel;
+				
+				errlog("Using model {$this->aiModel} for URL detection");
+				
+				$messages = [
+					[
+						'role' => 'system',
+						'content' => 'You are a helpful assistant that detects URLs in email bodies. Respond only with valid JSON.'
+					],
+					[
+						'role' => 'user',
+						'content' => "Analyze this email body text and determine if it contains just a URL (possibly with minimal text like 'Sent from iPhone/iPad' or similar signatures). If so, extract the URL. If not, return null.\n\nEmail body:\n{$textBody}\n\nRespond with JSON in this format:\n{\"containsUrl\": true/false, \"url\": \"extracted_url_or_null\"}"
+					]
+				];
+				
+				$data = [
+					'model' => $this->aiModel,
+					'messages' => $messages,
+					'temperature' => 0.1,
+					'max_tokens' => 500
+				];
+				
+				errlog("Sending URL detection request to OpenRouter");
+				$api_start_time = microtime(true);
 
-			try {
-				// Make direct POST request to OpenRouter
-				$guzzleResponse = $this->openaiClient->post('chat/completions', [
-					'json' => $data,
-					'http_errors' => false, // Don't throw on 4xx/5xx, handle manually
-				]);
+				try {
+					// Make direct POST request to OpenRouter
+					$guzzleResponse = $this->openaiClient->post('chat/completions', [
+						'json' => $data,
+						'http_errors' => false, // Don't throw on 4xx/5xx, handle manually
+					]);
 
-				$api_duration = microtime(true) - $api_start_time;
-				$statusCode = $guzzleResponse->getStatusCode();
-				$responseBody = (string) $guzzleResponse->getBody();
+					$api_duration = microtime(true) - $api_start_time;
+					$statusCode = $guzzleResponse->getStatusCode();
+					$responseBody = (string) $guzzleResponse->getBody();
 
-				errlog('URL detection response received in ' . number_format($api_duration, 4) . ' seconds');
-				errlog('URL detection response status: ' . $statusCode);
-				errlog('URL detection response body (first 500 chars): ' . substr($responseBody, 0, 500));
+					errlog('URL detection response received in ' . number_format($api_duration, 4) . ' seconds');
+					errlog('URL detection response status: ' . $statusCode);
+					errlog('URL detection response body (first 500 chars): ' . substr($responseBody, 0, 500));
 
-				// Parse JSON response
-				$response = json_decode($responseBody, true);
+					// Parse JSON response
+					$response = json_decode($responseBody, true);
 
-				if (json_last_error() !== JSON_ERROR_NONE) {
-					$jsonError = json_last_error_msg();
-					errlog("Failed to parse OpenRouter JSON response for URL detection: " . $jsonError);
-					errlog("Raw response: " . $responseBody);
-
-					// Restore original model
-					$this->aiModel = $originalModel;
-					return null;
-				}
-
-				// Check for HTTP error status
-				if ($statusCode >= 400) {
-					$errorMsg = "OpenRouter API returned error status {$statusCode} for URL detection";
-					if (isset($response['error'])) {
-						$errorMsg .= ": " . ($response['error']['message'] ?? json_encode($response['error']));
+					if (json_last_error() !== JSON_ERROR_NONE) {
+						$jsonError = json_last_error_msg();
+						errlog("Failed to parse OpenRouter JSON response for URL detection with {$urlDetectionModel}: " . $jsonError);
+						errlog("Raw response: " . $responseBody);
+						continue;
 					}
-					errlog($errorMsg);
-					errlog("Full error response: " . json_encode($response, JSON_PRETTY_PRINT));
 
-					// Restore original model
-					$this->aiModel = $originalModel;
-					return null;
+					// Check for HTTP error status
+					if ($statusCode >= 400) {
+						$errorMsg = "OpenRouter API returned error status {$statusCode} for URL detection with {$urlDetectionModel}";
+						if (isset($response['error'])) {
+							$errorMsg .= ": " . ($response['error']['message'] ?? json_encode($response['error']));
+						}
+						errlog($errorMsg);
+						errlog("Full error response: " . json_encode($response, JSON_PRETTY_PRINT));
+						continue;
+					}
+
+					// Check if response has expected structure
+					if (!isset($response['choices']) || !isset($response['choices'][0]) || !isset($response['choices'][0]['message']['content'])) {
+						errlog("OpenRouter response missing expected 'choices' structure for URL detection with {$urlDetectionModel}.");
+						errlog("Full response: " . json_encode($response, JSON_PRETTY_PRINT));
+						continue;
+					}
+
+					$content = trim($response['choices'][0]['message']['content']);
+					errlog("AI response for URL detection from {$urlDetectionModel}: " . $content);
+				} catch (\Throwable $e) {
+					errlog("Exception during URL detection request with {$urlDetectionModel}: " . $e->getMessage());
+					errlog("Error class: " . get_class($e));
+					errlog("Stack trace: " . $e->getTraceAsString());
+					continue;
 				}
-
-				// Check if response has expected structure
-				if (!isset($response['choices']) || !isset($response['choices'][0]) || !isset($response['choices'][0]['message']['content'])) {
-					errlog("OpenRouter response missing expected 'choices' structure for URL detection.");
-					errlog("Full response: " . json_encode($response, JSON_PRETTY_PRINT));
-
-					// Restore original model
-					$this->aiModel = $originalModel;
-					return null;
+				
+				// Strip markdown code blocks if present
+				if (preg_match('/^```(?:json)?\s*\n?(.*?)\n?```$/s', $content, $matches)) {
+					$content = $matches[1];
 				}
-
-				$content = $response['choices'][0]['message']['content'];
-				errlog("AI response for URL detection: " . $content);
-			} catch (\Throwable $e) {
-				errlog("Exception during URL detection request: " . $e->getMessage());
-				errlog("Error class: " . get_class($e));
-				errlog("Stack trace: " . $e->getTraceAsString());
-
-				// Restore original model
-				$this->aiModel = $originalModel;
-				return null;
-			}
-			
-			// Restore original model
-			$this->aiModel = $originalModel;
-			
-			// Strip markdown code blocks if present
-			$content = trim($content);
-			if (preg_match('/^```(?:json)?\s*\n?(.*?)\n?```$/s', $content, $matches)) {
-				$content = $matches[1];
-			}
-			
-			$result = json_decode($content, true);
-			
-			if ($result && isset($result['containsUrl']) && $result['containsUrl'] && !empty($result['url'])) {
-				$url = trim($result['url']);
-				errlog("AI found URL: {$url}, validating...");
-				if ($this->is_valid_url($url)) {
-					errlog("AI detected valid URL in email body: {$url}");
-					return $url;
+				
+				$result = json_decode($content, true);
+				
+				if ($result && isset($result['containsUrl']) && $result['containsUrl'] && !empty($result['url'])) {
+					$url = trim($result['url']);
+					errlog("AI found URL with {$urlDetectionModel}: {$url}, validating...");
+					if ($this->is_valid_url($url)) {
+						errlog("AI detected valid URL in email body with {$urlDetectionModel}: {$url}");
+						return $url;
+					} else {
+						errlog("AI found URL with {$urlDetectionModel} but it failed validation: {$url}");
+					}
 				} else {
-					errlog("AI found URL but it failed validation: {$url}");
+					errlog("AI did not detect a URL in the email body with {$urlDetectionModel}");
+					$hasFallbackModel = $modelIndex < count($urlDetectionModels) - 1;
+					if (!$hasFallbackModel || $textBodyLength >= 500) {
+						return null;
+					}
+					errlog("Trying fallback URL detection model because body is under 500 characters ({$textBodyLength})");
 				}
-			} else {
-				errlog("AI did not detect a URL in the email body");
 			}
+
 		} catch (Exception $e) {
 			errlog("Error in URL detection: " . $e->getMessage());
-			// Restore original model on error
-			if (isset($originalModel)) {
-				$this->aiModel = $originalModel;
-			}
+		} finally {
+			$this->aiModel = $originalModel;
 		}
 		
 		return null;
