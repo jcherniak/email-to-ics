@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Jcherniak\EmailToIcs\Config\Environment;
 use Dotenv\Dotenv;
 use Jcherniak\EmailToIcs\Geocode\ChainGeocoder;
 use Jcherniak\EmailToIcs\Geocode\GooglePlacesGeocoder;
@@ -99,7 +100,7 @@ final class GeocoderIntegrationTest extends TestCase
             return strtolower(trim($fromProcess));
         }
 
-        return strtolower(trim((string)($realEnv['TESTS_REQUIRE_GEOCODER_INTEGRATION'] ?? $_ENV['TESTS_REQUIRE_GEOCODER_INTEGRATION'] ?? '')));
+        return strtolower(trim((string)($realEnv['TESTS_REQUIRE_GEOCODER_INTEGRATION'] ?? Environment::get('TESTS_REQUIRE_GEOCODER_INTEGRATION', '') ?? '')));
     }
 
     /**
@@ -112,7 +113,7 @@ final class GeocoderIntegrationTest extends TestCase
             return trim($fromProcess);
         }
 
-        return trim((string)($realEnv[$key] ?? ''));
+        return trim((string)($realEnv[$key] ?? Environment::get($key, '') ?? ''));
     }
 
     private static function providerIsRequired(string $provider, string $setting): bool

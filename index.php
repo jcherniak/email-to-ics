@@ -52,14 +52,13 @@ ini_set('error_reporting', E_ALL & ~E_DEPRECATED);
 require 'vendor/autoload.php';
 error_log('Autoloader loaded');
 
-// Load environment variables early
-use Dotenv\Dotenv;
 use GuzzleHttp\Client;
 use Spatie\PdfToText\Pdf;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizerConfig;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
 use Opis\JsonSchema\Errors\ValidationError;
 use Jcherniak\EmailToIcs\Calendar\IcalGenerator;
+use Jcherniak\EmailToIcs\Config\Environment;
 use Jcherniak\EmailToIcs\Fetch\ChainUrlFetcher;
 use Jcherniak\EmailToIcs\Fetch\UrlFetcherInterface;
 use Jcherniak\EmailToIcs\Geocode\ChainGeocoder;
@@ -86,8 +85,7 @@ function errlog($msg)
 	error_log("{$requestId} - {$msg}");
 }
 
-$dotenv = Dotenv::createImmutable(__DIR__);
-$dotenv->load();
+Environment::load(__DIR__);
 error_log('Dotenv loaded'); // Add log to confirm loading
 
 (new ProcessedRecordStore(__DIR__ . '/processed'))->enforceMaxSize($_ENV['MAX_PROCESSED_DIR_SIZE'] ?? '100M');
@@ -3385,8 +3383,7 @@ function getAvailableModels()
 }
 
 if (!defined('EMAIL_TO_ICS_SKIP_FRONT_CONTROLLER') || !EMAIL_TO_ICS_SKIP_FRONT_CONTROLLER) {
-$dotenv = Dotenv::createImmutable(__DIR__);
-$dotenv->load();
+Environment::load(__DIR__);
 
 /** @disregard */
 if (function_exists('xdebug_is_debugger_active') && xdebug_is_debugger_active()) {
