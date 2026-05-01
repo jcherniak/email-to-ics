@@ -106,6 +106,10 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
 
 > ok, add that to the plan before tests and refactor
 
+### Prompt 22
+
+> continue work until all done.  add to the plan at the end to update the chrome extension with thesr samr method changes
+
 ## Current State
 
 - [x] Inspected the Presidio Theatre page.
@@ -227,6 +231,7 @@ This order is mandatory. The detailed backlog below must be executed according t
    - Run the full PHPUnit suite after refactor.
    - Run syntax checks.
    - Run focused manual CLI verification only after automated tests pass.
+   - Update the Chrome extension with the same calendar method/attachment semantics so browser-generated calendar files are personal editable events, not RSVP invitations.
    - Update this file with verification results and any residual risk.
 
 ### 1. Preserve Current Local State
@@ -424,6 +429,12 @@ This order is mandatory. The detailed backlog below must be executed according t
 - [ ] Run `php -l IcalGenerator.php`.
 - [ ] Run `node --check chrome-extension/email-processor.js` if extension code remains changed.
 - [ ] Run the CLI test-email command manually once after tests pass.
+- [ ] Update and verify the Chrome extension uses the same personal editable event semantics:
+  - no `METHOD:REQUEST`
+  - no `ATTENDEE`
+  - no `ORGANIZER`
+  - no RSVP/needs-action fields
+  - use `PUBLISH` or plain `text/calendar` attachment behavior where applicable
 
 ## Notes For Resume
 
