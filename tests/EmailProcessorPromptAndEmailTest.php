@@ -74,6 +74,31 @@ final class EmailProcessorPromptAndEmailTest extends TestCase
         return $decoded;
     }
 
+    private function callSendEmailWithAttachment(FakeEmailProcessor $processor, string $downloadedText): void
+    {
+        $reflection = new ReflectionMethod($processor, 'sendEmailWithAttachment');
+        $reflection->setAccessible(true);
+        $reflection->invokeArgs($processor, [
+            self::RECIPIENT_EMAIL,
+            "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n",
+            self::BASE_SUBJECT,
+            [
+                'FromName' => 'Sender Name',
+                'From' => 'sender@example.test',
+                'Date' => 'Fri, 1 May 2026 10:51:28 -0700',
+                'To' => 'calendar@example.test',
+                'Subject' => self::BASE_SUBJECT,
+                'TextBody' => PresidioExpected::URL . "\n\n--\n\nMiddle perf only",
+                'HtmlBody' => "<p>\xEF\xBB\xBF" . PresidioExpected::URL . '</p><p>Middle perf only</p>',
+                'Attachments' => [],
+                'MessageID' => 'message-id@example.test',
+            ],
+            PresidioExpected::aiJson(),
+            null,
+            $downloadedText,
+        ]);
+    }
+
     public function testGenerateIcalEventReturnsThreeEventsAndCapturesSeed(): void
     {
         $processor = new FakeEmailProcessor();
@@ -151,5 +176,29 @@ final class EmailProcessorPromptAndEmailTest extends TestCase
             $expectedIcs = $this->outputArtifact($summary[$index]['canonicalIcsFile']);
             $this->assertSame($expectedIcs, PresidioExpected::canonicalizeIcs($email['ics']));
         }
+    }
+
+    public function testCalendarEmailBodyStartsWithSourceUrlThenSourceDataThenSourcePage(): void
+    {
+        $processor = new FakeEmailProcessor();
+
+        $this->callSendEmailWithAttachment($processor, '<main><h1>Downloaded page</h1></main>');
+
+        $this->assertCount(1, $processor->sentEmails);
+        $htmlBody = $processor->sentEmails[0]['htmlBody'];
+
+        $sourceUrlPosition = strpos($htmlBody, 'Source URL:');
+        $sourceDataPosition = strpos($htmlBody, '-----Source data (email input)-----');
+        $sourcePagePosition = strpos($htmlBody, '-----Source page (cleaned)-----');
+
+        $this->assertStringStartsWith('<p>Source URL:', $htmlBody);
+        $this->assertNotFalse($sourceDataPosition);
+        $this->assertNotFalse($sourcePagePosition);
+        $this->assertLessThan($sourceDataPosition, $sourceUrlPosition);
+        $this->assertLessThan($sourcePagePosition, $sourceDataPosition);
+        $this->assertStringContainsString(PresidioExpected::URL, $htmlBody);
+        $this->assertStringContainsString('<b>From</b>: Sender Name <sender@example.test><br>', $htmlBody);
+        $this->assertStringContainsString('Downloaded page', $htmlBody);
+        $this->assertStringNotContainsString("\xEF\xBB\xBF", $htmlBody);
     }
 }

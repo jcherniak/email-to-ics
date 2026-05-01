@@ -425,6 +425,71 @@ class EmailProcessor
 		return $eventCount;
 	}
 
+	private function eventSourceUrl($eventDetails, ?string $fallbackUrl = null): string
+	{
+		$fallbackUrl = trim((string)$fallbackUrl);
+
+		if (!is_array($eventDetails)) {
+			return $fallbackUrl;
+		}
+
+		$eventData = $eventDetails['eventData'] ?? null;
+		$firstEvent = null;
+		if (is_array($eventData)) {
+			$firstEvent = isset($eventData[0]) && is_array($eventData[0])
+				? $eventData[0]
+				: $eventData;
+		}
+
+		$url = is_array($firstEvent) ? trim((string)($firstEvent['url'] ?? '')) : '';
+		return $url !== '' ? $url : $fallbackUrl;
+	}
+
+	private function sourceUrlLine(?string $sourceUrl): string
+	{
+		$sourceUrl = trim((string)$sourceUrl);
+		if ($sourceUrl === '') {
+			return '<p>Source URL: (none)</p>';
+		}
+
+		$escapedUrl = htmlspecialchars($sourceUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+		return '<p>Source URL: <a href="' . $escapedUrl . '">' . $escapedUrl . '</a></p>';
+	}
+
+	private function buildCalendarEmailBody(?string $sourceUrl, string $sourceLabel, string $sourceDataHtml, ?string $downloadedText = null): string
+	{
+		$sourceLabel = htmlspecialchars($sourceLabel, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+		$sourceDataHtml = str_replace("\xEF\xBB\xBF", '', $sourceDataHtml);
+		$htmlBody = $this->sourceUrlLine($sourceUrl)
+			. "\n\n<p>-----Source data ({$sourceLabel})-----</p>\n"
+			. "<div>{$sourceDataHtml}</div>";
+
+		if (!empty($downloadedText)) {
+			$downloadedText = $this->html_sanitize($downloadedText);
+			$htmlBody .= "\n\n<p>-----Source page (cleaned)-----</p>\n<div>\n\t{$downloadedText}\n</div>";
+		}
+
+		return $htmlBody;
+	}
+
+	private function buildFormSourceDataHtml(?string $url, ?string $instructions): string
+	{
+		$lines = [];
+		if (trim((string)$url) !== '') {
+			$lines[] = 'URL: ' . trim((string)$url);
+		}
+
+		if (trim((string)$instructions) !== '') {
+			$lines[] = 'Instructions: ' . trim((string)$instructions);
+		}
+
+		if ($lines === []) {
+			$lines[] = '(none)';
+		}
+
+		return '<pre>' . htmlspecialchars(implode("\n", $lines), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</pre>';
+	}
+
 	private function shouldExtractEqualPerformances(string $content, ?string $instructions = null): bool
 	{
 		if ($this->instructionsFocusSpecificDate($instructions)) {
@@ -888,16 +953,19 @@ TEXT;
             http_response_code(500);
             echo json_encode(['error' => "Failed to generate event for email: " . $errorMessage]);
             exit;
-        }
+		}
 
 		$recipientEmail = $tentative ? $this->toTentativeEmail : $this->toConfirmedEmail;
-		$htmlBody =  <<<BODY
-<p>Please find your iCal event attached.</p>
-
-<p>URL submitted: {$url}</p>
-<p>---------- Downloaded HTML (cleaned): ----------</p>
-<div>{$downloadedText}</div>
-BODY;
+		$sourceLabel = (defined('IS_CLI_RUN') && IS_CLI_RUN) ? 'cli input' : 'form input';
+		if ($fromExtension) {
+			$sourceLabel = 'form input';
+		}
+		$htmlBody = $this->buildCalendarEmailBody(
+			$this->eventSourceUrl($eventDetails, $url),
+			$sourceLabel,
+			$this->buildFormSourceDataHtml($url, $instructions),
+			$downloadedText
+		);
 
 		$emailsSent = $this->sendCalendarEmailsForEventData($eventDetails['eventData'] ?? null, $recipientEmail, $subject, $htmlBody);
 
@@ -2828,12 +2896,10 @@ PROMPT;
 		}
 
 		$origBody = $originalEmail['HtmlBody'] ?? nl2br($originalEmail['TextBody']);
+		$sourceUrl = $this->eventSourceUrl($eventDetails);
 
-		$htmlBody =  <<<BODY
-<p>Please find your iCal event attached.</p>
-
+		$sourceDataHtml = <<<BODY
 <p>
----------- Forwarded message ----------<br>
 <b>From</b>: {$originalEmail['FromName']} <{$originalEmail['From']}><br>
 <b>Date</b>: {$originalEmail['Date']}<br>
 <b>To</b>: {$originalEmail['To']}<br>
@@ -2843,24 +2909,14 @@ PROMPT;
 {$origBody}
 BODY;
 
+		$htmlBody = $this->buildCalendarEmailBody($sourceUrl, 'email input', $sourceDataHtml, $downloadedText);
+
 		if (!empty($pdfText)) {
 			$htmlBody .= <<<BODY
 
 
 ---------- PDF contents ----------<br>
 {$pdfText}
-BODY;
-		}
-
-		if (!empty($downloadedText)) {
-			$downloadedText = $this->html_sanitize($downloadedText);
-			$htmlBody .= <<<BODY
-
-
----------- Downloaded from URL (cleaned)  ----------<br>
-<div>
-	{$downloadedText}
-</div>
 BODY;
 		}
 
