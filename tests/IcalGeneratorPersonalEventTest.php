@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use App\IcalGenerator;
+use Jcherniak\EmailToIcs\Calendar\IcalGenerator;
 use PHPUnit\Framework\TestCase;
 
 final class IcalGeneratorPersonalEventTest extends TestCase

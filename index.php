@@ -50,7 +50,6 @@ ini_set('display_errors', 'On');
 ini_set('error_reporting', E_ALL & ~E_DEPRECATED);
 
 require 'vendor/autoload.php';
-require_once 'IcalGenerator.php'; // Include the new generator class
 error_log('Autoloader loaded');
 
 // Load environment variables early
@@ -60,7 +59,17 @@ use Spatie\PdfToText\Pdf;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizerConfig;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
 use Opis\JsonSchema\Errors\ValidationError;
-use App\IcalGenerator; // Use the generator from its namespace
+use Jcherniak\EmailToIcs\Calendar\IcalGenerator;
+use Jcherniak\EmailToIcs\Fetch\ChainUrlFetcher;
+use Jcherniak\EmailToIcs\Fetch\UrlFetcherInterface;
+use Jcherniak\EmailToIcs\Input\CliInputSource;
+use Jcherniak\EmailToIcs\Input\EmailInputSource;
+use Jcherniak\EmailToIcs\Input\RawEmailTextInputSource;
+use Jcherniak\EmailToIcs\Input\WebFormInputSource;
+use Jcherniak\EmailToIcs\Mail\EmailAttachment;
+use Jcherniak\EmailToIcs\Mail\EmailMessage;
+use Jcherniak\EmailToIcs\Mail\MailerInterface;
+use Jcherniak\EmailToIcs\Mail\PostmarkMailer;
 
 global $requestId;
 $requestId = uniqid('request-');
@@ -314,7 +323,8 @@ class EmailProcessor
 	private $openaiClient;
 	private $scrapeflyScreenshot = null; // Stores screenshot from Scrapefly
 	private $puphpeteerRenderer = null; // PuphpeteerRenderer instance
-	private $httpClient;
+	private MailerInterface $mailer;
+	private UrlFetcherInterface $urlFetcher;
 	private $googleMapsKey;
 
 	private $aiModel;
@@ -459,7 +469,7 @@ class EmailProcessor
 		)));
 	}
 
-    public function __construct()
+    public function __construct(?MailerInterface $mailer = null, ?UrlFetcherInterface $urlFetcher = null)
     {
         $this->openRouterKey = $_ENV['OPENROUTER_KEY'];
         $this->postmarkApiKey = $_ENV['POSTMARK_API_KEY'];
@@ -495,14 +505,8 @@ class EmailProcessor
 			'timeout' => 120,
 		]);
 
-		$this->httpClient = new Client([
-            'base_uri' => 'https://api.postmarkapp.com',
-            'headers' => [
-                'Accept' => 'application/json',
-                'Content-Type' => 'application/json',
-                'X-Postmark-Server-Token' => $this->postmarkApiKey,
-            ],
-        ]);
+		$this->mailer = $mailer ?? new PostmarkMailer($this->postmarkApiKey);
+		$this->urlFetcher = $urlFetcher ?? ChainUrlFetcher::fromEnvironment();
 	}
 
 
@@ -534,7 +538,6 @@ class EmailProcessor
 
 		errlog("Fetching available models from OpenRouter API...");
 		try {
-			// Use a separate Guzzle client for this, as httpClient is for Postmark
 			$apiClient = new Client();
 			$response = $apiClient->get('https://openrouter.ai/api/v1/models');
 
@@ -917,8 +920,8 @@ BODY;
                 // Optionally print ICS content or path if useful for CLI
             } else {
 			    http_response_code(200);
-			    echo count($eventItems) > 1
-                    ? "<h1>" . count($eventItems) . " emails sent to {$recipientEmail} with ICS files:</h1><pre>"
+			    echo $emailsSent > 1
+                    ? "<h1>{$emailsSent} emails sent to {$recipientEmail} with ICS files:</h1><pre>"
                     : "<h1>Email sent to {$recipientEmail} with ICS file:</h1><pre>";
 			    echo htmlspecialchars($this->unescapeNewlines($ics));
 			    echo '</pre>';
@@ -1348,46 +1351,17 @@ HasBody:
 		// Wrap entire processing in try-catch to record status
 		try {
         
-        $htmlBodyForAI = $body['HtmlBody'] ?? '';
-        $textBodyForExtraction = $body['TextBody'] ?? '';
-
-        if (empty($htmlBodyForAI) && !empty($textBodyForExtraction)) {
-            errlog("Postmark email has no HtmlBody, falling back to TextBody for AI content.");
-            $htmlBodyForAI = nl2br(htmlspecialchars($textBodyForExtraction)); // Basic conversion if only text
-        }
+        $emailInput = (new EmailInputSource())->parsePostmarkDirectives($body);
+        $htmlBodyForAI = $emailInput['htmlBody'];
+        $textBodyForExtraction = $emailInput['textBody'];
 
 		$pdfText = $this->extractPdfText($body['Attachments'] ?? []);
 
-        // Extract URL, instructions, and MULTI flag from the TEXT version of the email body
-        $extractedUrl = null;
-        $extractedInstructions = null;
-        $hasMultiFlag = false;
-        $lines = explode("\n", $textBodyForExtraction);
-        // $remainingTextBodyLines = []; // Not strictly needed if HtmlBody is primary
-
-        foreach ($lines as $line) {
-            $trimmedLine = trim($line);
-            if (preg_match('/^URL:\s*(.+)$/i', $trimmedLine, $matches)) {
-                $extractedUrl = trim($matches[1]);
-            } elseif (preg_match('/^Instructions:\s*(.+)$/i', $trimmedLine, $matches)) {
-                $extractedInstructions = trim($matches[1]);
-            } elseif (strcasecmp($trimmedLine, 'MULTI') === 0) {
-                // Standalone MULTI keyword
-                $hasMultiFlag = true;
-                errlog("Found standalone MULTI keyword in email body");
-            } elseif (!$extractedUrl && $this->is_valid_url($trimmedLine)) {
-                // URL without "URL:" prefix on its own line
-                $extractedUrl = $trimmedLine;
-                errlog("Found URL without prefix: {$extractedUrl}");
-            } // else {
-              // $remainingTextBodyLines[] = $line; // Not combining with HTML directly anymore
-            // }
-        }
-        
-        // Fallback: If no explicit URL: in TextBody, check if the entire TextBody is a URL
-        // This is less likely to be useful if HtmlBody is the primary content but kept for safety.
-        if (!$extractedUrl && $this->is_valid_url(trim($textBodyForExtraction))) {
-            $extractedUrl = trim($textBodyForExtraction);
+        $extractedUrl = $emailInput['url'];
+        $extractedInstructions = $emailInput['instructions'];
+        $hasMultiFlag = $emailInput['hasMultiFlag'];
+        if ($hasMultiFlag) {
+            errlog("Found standalone MULTI keyword in email body");
         }
         
         // AI-powered URL detection for simple link emails
@@ -1654,41 +1628,13 @@ HasBody:
 			return false;
 		}
 
-		// Try different methods in order: direct, proxy, Scrapefly
-		$methods = [
-			'direct' => 'fetchUrlDirect',
-			'proxy' => 'fetchUrlWithProxy',
-			'scrapefly' => 'fetchUrlWithScrapefly'
-		];
-
-		foreach ($methods as $method => $functionName) {
-			errlog("Attempting to fetch URL using {$method} method: {$url}");
-
-			try {
-				$result = $this->$functionName($url);
-				if ($result !== false) {
-					errlog("Successfully fetched URL using {$method} method");
-					return $result;
-				}
-			} catch (\Exception $e) {
-				$statusCode = 0;
-				if ($e instanceof \GuzzleHttp\Exception\RequestException && $e->hasResponse()) {
-					$statusCode = $e->getResponse()->getStatusCode();
-				}
-				errlog("Failed to fetch URL using {$method} method. Status: {$statusCode}, Error: " . $e->getMessage());
-
-				// Only continue to next method if we got a 4xx or 5xx error
-				if ($statusCode >= 400 && $statusCode < 600) {
-					continue;
-				}
-
-				// For other errors (network issues, etc), continue trying
-				continue;
-			}
+		$result = $this->urlFetcher->fetch($url);
+		if ($result === null) {
+			return false;
 		}
 
-		errlog("All fetch methods failed for URL: {$url}");
-		return false;
+		$this->scrapeflyScreenshot = $result->screenshotBase64;
+		return $result->content;
 	}
 
 	private function fetchUrlDirect($url) {
@@ -2935,51 +2881,42 @@ BODY;
 	public function sendEmail($ics, $toEmail, $subject, $htmlBody, array $otherAttachments = [], $inReplyTo = null) {
 		$attachments = [];
 		if (!empty($ics)) {
-			$attachments = array_merge([
-				[
-					'Name' => 'event.ics',
-					'Content' => base64_encode($ics),
-					'ContentType' => 'text/calendar; method=PUBLISH; charset=UTF-8',
-				],
-			], $otherAttachments);
+			$attachments[] = new EmailAttachment(
+				'event.ics',
+				base64_encode($ics),
+				'text/calendar; method=PUBLISH; charset=UTF-8'
+			);
 		} else {
 			errlog("Attempted to send email with empty ICS content to {$toEmail} with subject '{$subject}'. This indicates an issue upstream.");
+		}
+
+		foreach ($otherAttachments as $attachment) {
+			$attachments[] = $attachment instanceof EmailAttachment
+				? $attachment
+				: EmailAttachment::fromPostmarkArray($attachment);
 		}
 
 		if (empty($subject)) {
 			throw new Exception('Subject is empty');
 		}
 
-		$request = [
-			'From' => $this->fromEmail,
-			'To' => $toEmail,
-			'Subject' => $subject,
-			'HTMLBody' => $htmlBody,
-		];
-
-		if (!empty($attachments)) {
-			$request['Attachments'] = $attachments;
-		}
-
-		// Add In-Reply-To header for email threading
+		$headers = [];
 		if (!empty($inReplyTo)) {
-			$request['Headers'] = [
+			$headers[] = 
 				[
 					'Name' => 'In-Reply-To',
 					'Value' => $inReplyTo
-				]
-			];
+				];
 		}
 
-        $response = $this->httpClient->post('/email', [
-            'json' => $request,
-        ]);
-
-        if ($response->getStatusCode() !== 200) {
-            throw new Exception('Failed to send email via Postmark');
-        }
-
-        errlog("Postmark response:\n" . $response->getBody()->getContents());
+		$this->mailer->send(new EmailMessage(
+			$this->fromEmail,
+			$toEmail,
+			$subject,
+			$htmlBody,
+			$attachments,
+			$headers
+		));
 	}
 
     /**
@@ -3671,23 +3608,22 @@ HTML;
 			$isFromShortcut = isset($_REQUEST['fromShortcut']) || 
 							  stripos($_SERVER['HTTP_USER_AGENT'] ?? '', 'Shortcuts') !== false;
 			
+			$input = (new WebFormInputSource($_REQUEST))->toProcessingInput();
 			$processor = new EmailProcessor();
 			$processor->processUrl(
-				$_REQUEST['url'],
-				$_REQUEST['html'] ?? '',
-				$_REQUEST['display'] ?? 'email',
-				($_REQUEST['tentative'] ?? '1') === '1', // Convert '1'/'0' back to boolean
-				$_REQUEST['instructions'] ?? null,
-				$_REQUEST['screenshot_viewport'] ?? null, // Add viewport screenshot
-				is_array($_REQUEST['screenshot_zoomed']) ?
-					$_REQUEST['screenshot_zoomed'][0] :
-					($_REQUEST['screenshot_zoomed'] ?? null),    // Add zoomed screenshot
-				$_REQUEST['model'] ?? null,
-				($_REQUEST['review'] ?? '0') === '1',     // Convert '1'/'0' back to boolean
-				($_REQUEST['fromExtension'] ?? 'false') === 'true', // Convert string bool to boolean
-				false, // $outputJsonOnly - defaults to false for form submissions
-				false, // $cliDebug - defaults to false for form submissions
-				($_REQUEST['multiday'] ?? '0') === '1'    // Convert '1'/'0' back to boolean
+				$input->url,
+				$input->downloadedText,
+				$input->display,
+				$input->tentative,
+				$input->instructions,
+				$input->screenshotViewport,
+				$input->screenshotZoomed,
+				$input->requestedModel,
+				$input->needsReview,
+				$input->fromExtension,
+				$input->outputJsonOnly,
+				$input->cliDebug,
+				$input->allowMultiDay
 			);
     }
 
@@ -3781,20 +3717,26 @@ HTML;
                 }
             }
 
-            $processor->processUrl(
-                '',
+            $input = (new RawEmailTextInputSource(
                 (string)$emailText,
-                'display',
-                true,
-                $options['instructions'] ?? null,
+                isset($options['instructions']) ? (string)$options['instructions'] : null,
+                isset($options['model']) ? (string)$options['model'] : null,
+                isset($options['debug'])
+            ))->toProcessingInput();
+            $processor->processUrl(
+                $input->url,
+                $input->downloadedText,
+                $input->display,
+                $input->tentative,
+                $input->instructions,
                 null,
                 null,
-                $options['model'] ?? null,
+                $input->requestedModel,
                 false,
                 false,
-                true,
-                isset($options['debug']),
-                true
+                $input->outputJsonOnly,
+                $input->cliDebug,
+                $input->allowMultiDay
             );
             exit(0);
         }
@@ -3841,40 +3783,29 @@ HTML;
             throw new \InvalidArgumentException("You must provide at least one of --url, --html, or --instructions. Use --help for usage.");
         }
 
-        $url = $options['url'] ?? ''; // Default to empty if not set
-        $downloadedText = $options['html'] ?? '';
-        $display = $options['display'] ?? 'display';
-        $tentative = isset($options['tentative']) ? ($options['tentative'] === '1' || strtolower($options['tentative']) === 'true') : true;
-        $instructions = $options['instructions'] ?? null;
-        $screenshotViewport = $options['screenshot_viewport'] ?? null;
-        $screenshotZoomed = $options['screenshot_zoomed'] ?? null;
-        $requestedModel = $options['model'] ?? null;
-        $needsReview = isset($options['review']) ? ($options['review'] === '1' || strtolower($options['review']) === 'true') : false;
-        $fromExtension = false; // This is a direct CLI call
-        $outputAsJson = isset($options['json']); // Check for the --json flag
-        $cliDebugEnabled = isset($options['debug']); // Check for --debug flag
+        $input = (new CliInputSource($options))->toProcessingInput();
 
         try {
             $processor->processUrl(
-                $url,
-                $downloadedText,
-                $display,
-                $tentative,
-                $instructions,
-                $screenshotViewport,
-                $screenshotZoomed,
-                $requestedModel,
-                $needsReview,
-                $fromExtension,
-                $outputAsJson, // Pass the flag here
-                $cliDebugEnabled
+                $input->url,
+                $input->downloadedText,
+                $input->display,
+                $input->tentative,
+                $input->instructions,
+                $input->screenshotViewport,
+                $input->screenshotZoomed,
+                $input->requestedModel,
+                $input->needsReview,
+                $input->fromExtension,
+                $input->outputJsonOnly,
+                $input->cliDebug
             );
             exit(0); // Successful CLI execution
         } catch (Throwable $e) {
             // The main try-catch block in index.php will handle this exception
             // and format the error appropriately for CLI output.
             // We log it here too for completeness before re-throwing.
-            errlog("Error during CLI processing in handleCli for URL {$url}: " . $e->getMessage());
+            errlog("Error during CLI processing in handleCli for URL {$input->url}: " . $e->getMessage());
             throw $e; // Re-throw to be caught by the main script's error handler
         }
     }

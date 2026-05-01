@@ -7,7 +7,14 @@
         "html2text/html2text": "^4.3",
         "opis/json-schema": "^2.4",
         "eluceo/ical": "^2.14",
-        "zoon/puphpeteer": "^1.0"
+        "zoon/puphpeteer": "^1.0",
+        "slim/slim": "^4",
+        "slim/psr7": "^1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Jcherniak\\EmailToIcs\\": "src/"
+        }
     },
     "config": {
         "allow-plugins": {

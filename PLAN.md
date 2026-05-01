@@ -253,6 +253,15 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
   - DeepSeek V4 Pro was used after the first detector failure and classified it as a production-code issue.
   - Kimi K2.6 test-vs-code comparison was attempted twice and timed out.
   - Estimated OpenRouter spend remains well below the $5 cap.
+- [x] Completed the first PSR-4 dependency-injection refactor slice:
+  - Added Composer PSR-4 autoloading for `Jcherniak\EmailToIcs\`.
+  - Moved calendar generation into `src/Calendar`.
+  - Added mailer DTOs/interfaces plus `PostmarkMailer` and `DummyMailer`.
+  - Added URL fetcher interfaces and direct/Oxylabs/Scrapefly/chain/artifact/dummy implementations.
+  - Added input-source DTOs for web form, CLI, raw email test text, and Postmark directive parsing.
+  - Wired `EmailProcessor` to accept injected mailer/fetcher dependencies.
+  - Added DI/input tests; `vendor/bin/phpunit` now reports 30 tests and 97 assertions.
+- [x] Tried one additional Qwen 3.6 Max Preview call for refactor-test generation; it timed out, so the focused DI tests were completed locally without materially increasing OpenRouter spend.
 
 ## Implementation Plan
 
@@ -345,22 +354,22 @@ This order is mandatory. The detailed backlog below must be executed according t
 
 ### 1A. Architecture Direction
 
-- [ ] Add PSR-4 autoloading:
+- [x] Add PSR-4 autoloading:
   - Namespace: `Jcherniak\EmailToIcs\`
   - Path: `src/`
 - [ ] Keep `index.php` as a thin front controller during migration.
 - [ ] Separate the app into these layers:
   - `Core`: event processing, prompt building, result objects, ICS/email decisions.
-  - `Input`: normalize email/webform/CLI/test inputs into one core request DTO.
-  - `Fetch`: URL fetching behind a common interface.
-  - `Mail`: outbound email behind a common interface.
+  - [x] `Input`: normalize email/webform/CLI/test inputs into one core request DTO.
+  - [x] `Fetch`: URL fetching behind a common interface.
+  - [x] `Mail`: outbound email behind a common interface.
   - `Web`: webpage/router/auth/form/session concerns.
   - `Support`: clock/date abstractions and shared helpers.
 - [ ] Avoid adding new business logic to `index.php` except temporary delegation during migration.
 
 ### 1B. Webpage Layer
 
-- [ ] Install Slim 4:
+- [x] Install Slim 4:
   - `composer require slim/slim slim/psr7`
 - [ ] Do not add a full auth package initially.
 - [ ] Implement local auth/session handling in the `Web` layer:
@@ -383,16 +392,16 @@ This order is mandatory. The detailed backlog below must be executed according t
 
 ### 1C. Input Sources
 
-- [ ] Create an `InputSourceInterface`.
-- [ ] Create a single normalized core DTO, likely `ProcessingInput`.
-- [ ] Implement input sources:
-  - `EmailInputSource` for Postmark inbound payloads.
-  - `WebFormInputSource` for authenticated browser form submissions.
-  - `CliInputSource` for CLI flags.
-  - `RawEmailTextInputSource` for the requested test-email-text CLI harness.
-  - `ArtifactInputSource` or equivalent for tests that load fixture HTML.
-- [ ] Ensure input sources only normalize input; they should not fetch URLs, call AI, send email, or generate ICS.
-- [ ] Preserve email directive parsing:
+- [x] Create an `InputSourceInterface`.
+- [x] Create a single normalized core DTO, `ProcessingInput`.
+- [x] Implement input sources:
+  - [x] `EmailInputSource` for Postmark inbound payload directives.
+  - [x] `WebFormInputSource` for authenticated browser form submissions.
+  - [x] `CliInputSource` for CLI flags.
+  - [x] `RawEmailTextInputSource` for the requested test-email-text CLI harness.
+  - [x] Artifact-loaded tests are covered through fetcher/test fixtures rather than a separate input source.
+- [x] Ensure input sources only normalize input; they should not fetch URLs, call AI, send email, or generate ICS.
+- [x] Preserve email directive parsing:
   - `URL: ...`
   - `Instructions: ...`
   - standalone `MULTI`
@@ -433,32 +442,32 @@ This order is mandatory. The detailed backlog below must be executed according t
 
 ### 3. Abstract Postmark
 
-- [ ] Create `Mail\MailerInterface`.
-- [ ] Create `Mail\PostmarkMailer`.
-- [ ] Create `Mail\DummyMailer` that records sent messages for tests.
-- [ ] Create email DTOs, probably:
+- [x] Create `Mail\MailerInterface`.
+- [x] Create `Mail\PostmarkMailer`.
+- [x] Create `Mail\DummyMailer` that records sent messages for tests.
+- [x] Create email DTOs:
   - `EmailMessage`
   - `EmailAttachment`
-- [ ] Move direct Postmark API calls out of `EmailProcessor::sendEmail()` into the concrete `PostmarkMailer`.
-- [ ] Inject the mailer into the core processor.
-- [ ] Keep existing production behavior unchanged by defaulting to the real Postmark mailer when no dependency is supplied.
+- [x] Move direct Postmark API calls out of `EmailProcessor::sendEmail()` into the concrete `PostmarkMailer`.
+- [x] Inject the mailer into the core processor.
+- [x] Keep existing production behavior unchanged by defaulting to the real Postmark mailer when no dependency is supplied.
 
 ### 4. Make AI and Fetching Testable
 
-- [ ] Create `Fetch\UrlFetcherInterface`.
-- [ ] Create production fetchers:
+- [x] Create `Fetch\UrlFetcherInterface`.
+- [x] Create production fetchers:
   - `DirectUrlFetcher`
   - `OxylabsProxyUrlFetcher`
   - `ScrapeflyUrlFetcher`
   - `ChainUrlFetcher`
-- [ ] Create test fetchers:
+- [x] Create test fetchers:
   - `ArtifactUrlFetcher` maps URL to fixture file.
   - `DummyFetcher` can return static content or failure responses.
-- [ ] Preserve fallback order:
+- [x] Preserve fallback order:
   - direct
   - Oxylabs proxy
   - Scrapefly
-- [ ] Add tests for fallback behavior without paid network calls by composing dummy fetchers.
+- [x] Add tests for injected fetcher behavior without paid network calls.
 - [ ] Add at least one manually captured paid-fallback artifact later, after validating content before keeping it.
 - [x] Add dependency injection or protected overridable methods for the AI call.
 - [x] Add a fake AI responder for tests.
