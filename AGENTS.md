@@ -6,7 +6,9 @@ This file provides guidance to coding agents when working with code in this repo
 
 `PLAN.md` is the authoritative todo list, implementation plan, decision log, and progress tracker for this repository. Treat it as the source of truth for what is planned, what is in progress, what has been completed, and what decisions have been made.
 
-You must update `PLAN.md` as you work. When you complete a task, discover a blocker, change direction, make an architectural decision, add tests, defer work, or verify behavior, record that in `PLAN.md` before or alongside the related code changes. Do not rely on chat history, local memory, stashes, or informal notes as the durable source of project state.
+You must update `PLAN.md` as you work on significant or durable changes. When you complete a task, discover a blocker, change direction, make an architectural decision, add tests, defer work, or verify behavior, record that in `PLAN.md` before or alongside the related code changes. Do not rely on chat history, local memory, stashes, or informal notes as the durable source of project state.
+
+For a small prompt that can be fully handled in a single request and does not create durable project state, architectural decisions, new backlog, or meaningful future context, you may skip updating `PLAN.md`. Examples include narrow typo fixes, tiny log-message adjustments, or other localized changes whose intent is fully captured by the commit itself. If there is any doubt whether the change matters for future agents, update `PLAN.md`.
 
 Every 5 commits, summarize older detailed `PLAN.md` entries into a concise historical summary while preserving current active todos, active decisions, and unfinished work. The goal is to keep `PLAN.md` useful as a live operating document, not an ever-growing transcript.
 
