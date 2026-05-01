@@ -70,6 +70,8 @@ use Jcherniak\EmailToIcs\Mail\EmailAttachment;
 use Jcherniak\EmailToIcs\Mail\EmailMessage;
 use Jcherniak\EmailToIcs\Mail\MailerInterface;
 use Jcherniak\EmailToIcs\Mail\PostmarkMailer;
+use Jcherniak\EmailToIcs\Processed\ProcessedRecordStore;
+use Jcherniak\EmailToIcs\Web\ProcessedDebugView;
 
 global $requestId;
 $requestId = uniqid('request-');
@@ -1146,6 +1148,45 @@ HasBody:
 		);
 	}
 
+	private function extractPageTitleFromHtml(?string $html): ?string
+	{
+		if (empty($html)) {
+			return null;
+		}
+
+		if (preg_match('/<title[^>]*>(.*?)<\/title>/is', $html, $matches)) {
+			$title = trim(html_entity_decode(strip_tags($matches[1]), ENT_QUOTES | ENT_HTML5));
+			return $title !== '' ? $title : null;
+		}
+
+		if (preg_match('/<h1[^>]*>(.*?)<\/h1>/is', $html, $matches)) {
+			$title = trim(html_entity_decode(strip_tags($matches[1]), ENT_QUOTES | ENT_HTML5));
+			return $title !== '' ? $title : null;
+		}
+
+		return null;
+	}
+
+	private function buildProcessingMetadata(?string $downloadedUrl, ?string $pageTitle, array $eventDetails = []): array
+	{
+		$eventData = $eventDetails['eventData'] ?? null;
+		$events = $this->eventDataItems($eventData);
+		$parsedDates = [];
+		foreach ($events as $event) {
+			if (!empty($event['dtstart'])) {
+				$parsedDates[] = $event['dtstart'];
+			}
+		}
+
+		return [
+			'downloadedUrl' => $downloadedUrl,
+			'pageTitle' => $pageTitle,
+			'parsedTitle' => $events[0]['summary'] ?? ($eventDetails['emailSubject'] ?? null),
+			'parsedDates' => $parsedDates,
+			'generatedJson' => $eventDetails ?: null,
+		];
+	}
+
 	/**
 	 * Get the processed folder path
 	 */
@@ -1209,11 +1250,18 @@ HasBody:
 			return [];
 		}
 
-		$content = file_get_contents($filename);
+		$content = str_ends_with($filename, '.gz')
+			? gzdecode(file_get_contents($filename) ?: '')
+			: file_get_contents($filename);
 		if ($content === false) {
 			return [];
 		}
 
+		$content = preg_replace_callback(
+			'/"icsData":\s*`(.*?)`/s',
+			static fn(array $matches): string => '"icsData": ' . json_encode(trim($matches[1]), JSON_UNESCAPED_SLASHES),
+			$content
+		) ?? $content;
 		$data = json_decode($content, true);
 		return is_array($data) ? $data : [];
 	}
@@ -1222,7 +1270,7 @@ HasBody:
 	 * Record processing attempt for a MessageID
 	 * Writes atomically using file locking
 	 */
-	private function recordProcessingAttempt($messageId, $subject, $status, $icsData = null, $errorMessage = null, $stackTrace = null, $downloadedContent = null, $screenshot = null, $pdfText = null, $emailHtml = null)
+	private function recordProcessingAttempt($messageId, $subject, $status, $icsData = null, $errorMessage = null, $stackTrace = null, $downloadedContent = null, $screenshot = null, $pdfText = null, $emailHtml = null, array $metadata = [])
 	{
 		// Skip recording in CLI mode to avoid permission issues
 		if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
@@ -1254,14 +1302,19 @@ HasBody:
 		$content = stream_get_contents($fp);
 		$data = [];
 		if (!empty($content)) {
-			$decoded = json_decode($content, true);
+			$normalizedContent = preg_replace_callback(
+				'/"icsData":\s*`(.*?)`/s',
+				static fn(array $matches): string => '"icsData": ' . json_encode(trim($matches[1]), JSON_UNESCAPED_SLASHES),
+				$content
+			) ?? $content;
+			$decoded = json_decode($normalizedContent, true);
 			if (is_array($decoded)) {
 				$data = $decoded;
 			}
 		}
 
 		// Add new attempt
-		$data[$dateStarted] = [
+		$data[$dateStarted] = array_merge([
 			'dateEnded' => date('Y-m-d H:i:s'),
 			'status' => $status,
 			'icsData' => $icsData,
@@ -1271,30 +1324,19 @@ HasBody:
 			'screenshot' => $screenshot, // Already base64 encoded
 			'pdfText' => $pdfText ? base64_encode($pdfText) : null,
 			'emailHtml' => $emailHtml ? base64_encode($emailHtml) : null
-		];
+		], array_filter([
+			'downloadedUrl' => $metadata['downloadedUrl'] ?? null,
+			'pageTitle' => $metadata['pageTitle'] ?? null,
+			'parsedTitle' => $metadata['parsedTitle'] ?? null,
+			'parsedDates' => $metadata['parsedDates'] ?? null,
+			'generatedJson' => $metadata['generatedJson'] ?? null,
+		], static fn($value) => $value !== null));
 
 		// Write updated content
 		ftruncate($fp, 0);
 		rewind($fp);
 
-		// Custom JSON encoding for ICS data with backticks and actual newlines
 		$json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-
-		// If there's ICS data, replace the JSON-encoded version with backtick version
-		if ($icsData !== null) {
-			// Find the icsData field and replace it
-			// Pattern: "icsData": "..." (with escaped content)
-			$json = preg_replace_callback(
-				'/"icsData":\s*"((?:[^"\\\\]|\\\\.)*)"/s',
-				function($matches) use ($icsData) {
-					// The actual ICS data (not the JSON-escaped version from the match)
-					// Replace with backticks and preserve actual newlines
-					// Add newline after opening backtick and before closing backtick
-					return '"icsData": `' . "\n" . $icsData . "\n" . '`';
-				},
-				$json
-			);
-		}
 
 		fwrite($fp, $json);
 
@@ -1377,6 +1419,7 @@ HasBody:
 		}
 
 		$downloadedUrlContent = null;
+		$downloadedPageTitle = null;
 		$screenshotData = null;
 		if ($extractedUrl) {
 			// Strip tracking parameters from extracted URL
@@ -1386,6 +1429,7 @@ HasBody:
 			$this->scrapeflyScreenshot = null;
 			$fetchedContent = $this->fetch_url($extractedUrl); // Returns raw HTML/content
             if ($fetchedContent) {
+                $downloadedPageTitle = $this->extractPageTitleFromHtml($fetchedContent);
                 $downloadedUrlContent = $this->extractMainContent($fetchedContent); // Cleaned content
     			$combinedText .= "\n\n--- HTML content fetched from URL found in email TextBody ---\n```html\n" . $downloadedUrlContent . "\n```";
 				// Get screenshot if it was captured by Scrapefly
@@ -1511,7 +1555,7 @@ HasBody:
 
             // Record successful processing
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'success', $calendarEvent, null, null, $downloadedUrlContent, $this->scrapeflyScreenshot, $pdfText, $htmlBodyForAI);
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'success', $calendarEvent, null, null, $downloadedUrlContent, $this->scrapeflyScreenshot, $pdfText, $htmlBodyForAI, $this->buildProcessingMetadata($extractedUrl, $downloadedPageTitle, $eventDetails));
             }
 
             echo json_encode([
@@ -1532,7 +1576,7 @@ HasBody:
 
             // Record failed processing
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'failure', null, $errorMessage, null, $downloadedUrlContent, $this->scrapeflyScreenshot, $pdfText, $htmlBodyForAI);
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'failure', null, $errorMessage, null, $downloadedUrlContent, $this->scrapeflyScreenshot, $pdfText, $htmlBodyForAI, $this->buildProcessingMetadata($extractedUrl, $downloadedPageTitle, $eventDetails));
             }
 
             echo json_encode(['status' => 'error', 'message' => 'Failed to process email - error notification sent']);
@@ -1546,7 +1590,7 @@ HasBody:
             errlog("Stack trace: " . $stackTrace);
 
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'exception', null, $errorMessage, $stackTrace, $downloadedUrlContent ?? null, $this->scrapeflyScreenshot ?? null, $pdfText ?? null, $htmlBodyForAI ?? null);
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'exception', null, $errorMessage, $stackTrace, $downloadedUrlContent ?? null, $this->scrapeflyScreenshot ?? null, $pdfText ?? null, $htmlBodyForAI ?? null, $this->buildProcessingMetadata($extractedUrl ?? null, $downloadedPageTitle ?? null, $eventDetails ?? []));
             }
 
             // Send error email
@@ -3480,6 +3524,18 @@ class WebPage
             return;
         }
 
+        if (ProcessedDebugView::isEnabled()) {
+            if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['debug_processed'])) {
+                $this->displayProcessedDebug();
+                return;
+            }
+
+            if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['debug_processed_replay'])) {
+                $this->replayProcessedDebug();
+                return;
+            }
+        }
+
         switch ($_SERVER['REQUEST_METHOD']) {
             case 'GET':
                 $this->displayGetForm();
@@ -3584,6 +3640,36 @@ HTML;
     private function displayGetForm()
     {
         echo file_get_contents(__DIR__ . '/form.html');
+        if (ProcessedDebugView::isEnabled()) {
+            echo '<div class="container my-3"><a class="btn btn-outline-secondary btn-sm" href="?debug_processed=1">Processed Debug</a></div>';
+        }
+    }
+
+    private function displayProcessedDebug()
+    {
+        $view = new ProcessedDebugView(new ProcessedRecordStore(__DIR__ . '/processed'));
+        if (!empty($_GET['id'])) {
+            echo $view->renderDetail((string)$_GET['id']);
+            return;
+        }
+
+        echo $view->renderIndex();
+    }
+
+    private function replayProcessedDebug()
+    {
+        $store = new ProcessedRecordStore(__DIR__ . '/processed');
+        $record = $store->readRecord((string)($_POST['id'] ?? ''));
+        if ($record === null) {
+            http_response_code(404);
+            echo 'Processed record not found.';
+            return;
+        }
+
+        $url = (string)($record->latestAttempt['downloadedUrl'] ?? '');
+        $source = $record->downloadedContent ?? $record->emailHtml ?? '';
+        $processor = new EmailProcessor();
+        $processor->processUrl($url, $source, 'display', true, null, null, $record->screenshotBase64, null, false, false, false, false, true);
     }
 
     private function handlePostRequest()

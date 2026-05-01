@@ -262,6 +262,13 @@ Every 5 commits, summarize older detailed entries into a shorter historical summ
   - Wired `EmailProcessor` to accept injected mailer/fetcher dependencies.
   - Added DI/input tests; `vendor/bin/phpunit` now reports 30 tests and 97 assertions.
 - [x] Tried one additional Qwen 3.6 Max Preview call for refactor-test generation; it timed out, so the focused DI tests were completed locally without materially increasing OpenRouter spend.
+- [x] Implemented the env-gated processed-folder debug browser:
+  - Added `ProcessedRecordStore` to read current JSON and legacy backtick-ICS processed records.
+  - Added `ProcessedDebugView` as an isolated web view with TOC, detail panels, generated JSON viewer, ICS `pre`, source tabs, current-page iframe/link, and replay/retry form.
+  - Added saved metadata for new processed records: downloaded URL, page title, parsed title, parsed dates, and generated JSON.
+  - Enabled `DEBUG_PROCESSED_VIEW_ENABLED=true` in local `.env`; default remains disabled when the env var is absent.
+  - Added PHPUnit coverage for legacy record parsing and debug-view enable/render behavior.
+  - Ran `vendor/bin/phpunit`: 32 tests, 109 assertions, all passing.
 
 ## Implementation Plan
 
@@ -550,13 +557,13 @@ This order is mandatory. The detailed backlog below must be executed according t
 
 ### 8. Debug Processed-Folder Web View
 
-- [ ] Add an isolated debug view class instead of mixing this UI into core processing.
-- [ ] Add an env flag, default disabled:
+- [x] Add an isolated debug view class instead of mixing this UI into core processing.
+- [x] Add an env flag, default disabled:
   - `DEBUG_PROCESSED_VIEW_ENABLED=false`
-- [ ] Enable it in the local `.env`:
+- [x] Enable it in the local `.env`:
   - `DEBUG_PROCESSED_VIEW_ENABLED=true`
-- [ ] Link to the debug view from the main web view only when the flag is enabled.
-- [ ] Build a table-of-contents/index view over the processed folder with columns:
+- [x] Link to the debug view from the main web view only when the flag is enabled.
+- [x] Build a table-of-contents/index view over the processed folder with columns:
   - saved file/request id
   - URL downloaded
   - source page title
@@ -564,19 +571,19 @@ This order is mandatory. The detailed backlog below must be executed according t
   - parsed event dates, if any
   - status/error
   - created/processed timestamp
-- [ ] Store missing metadata in processed JSON during normal processing:
+- [x] Store missing metadata in processed JSON during normal processing:
   - downloaded URL
   - page title, if extracted from HTML/source
   - parsed event title
   - parsed event dates
-- [ ] Add a detail view with four logical panels:
+- [x] Add a detail view with four logical panels:
   - processed JSON file
   - source capture frame with tabs for saved HTML, API/download text, screenshot, and current live page view
   - generated JSON with a JSON viewer frontend component loaded from unpkg or similar
   - generated ICS rendered in a `pre`
-- [ ] In the source/current live page tab, show a `current view` iframe when the saved URL can be framed, plus a link that opens the URL in a new tab.
-- [ ] Add a replay/retry action that reruns a request from the saved data without manually reconstructing it.
-- [ ] Keep this debug feature out of normal production workflows unless explicitly enabled.
+- [x] In the source/current live page tab, show a `current view` iframe when the saved URL can be framed, plus a link that opens the URL in a new tab.
+- [x] Add a replay/retry action that reruns a request from the saved data without manually reconstructing it.
+- [x] Keep this debug feature out of normal production workflows unless explicitly enabled.
 
 ### 9. Processed Folder Retention, Compression, And Backfill
 
