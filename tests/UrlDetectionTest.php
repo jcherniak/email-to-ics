@@ -46,12 +46,37 @@ final class UrlDetectionTest extends TestCase
     public function testPostmarkDirectivesExtractUrlAndInstructionsFromDashedSeparatorFormat(): void
     {
         $email = (new EmailInputSource())->parsePostmarkDirectives([
-            'TextBody' => "https://example.test/show\n\n-----\nFocus on the evening performance.\nUse the venue timezone.",
+            'TextBody' => "https://example.test/show\n\n--\nFocus on the evening performance.\nUse the venue timezone.",
             'HtmlBody' => '',
         ]);
 
         $this->assertSame('https://example.test/show', $email['url']);
         $this->assertSame("Focus on the evening performance.\nUse the venue timezone.", $email['instructions']);
+    }
+
+    public function testPostmarkDirectivesExtractPresidioStyleTwoDashOverrideInstructions(): void
+    {
+        $email = (new EmailInputSource())->parsePostmarkDirectives([
+            'TextBody' => "\xEF\xBB\xBFhttps://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre?\n\n--\n\nMiddle perf only",
+            'HtmlBody' => '',
+        ]);
+
+        $this->assertSame(
+            'https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre',
+            $email['url']
+        );
+        $this->assertSame('Middle perf only', $email['instructions']);
+    }
+
+    public function testPostmarkDirectivesExtractInlineTwoDashOverrideInstructions(): void
+    {
+        $email = (new EmailInputSource())->parsePostmarkDirectives([
+            'TextBody' => 'https://example.test/show -- Middle perf only',
+            'HtmlBody' => '',
+        ]);
+
+        $this->assertSame('https://example.test/show', $email['url']);
+        $this->assertSame('Middle perf only', $email['instructions']);
     }
 
     public function testDashedSeparatorInstructionsOverrideInlineInstructions(): void

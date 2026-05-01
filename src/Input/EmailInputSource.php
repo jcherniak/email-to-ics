@@ -48,11 +48,11 @@ final class EmailInputSource
     {
         $normalized = str_replace(["\r\n", "\r"], "\n", $directiveText);
 
-        if (preg_match('/\n{2,}[ \t]*-{3,}[ \t]*\n+(?<instructions>.*)\z/s', $normalized, $matches, PREG_OFFSET_CAPTURE)) {
-            $instructions = trim($matches['instructions'][0]);
+        if (preg_match('/\A(?<prefix>.*?(?:https?:\/\/\S+|URL\s*:).*?)\s+-{2,}\s+(?<instructions>.*)\z/is', $normalized, $matches)) {
+            $instructions = trim($matches['instructions']);
             if ($instructions !== '') {
                 return [
-                    substr($normalized, 0, $matches[0][1]),
+                    $matches['prefix'],
                     $instructions,
                 ];
             }

@@ -25,13 +25,10 @@ MULTI
 You can also put the URL first, then a dashed separator, then override instructions:
 
 ```text
-https://example.test/event
-
----
-Focus on the May 30 performance only.
+https://example.test/event -- Focus on the May 30 performance only.
 Ignore related events listed elsewhere on the page.
 ```
 
-The separator must be a line containing at least three dashes, with one or more blank lines above it. Any text below the separator is treated as override instructions for the model. This override takes precedence over an earlier `Instructions:` line if both formats are present.
+The separator must contain at least two dashes with whitespace around it. It can be inline or on its own line. Any text after the separator is treated as override instructions for the model. This override takes precedence over an earlier `Instructions:` line if both formats are present.
 
 URL-only messages are supported. The parser handles UTF-8 BOM-prefixed mail bodies, simple HTML bodies, and URL-only bodies with a trailing bare `?`.
