@@ -1,6 +1,14 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents when working with code in this repository.
+
+## Authoritative Plan and Tracking
+
+`PLAN.md` is the authoritative todo list, implementation plan, decision log, and progress tracker for this repository. Treat it as the source of truth for what is planned, what is in progress, what has been completed, and what decisions have been made.
+
+You must update `PLAN.md` as you work. When you complete a task, discover a blocker, change direction, make an architectural decision, add tests, defer work, or verify behavior, record that in `PLAN.md` before or alongside the related code changes. Do not rely on chat history, local memory, stashes, or informal notes as the durable source of project state.
+
+Every 5 commits, summarize older detailed `PLAN.md` entries into a concise historical summary while preserving current active todos, active decisions, and unfinished work. The goal is to keep `PLAN.md` useful as a live operating document, not an ever-growing transcript.
 
 ## Project Overview
 
@@ -133,4 +141,7 @@ The server returns different response formats:
 - Model caching can be cleared by deleting `/tmp/.models_cache.json`
 
 ### Workflow Guidance
-- For each logical todo part (so for example, all multiday tasks as one), create a git commit
+- For each logical todo part (so for example, all multiday tasks as one), create a git commit.
+- Every coding-agent commit must include an `Assisted-by` trailer in this exact form: `Assisted-by: AGENT_NAME:MODEL_VERSION`.
+- For Codex using GPT-5.5, use `--trailer 'Assisted-by: Codex:gpt-5.5'`.
+- Do not change the Git author when adding the trailer. The trailer belongs only in the commit message body.
