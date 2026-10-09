@@ -193,7 +193,7 @@ class ErrorHandler {
         $isPostmark = defined('IS_POSTMARK_WEBHOOK') && IS_POSTMARK_WEBHOOK;
         $isCli = defined('IS_CLI_RUN') && IS_CLI_RUN;
         $isExtension = (isset($_REQUEST['fromExtension']) && ($_REQUEST['fromExtension'] === 'true' || $_REQUEST['fromExtension'] === true))
-            || ($_REQUEST['display'] ?? null) === 'json';
+            || in_array($_REQUEST['display'] ?? null, ['json', 'dataurl'], true);
 
         // Handle based on context
         if ($isPostmark) {
@@ -920,6 +920,18 @@ TEXT;
 		}
 
 		// --- If not reviewing, proceed with requested action (download/display/email) ---
+
+		if ($display === 'dataurl' && !(defined('IS_CLI_RUN') && IS_CLI_RUN)) {
+			if ($ics === null) {
+				http_response_code(500);
+				header('Content-Type: application/json');
+				echo json_encode(['error' => 'ICS data could not be generated.', 'success' => false]);
+				exit;
+			}
+			header('Content-Type: text/plain; charset=utf-8');
+			echo 'data:text/calendar;charset=utf-8;base64,' . base64_encode($ics);
+			exit;
+		}
 
 		if ($display == 'download' || $display == 'display') {
 			$filename = 'event.ics';
