@@ -15,6 +15,7 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
   - email attachments use `text/calendar; method=PUBLISH; charset=UTF-8`
 - PHPUnit is installed and configured; artifact-backed tests exist for prompt behavior, Presidio output, ICS semantics, URL detection, DI, processed debug records, environment precedence, and geocoders.
 - PSR-4 autoloading is active for `Jcherniak\EmailToIcs\` under `src/`.
+  - `tests/SourceClassReferencesTest.php` guards against missing `use` imports in `src/` (a missing import of the `Input` sources in `WebPage.php` caused a 500 on web form submits).
 - Postmark, URL fetching, input normalization, URL detection, and geocoding are abstracted behind injectable interfaces/classes.
 - Web handling has been moved into `src/Web/WebPage.php`; `index.php` remains a front controller plus legacy-compatible glue.
 - The processed-folder debug browser is implemented, env-gated, and isolated from normal workflows.

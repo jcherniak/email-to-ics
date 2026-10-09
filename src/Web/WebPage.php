@@ -6,6 +6,9 @@ namespace Jcherniak\EmailToIcs\Web;
 
 use EmailProcessor;
 use ErrorHandler;
+use Jcherniak\EmailToIcs\Input\CliInputSource;
+use Jcherniak\EmailToIcs\Input\RawEmailTextInputSource;
+use Jcherniak\EmailToIcs\Input\WebFormInputSource;
 use Jcherniak\EmailToIcs\Processed\ProcessedRecordStore;
 use Throwable;
 use function errlog;
