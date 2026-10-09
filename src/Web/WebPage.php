@@ -73,12 +73,16 @@ class WebPage
 
         if (!$authorized) {
             error_log("Authorization failed - sending challenge/form");
-            // Always send WWW-Authenticate header for basic auth
-            header('WWW-Authenticate: Basic realm="Email to ICS"');
+            // iOS Shortcuts hang on a Basic auth challenge, so give them a plain JSON 401 instead.
+            $isShortcut = stripos($_SERVER['HTTP_USER_AGENT'] ?? '', 'Shortcut') !== false;
+            if (!$isShortcut) {
+                header('WWW-Authenticate: Basic realm="Email to ICS"');
+            }
             http_response_code(401);
             
             // For API requests or when explicitly requesting basic auth, return JSON
-            if (isset($_SERVER['HTTP_ACCEPT']) && strpos($_SERVER['HTTP_ACCEPT'], 'application/json') !== false) {
+            if ($isShortcut || (isset($_SERVER['HTTP_ACCEPT']) && strpos($_SERVER['HTTP_ACCEPT'], 'application/json') !== false)) {
+                header('Content-Type: application/json');
                 echo json_encode(['error' => 'Authentication required']);
                 return;
             }
@@ -255,7 +259,7 @@ HTML;
     {
 			// Detect iOS Shortcuts requests
 			$isFromShortcut = isset($_REQUEST['fromShortcut']) || 
-							  stripos($_SERVER['HTTP_USER_AGENT'] ?? '', 'Shortcuts') !== false;
+							  stripos($_SERVER['HTTP_USER_AGENT'] ?? '', 'Shortcut') !== false;
 			
 			$input = (new WebFormInputSource($_REQUEST))->toProcessingInput();
 			$processor = new EmailProcessor();
