@@ -142,7 +142,26 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
   - backfill compressed 90 processed records
 - Used external model collaboration for some tests within the requested cap; useful output was selectively integrated, and unreliable/time-out output was discarded.
 
+## iOS Shortcuts Integration (2026-10-09)
+
+Web POST modes added for Shortcuts clients (`WebPage::processFormSubmission`):
+- `display=json` → `{name, description, start, end, location}` via `Calendar\SimpleEventJson`.
+- `display=dataurl` → `data:text/calendar;charset=utf-8;base64,...` (Shortcut decodes → Quick Look → Add to Calendar).
+- `async=1` → responds `202 {"status":"queued","jobId":...}` immediately, then `Web\BackgroundJobLauncher` spawns a detached
+  `php index.php --display=email ...` run that emails the ICS. HTML is passed via `--html-file` (argv is capped at 128 KiB).
+  Logs land in `sys_get_temp_dir()/email-to-ics-jobs/<jobId>.log` (Apache has PrivateTmp, so look under `/tmp/systemd-private-*-apache2.service-*/tmp/`).
+  Override the CLI binary with `PHP_CLI_BINARY` in `.env` if it is not `/usr/bin/php`.
+- Auth failures from a Shortcuts user agent return a plain JSON 401 with no `WWW-Authenticate` challenge, because the
+  background Shortcut runner hangs on a Basic challenge.
+- CLI gained `--html-file <path>` and `--multiday <1|0>`.
+- Verified live 2026-10-09: async job with instructions-only input → emailed within 14 s using `~openai/gpt-sol-latest`.
+- `.env` `ALLOWED_MODELS` trimmed to `~openai/gpt-sol-latest,~anthropic/claude-sonnet-latest,~google/gemini-flash-latest`;
+  `~openai/gpt-latest` is not an OpenRouter alias (it only redirects to gpt-sol-latest) and was being filtered out, which
+  caused "no allowed models remain" fallbacks.
+
 ## Active Backlog
+
+- Background jobs (`async=1`) have no failure notification; errors only reach the job log. Consider emailing failures.
 
 - Continue keeping `vendor/bin/phpunit` green after backend/PHP changes.
 - Continue keeping extension checks/build green after JS/Chrome extension changes.
