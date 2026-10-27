@@ -2,8 +2,9 @@
 # Verifies that ShareExtension/ShareJS.js matches a fresh concatenation of its inputs and that all JS parses.
 set -euo pipefail
 IOS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-TMP="$(mktemp)"
-trap 'rm -f "$TMP"' EXIT
+TMPDIR_JS="$(mktemp -d)"
+TMP="$TMPDIR_JS/ShareJS.js"
+trap 'rm -rf "$TMPDIR_JS"' EXIT
 "$IOS_DIR/scripts/build-js.sh" "$TMP" > /dev/null
 if ! cmp -s "$TMP" "$IOS_DIR/ShareExtension/ShareJS.js"; then
   echo "ShareExtension/ShareJS.js is out of date; run ios/scripts/build-js.sh" >&2
