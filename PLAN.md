@@ -15,8 +15,8 @@ Branch `multi-event-and-retry` (items 1-5), then branch `model-driven-fetch` (it
 | C1 Fetch chain direct -> firecrawl -> tinyfish_fetch -> tinyfish_browser; remove Oxylabs/Scrapefly/Puphpeteer | a7ac750 | done |
 | C2 Readability (node + jsdom) snippet with lightened full-HTML fallback; delete PHP 8.4-only `extractMainContent` | 39c3ad6 | done |
 | C3 Shared retry runner: per model, snippet then full on first level, full on later levels, then next model; opis validation back on | 727d50c | done |
-| C4a Multi-event candidates: always-array schema, `CandidateStore` keyed state, choice email with confirm-page links, routes before auth | this commit | done |
-| C4b Chrome extension: candidate checkbox picker in the local JS processor, Reply-To + source-url marker | | todo |
+| C4a Multi-event candidates: always-array schema, `CandidateStore` keyed state, choice email with confirm-page links, routes before auth | 2772030 | done |
+| C4b Chrome extension: candidate checkbox picker in the local JS processor, Reply-To + source-url marker | this commit | done |
 | C5 Reply-to-edit: unique Reply-To `edit-<key>@INBOUND_REPLY_DOMAIN`, stored state path with previous ICS, URL fallback from quoted email | | todo |
 | C6 Model-driven fetch via tool loop (`fetch_direct`, `fetch_with_firecrawl`, `fetch_with_tinyfish`, `render_with_tinyfish_browser`) on `model-driven-fetch` | | todo |
 
@@ -27,6 +27,13 @@ Decisions for this work (confirmed with the owner):
 - Item 6 level 1 is a PHP `fetch_direct` function tool (not `openrouter:web_fetch`) so PHP always sees page content for emails and edits.
 - Retry failure = transport error, unparseable JSON, schema-invalid JSON, zero events or missing dtstart, or model `success:false`.
 - Extension keeps local processing; candidates are ported into `email-processor.js`.
+
+C4b notes:
+- The popup keeps processing locally (`email-processor.js` calls OpenRouter/Postmark itself); the server candidate flow is not used by the popup. Only the context menu posts to the server (now with `fromExtension=true`).
+- `email-processor.js`: prompt always asks for a JSON array with the candidate policy; `parseAiResponse` returns a normalized list; `processContent` builds one ICS per candidate, shows the picker (review flow) whenever more than one candidate comes back unless multi-day + direct was chosen, and sends one email per candidate (date-suffixed subjects) via `sendCandidateEmails`; `confirmEvent(token, indexes)` sends the selected ones.
+- Calendar emails from the extension include `Source URL:` and `[source-url: ...]` lines and, when the new `inboundReplyDomain` setting is set, a unique `Reply-To: edit-<key>@domain`, so the server reply-to-edit fallback (C5) can re-fetch the page from the quoted email.
+- `popup.js`/`popup.html`: `#review-candidates` checkbox list; the Send button posts the selected indexes. `settings.html/js`: Reply-to-edit Domain field.
+- Verified: `node --check` on the four JS files, `esbuild` bundle build (via `node_modules/@esbuild/linux-x64/bin/esbuild` because the tracked `node_modules` carries a darwin binary), a node smoke of the processor functions, and `vendor/bin/phpunit --filter ChromeExtensionAndCliTest`. `chrome-extension/build/chrome/` (tracked packaged copy) was not regenerated.
 
 C4a notes:
 - Schema: `eventData` is always an array (1..10). Prompt gains a CANDIDATE POLICY (one event by default; several only for equal performances, explicit multi requests, or genuinely ambiguous pages, most likely first). `prompt/system_prompt_policy.xml` v2 adds `<candidate-rule>` and `<ambiguity-rule>`; the extension copy is identical.

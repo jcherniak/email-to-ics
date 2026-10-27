@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const settings = await chrome.storage.sync.get([
                 'openRouterKey', 'postmarkApiKey', 'fromEmail', 
-                'inboundConfirmedEmail', 'toTentativeEmail', 'toConfirmedEmail', 'aiModel'
+                'inboundConfirmedEmail', 'toTentativeEmail', 'toConfirmedEmail', 'aiModel', 'inboundReplyDomain'
             ]);
             
             document.getElementById('openRouterKey').value = settings.openRouterKey || '';
@@ -40,6 +40,7 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('toTentativeEmail').value = settings.toTentativeEmail || '';
             document.getElementById('toConfirmedEmail').value = settings.toConfirmedEmail || '';
             document.getElementById('aiModel').value = settings.aiModel || '~openai/gpt-latest';
+            document.getElementById('inboundReplyDomain').value = settings.inboundReplyDomain || '';
             
             // Load available models
             loadAvailableModels();
@@ -60,7 +61,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 inboundConfirmedEmail: document.getElementById('inboundConfirmedEmail').value.trim(),
                 toTentativeEmail: document.getElementById('toTentativeEmail').value.trim(),
                 toConfirmedEmail: document.getElementById('toConfirmedEmail').value.trim(),
-                aiModel: document.getElementById('aiModel').value
+                aiModel: document.getElementById('aiModel').value,
+                inboundReplyDomain: document.getElementById('inboundReplyDomain').value.trim().replace(/^@/, '')
             };
             
             // Validate required fields
@@ -93,6 +95,9 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             if (settings.inboundConfirmedEmail && !emailRegex.test(settings.inboundConfirmedEmail)) {
                 throw new Error('Invalid Inbound Confirmed Email format');
+            }
+            if (settings.inboundReplyDomain && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(settings.inboundReplyDomain)) {
+                throw new Error('Invalid Reply-to-edit Domain format');
             }
             
             // Save to storage and notify background script

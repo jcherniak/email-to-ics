@@ -124,6 +124,15 @@
                         Optional: Email address for inbound confirmed events (advanced usage).
                     </div>
                 </div>
+
+                <div class="mb-3">
+                    <label for="inboundReplyDomain" class="form-label">Reply-to-edit Domain</label>
+                    <input type="text" class="form-control" id="inboundReplyDomain" placeholder="reply.example.com">
+                    <div class="help-text">
+                        Optional: Postmark inbound catch-all subdomain. When set, calendar emails get a unique Reply-To
+                        (edit-&lt;key&gt;@domain) so replying with instructions regenerates the event on the server.
+                    </div>
+                </div>
             </div>
             
             <!-- Actions -->

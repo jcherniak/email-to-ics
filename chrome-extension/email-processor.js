@@ -7,6 +7,7 @@ class EmailProcessor {
         this.inboundConfirmedEmail = '';
         this.toTentativeEmail = '';
         this.toConfirmedEmail = '';
+        this.inboundReplyDomain = '';
         this.aiModel = '~openai/gpt-latest';
         this.maxTokens = 20000;
         this.availableModels = [];
@@ -42,6 +43,7 @@ class EmailProcessor {
                 this.inboundConfirmedEmail = settings.inboundConfirmedEmail || '';
                 this.toTentativeEmail = settings.toTentativeEmail || '';
                 this.toConfirmedEmail = settings.toConfirmedEmail || '';
+            this.inboundReplyDomain = (settings.inboundReplyDomain || '').trim();
                 this.aiModel = settings.aiModel || '~openai/gpt-latest';
             }
             
@@ -80,7 +82,7 @@ class EmailProcessor {
         return new Promise((resolve) => {
             chrome.storage.sync.get([
                 'openRouterKey', 'postmarkApiKey', 'fromEmail', 
-                'inboundConfirmedEmail', 'toTentativeEmail', 'toConfirmedEmail', 'aiModel'
+                'inboundConfirmedEmail', 'toTentativeEmail', 'toConfirmedEmail', 'aiModel', 'inboundReplyDomain'
             ], resolve);
         });
     }
@@ -219,29 +221,48 @@ class EmailProcessor {
         } = params;
 
         try {
+            const cleanUrl = url ? this.stripTrackingParameters(url) : url;
+
             // Build the prompt
-            const prompt = this.buildPrompt(html, instructions, url, screenshot, tentative, multiday);
+            const prompt = this.buildPrompt(html, instructions, cleanUrl, screenshot, tentative, multiday);
             
             // Call AI model
             const aiResponse = await this.callAiModel(prompt);
             
-            // Parse and validate response
-            const parsedData = this.parseAiResponse(aiResponse);
-            
-            // Generate ICS
-            const icsContent = await this.generateICS(parsedData, tentative, multiday);
+            // Parse and validate response: always a list of candidate events
+            const events = this.parseAiResponse(aiResponse);
+
+            // One single-event ICS per candidate, plus a combined calendar for display
+            const candidates = [];
+            for (let index = 0; index < events.length; index++) {
+                const event = events[index];
+                candidates.push({
+                    index,
+                    summary: event.summary,
+                    start: this.describeStart(event),
+                    location: event.location || '',
+                    eventData: event,
+                    ics: await this.generateICS([event], tentative, multiday)
+                });
+            }
+            const icsContent = await this.generateICS(events, tentative, multiday);
             
             // Determine recipient email
             const recipientEmail = tentative ? this.toTentativeEmail : this.toConfirmedEmail;
-            
-            if (reviewMode === 'review') {
-                // Return for review
+            const emailSubject = this.generateEmailSubject(events[0]);
+            const clientCandidates = candidates.map(({ index, summary, start, location, ics }) => ({ index, summary, start, location, ics }));
+
+            // Several candidates: the user picks in the popup unless they explicitly asked for every event (multi-day)
+            // and chose direct sending. One candidate: honour the review mode as before.
+            const needsPicker = candidates.length > 1 && !(multiday && reviewMode !== 'review');
+            if (reviewMode === 'review' || needsPicker) {
                 const confirmationToken = this.generateConfirmationToken();
                 await this.storeConfirmationData(confirmationToken, {
-                    icsContent,
+                    candidates,
                     recipientEmail,
-                    emailSubject: this.generateEmailSubject(parsedData),
-                    parsedData
+                    emailSubject,
+                    sourceUrl: cleanUrl || '',
+                    icsContent
                 });
                 
                 return {
@@ -249,20 +270,58 @@ class EmailProcessor {
                     confirmationToken,
                     icsContent,
                     recipientEmail,
-                    emailSubject: this.generateEmailSubject(parsedData)
-                };
-            } else {
-                // Send directly
-                await this.sendEmail(recipientEmail, this.generateEmailSubject(parsedData), icsContent, parsedData);
-                return {
-                    message: 'Calendar invite sent successfully!',
-                    icsContent
+                    emailSubject,
+                    candidates: clientCandidates
                 };
             }
+
+            // Send directly: one email per candidate, never a combined ICS
+            const sent = await this.sendCandidateEmails(candidates, candidates.map(c => c.index), recipientEmail, emailSubject, cleanUrl || '');
+            return {
+                message: sent > 1 ? `${sent} calendar invites sent successfully!` : 'Calendar invite sent successfully!',
+                icsContent,
+                candidates: clientCandidates
+            };
         } catch (error) {
             console.error('Error processing content:', error);
             throw error;
         }
+    }
+
+    describeStart(event) {
+        if (!event || !event.start_date) return '';
+        return event.start_time ? `${event.start_date} ${event.start_time}` : `${event.start_date} (all day)`;
+    }
+
+    /**
+     * Sends one Postmark email per selected candidate. The subject carries the start date when
+     * more than one is sent so each email is distinguishable.
+     */
+    async sendCandidateEmails(candidates, indexes, recipientEmail, emailSubject, sourceUrl) {
+        const selected = candidates.filter(c => indexes.includes(c.index));
+        if (selected.length === 0) {
+            throw new Error('No matching candidate events to send');
+        }
+        const replyTo = this.buildEditReplyAddress();
+        for (const candidate of selected) {
+            const subject = selected.length > 1 && candidate.start
+                ? `${emailSubject} - ${candidate.start}`
+                : emailSubject;
+            await this.sendEmail(recipientEmail, subject, candidate.ics, candidate.eventData, sourceUrl, replyTo);
+        }
+        return selected.length;
+    }
+
+    /**
+     * Unique Reply-To so the server's reply-to-edit flow can pick replies up (it re-fetches the
+     * source URL from the quoted email because extension runs keep no server state).
+     */
+    buildEditReplyAddress() {
+        if (!this.inboundReplyDomain) return null;
+        const bytes = new Uint8Array(16);
+        (globalThis.crypto || {}).getRandomValues ? crypto.getRandomValues(bytes) : bytes.forEach((_, i) => { bytes[i] = Math.floor(Math.random() * 256); });
+        const key = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+        return `edit-${key}@${this.inboundReplyDomain}`;
     }
 
     stripTrackingParameters(url) {
@@ -333,7 +392,8 @@ This applies to:
 - Any scheduled performances of the same show` :
             `SINGLE EVENT MODE: Focus on extracting ONLY the main/primary event. Ignore secondary or related events.
 
-However, follow the shared prompt policy exactly: if the content is clearly one event/show with multiple equal peer performance date/time options and no selected or primary date, extract each equal performance as its own event when multi-event output is available.`;
+CANDIDATE POLICY: the output is ALWAYS an array of candidate events. In this mode return exactly ONE event object in it.
+Return more than one candidate ONLY when the shared policy's equal-performance rule applies (one show with several peer performance date/times and no selected or primary date), or when the content genuinely describes several distinct events and none can be identified as primary. Put the most likely intended event first. Never add secondary or related events as extra candidates.`;
             
         const basePrompt = `You are an AI assistant that extracts event information from web content and converts it to structured JSON for calendar creation.
 
@@ -348,45 +408,20 @@ ${this.promptPolicyText || '<prompt-policy unavailable="true">Use the equal-perf
 ${multiDayInstructions}
 
 # OUTPUT FORMAT
-${multiday ? 
-    `Return an ARRAY of event objects (one for each performance):
+ALWAYS return a JSON ARRAY of event objects (one element unless the rules above require more, at most 10):
 [
     {
-        "summary": "Event 1 title",
-        "location": "Event location",
-        "start_date": "2025-10-03",
-        "start_time": "19:30",
-        "end_date": "2025-10-03", 
-        "end_time": "21:30",
-        "description": "Event 1 description",
-        "timezone": "America/Los_Angeles",
-        "url": "Event URL"
-    },
-    {
-        "summary": "Event 2 title", 
-        "location": "Event location",
-        "start_date": "2025-10-04",
-        "start_time": "19:30",
-        "end_date": "2025-10-04",
-        "end_time": "21:30", 
-        "description": "Event 2 description",
-        "timezone": "America/Los_Angeles",
-        "url": "Event URL"
+        "summary": "Event title",
+        "location": "Event location or empty string",
+        "start_date": "YYYY-MM-DD",
+        "start_time": "HH:MM" or null for all-day,
+        "end_date": "YYYY-MM-DD", 
+        "end_time": "HH:MM" or null for all-day,
+        "description": "Event description",
+        "timezone": "America/New_York",
+        "url": "Event URL or source URL"
     }
-]` :
-    `Return a single event object:
-{
-    "summary": "Event title",
-    "location": "Event location or empty string",
-    "start_date": "YYYY-MM-DD",
-    "start_time": "HH:MM" or null for all-day,
-    "end_date": "YYYY-MM-DD", 
-    "end_time": "HH:MM" or null for all-day,
-    "description": "Event description",
-    "timezone": "America/New_York",
-    "url": "Event URL or source URL"
-}`
-}
+]
 
 Guidelines:
 - Use ISO 8601 date format (YYYY-MM-DD)
@@ -453,14 +488,24 @@ ${html}`;
                 cleaned = cleaned.replace(/```\n?/, '').replace(/\n?```$/, '');
             }
             
-            const parsed = JSON.parse(cleaned);
-            
-            // Validate required fields
-            if (!parsed.summary) {
-                throw new Error('Missing required field: summary');
+            let parsed = JSON.parse(cleaned);
+            if (parsed && !Array.isArray(parsed) && Array.isArray(parsed.events)) {
+                parsed = parsed.events;
             }
+            const events = Array.isArray(parsed) ? parsed : [parsed];
+            if (events.length === 0) {
+                throw new Error('No events returned');
+            }
+            events.forEach((event, index) => {
+                if (!event || typeof event !== 'object' || !event.summary) {
+                    throw new Error(`Missing required field: summary (event ${index})`);
+                }
+                if (!event.start_date) {
+                    throw new Error(`Missing required field: start_date (event ${index})`);
+                }
+            });
             
-            return parsed;
+            return events;
         } catch (error) {
             console.error('Error parsing AI response:', error);
             console.error('Raw response:', response);
@@ -602,18 +647,39 @@ ${html}`;
         });
     }
 
-    async sendEmail(recipientEmail, subject, icsContent, eventData) {
+    async sendEmail(recipientEmail, subject, icsContent, eventData, sourceUrl = '', replyTo = null) {
         if (!this.postmarkApiKey) {
             throw new Error('Postmark API key not configured');
         }
 
-        const emailBody = `Please find the calendar event attached.
+        const resolvedSourceUrl = sourceUrl || (eventData && eventData.url) || '';
+        const sourceLines = resolvedSourceUrl
+            ? `Source URL: ${resolvedSourceUrl}\n[source-url: ${resolvedSourceUrl}]\n\n`
+            : '';
+        const emailBody = `${sourceLines}Please find the calendar event attached.
 
 Event: ${eventData.summary}
 ${eventData.location ? `Location: ${eventData.location}` : ''}
 ${eventData.description ? `Description: ${eventData.description}` : ''}
 
-This calendar event was generated automatically.`;
+This calendar event was generated automatically.${replyTo ? '\nReply to this email with instructions to change the event.' : ''}`;
+
+        const payload = {
+            From: this.fromEmail,
+            To: recipientEmail,
+            Subject: subject,
+            TextBody: emailBody,
+            Attachments: [
+                {
+                    Name: 'event.ics',
+                    Content: btoa(unescape(encodeURIComponent(icsContent))),
+                    ContentType: 'text/calendar; method=PUBLISH; charset=UTF-8'
+                }
+            ]
+        };
+        if (replyTo) {
+            payload.ReplyTo = replyTo;
+        }
 
         const response = await fetch('https://api.postmarkapp.com/email', {
             method: 'POST',
@@ -622,19 +688,7 @@ This calendar event was generated automatically.`;
                 'Content-Type': 'application/json',
                 'X-Postmark-Server-Token': this.postmarkApiKey
             },
-            body: JSON.stringify({
-                From: this.fromEmail,
-                To: recipientEmail,
-                Subject: subject,
-                TextBody: emailBody,
-                Attachments: [
-                    {
-                        Name: 'event.ics',
-                        Content: btoa(unescape(encodeURIComponent(icsContent))),
-                        ContentType: 'text/calendar; method=PUBLISH; charset=UTF-8'
-                    }
-                ]
-            })
+            body: JSON.stringify(payload)
         });
 
         if (!response.ok) {
@@ -645,20 +699,29 @@ This calendar event was generated automatically.`;
         return await response.json();
     }
 
-    async confirmEvent(confirmationToken) {
+    async confirmEvent(confirmationToken, indexes = null) {
         const data = await this.getConfirmationData(confirmationToken);
         if (!data) {
             throw new Error('Invalid or expired confirmation token');
         }
 
-        await this.sendEmail(data.recipientEmail, data.emailSubject, data.icsContent, data.parsedData);
+        // Legacy entries (single event stored as icsContent + parsedData)
+        const candidates = Array.isArray(data.candidates) && data.candidates.length > 0
+            ? data.candidates
+            : [{ index: 0, summary: data.parsedData?.summary, start: this.describeStart(data.parsedData || {}), eventData: data.parsedData || {}, ics: data.icsContent }];
+        const selected = Array.isArray(indexes) && indexes.length > 0
+            ? indexes.map(Number)
+            : candidates.map(c => c.index);
+
+        const sent = await this.sendCandidateEmails(candidates, selected, data.recipientEmail, data.emailSubject, data.sourceUrl || '');
         
         // Clean up confirmation data
         const storageKey = `confirmation_${confirmationToken}`;
         chrome.storage.local.remove([storageKey]);
         
         return {
-            message: 'Calendar invite sent successfully!',
+            message: sent > 1 ? `${sent} calendar invites sent successfully!` : 'Calendar invite sent successfully!',
+            sent,
             icsContent: data.icsContent
         };
     }

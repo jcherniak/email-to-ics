@@ -423,7 +423,7 @@ async function handleContextMenuAction(instructions, tab) {
       url: cleanUrl,
       html: pageData.html,
       instructions: instructions,
-      fromExtension: '1'
+      fromExtension: 'true'
     });
 
     // Add model if specified in preferences
@@ -671,7 +671,7 @@ async function handleGetModelsRequest(sendResponse) {
 async function handleConfirmEventRequest(message, sendResponse) {
   try {
     const processor = await initializeEmailProcessor();
-    const result = await processor.confirmEvent(message.confirmationToken);
+    const result = await processor.confirmEvent(message.confirmationToken, message.indexes || null);
     sendResponse({ success: true, result });
   } catch (error) {
     console.error('Error confirming event:', error);
