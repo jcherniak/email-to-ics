@@ -14,6 +14,17 @@ Fetched pages are cleaned with Mozilla Readability through `scripts/readability.
 dependencies are missing, or extraction yields too little text, the lightened full page is sent instead
 (see `READABILITY_*` in `.env.template`).
 
+## Reply to Edit
+
+Every calendar email (and every "choose events" email) carries a unique `Reply-To: edit-<key>@<INBOUND_REPLY_DOMAIN>`.
+Reply above the quote with the changes you want ("move it to 8pm", "only keep the Saturday show", "add the box office phone")
+and the events are regenerated with those instructions, using the previously sent ICS as context, then re-sent (or offered
+again as candidates when several come back). Keep the quoted original in your reply: it carries a `[source-url: ...]` line
+that lets the server re-fetch the page if its stored state has expired. Optional lines: `--model <id>` to pick the model,
+`<multiple>` to receive every candidate as its own email.
+
+Postmark setup: point the subdomain's MX at `inbound.postmarkapp.com` and set the inbound webhook to this app's URL.
+
 ## Email Input Formats
 
 Inbound email can include a URL, optional model instructions, and an optional `MULTI` flag.

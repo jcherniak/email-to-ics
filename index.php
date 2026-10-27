@@ -83,6 +83,7 @@ use Jcherniak\EmailToIcs\Geocode\GeocoderInterface;
 use Jcherniak\EmailToIcs\Input\CliInputSource;
 use Jcherniak\EmailToIcs\Input\EmailInputSource;
 use Jcherniak\EmailToIcs\Input\RawEmailTextInputSource;
+use Jcherniak\EmailToIcs\Input\ReplyEmailParser;
 use Jcherniak\EmailToIcs\Input\WebFormInputSource;
 use Jcherniak\EmailToIcs\Mail\CalendarEmailBody;
 use Jcherniak\EmailToIcs\Mail\EmailAttachment;
@@ -1095,7 +1096,7 @@ class EmailProcessor
 	 */
 	private function getProcessedFolder()
 	{
-		$folder = __DIR__ . '/processed';
+		$folder = trim((string)($_ENV['PROCESSED_DIR'] ?? '')) ?: __DIR__ . '/processed';
 		if (!is_dir($folder)) {
 			mkdir($folder, 0755, true);
 		}
@@ -1244,6 +1245,10 @@ class EmailProcessor
 			'contentUsed' => $metadata['contentUsed'] ?? null,
 			'stopReason' => $metadata['stopReason'] ?? null,
 			'candidateKey' => $metadata['candidateKey'] ?? null,
+			'editOfKey' => $metadata['editOfKey'] ?? null,
+			'editRound' => $metadata['editRound'] ?? null,
+			'stateMissing' => $metadata['stateMissing'] ?? null,
+			'quotedSourceUrl' => $metadata['quotedSourceUrl'] ?? null,
 		], static fn($value) => $value !== null));
 
 		// Write updated content
@@ -1310,6 +1315,13 @@ class EmailProcessor
 		$this->currentProcessingKey = date('Y-m-d H:i:s');
 		if ($messageId) {
 			$this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'started');
+		}
+
+		// A reply to one of our calendar emails (edit-<key>@INBOUND_REPLY_DOMAIN) is an edit request.
+		$editKey = ReplyEmailParser::findEditKey($body);
+		if ($editKey !== null) {
+			$this->processEditReply($body, $editKey, $messageId, $cliDebug);
+			return;
 		}
 
 		// Wrap entire processing in try-catch to record status
@@ -2188,6 +2200,28 @@ PROMPT;
             ],
         ];
 
+        if ($editContext !== []) {
+            $round = (int)($editContext['round'] ?? 1);
+            if (!empty($editContext['stateMissing'])) {
+                $editBlock = "*** EDIT REQUEST (previous structured output unavailable) ***\n"
+                    . "The user previously received a calendar email generated from the page content provided below and has replied with change requests (see the EXTREMELY IMPORTANT INSTRUCTIONS block). "
+                    . "The quoted text of that earlier email is the only record of what was sent: use it to understand which event(s) and fields the user is referring to. "
+                    . "Regenerate the event(s) from the page content, apply exactly the requested changes, keep everything else as it was in the earlier email, and return the full corrected event(s) in the normal JSON format.\n\n"
+                    . "--- QUOTED PREVIOUS EMAIL ---\n" . (string)($editContext['previousOutputText'] ?? '') . "\n--- END QUOTED PREVIOUS EMAIL ---";
+            } else {
+                $editBlock = "*** EDIT REQUEST (round {$round}) ***\n"
+                    . "You previously generated the calendar event(s) below. The user replied with change requests (see the EXTREMELY IMPORTANT INSTRUCTIONS block). "
+                    . "Apply exactly those changes, keep every other field identical to the previous output, and return the FULL corrected event(s) in the normal JSON format. "
+                    . "If the user asks to drop or merge events, return only the events that should remain.\n\n"
+                    . "--- PREVIOUS ICS ---\n" . (string)($editContext['previousIcs'] ?? '') . "\n--- END PREVIOUS ICS ---\n\n"
+                    . "--- PREVIOUS EVENT JSON ---\n" . (string)($editContext['previousEventJson'] ?? '') . "\n--- END PREVIOUS EVENT JSON ---";
+            }
+            $messages[] = [
+                'role' => 'system',
+                'content' => $editBlock
+            ];
+        }
+
         if ($instructions) {
             $messages[] = [
                 'role' => 'system',
@@ -2518,7 +2552,9 @@ PROMPT;
 	 */
 	private function buildPostmarkSourceDataHtml(array $originalEmail): string
 	{
-		$origBody = $originalEmail['HtmlBody'] ?? nl2br((string)($originalEmail['TextBody'] ?? ''));
+		$origBody = trim((string)($originalEmail['HtmlBody'] ?? '')) !== ''
+			? (string)$originalEmail['HtmlBody']
+			: nl2br(htmlspecialchars((string)($originalEmail['TextBody'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
 		$fromName = (string)($originalEmail['FromName'] ?? '');
 		$from = (string)($originalEmail['From'] ?? '');
 		$date = (string)($originalEmail['Date'] ?? '');
@@ -2613,6 +2649,161 @@ BODY;
 	}
 
 	/**
+	 * Reply-to-edit: the reply text becomes instructions, the previous ICS/JSON (or, when the stored
+	 * state is gone, the quoted email plus a fresh fetch of its source URL) is the context, and the
+	 * result goes out through the normal single/choice email logic under a new key.
+	 *
+	 * @param array<string, mixed> $body Postmark inbound payload of the reply
+	 */
+	private function processEditReply(array $body, string $key, ?string $messageId, bool $cliDebug = false): void
+	{
+		$subject = (string)($body['Subject'] ?? 'no_subject');
+		$reply = ReplyEmailParser::parse($body);
+		$set = $this->candidateStore->load($key);
+		$stateMissing = $set === null;
+		errlog("Edit reply for key {$key}: state " . ($stateMissing ? 'missing/expired' : "found (round {$set->editRound})") . ", instructions: " . substr($reply->instructions, 0, 200));
+
+		$fail = function (string $message, ?GenerationOutcome $outcome = null) use ($body, $messageId, $subject, $key, $stateMissing, $reply): void {
+			errlog("Edit reply failed: {$message}");
+			$details = $message . ($outcome !== null ? "\n\nGeneration attempts:\n" . $outcome->attemptLog() : '');
+			$this->sendErrorEmail('Email-to-ICS Edit Failed: ' . $subject, $details, $body);
+			if ($messageId) {
+				$this->recordProcessingAttempt($messageId, $subject, 'edit_failure', null, $message, null, null, null, null, (string)($body['HtmlBody'] ?? ''), ['editOfKey' => $key, 'stateMissing' => $stateMissing, 'quotedSourceUrl' => $reply->quotedSourceUrl] + ($outcome?->toMetadata() ?? []));
+			}
+			echo json_encode(['status' => 'error', 'message' => 'Edit request failed - error notification sent']);
+		};
+
+		try {
+			if ($reply->instructions === '') {
+				$fail('No edit instructions were found above the quoted email. Reply with the changes you want, above the quote.');
+				return;
+			}
+
+			$maxRounds = max(1, (int)($_ENV['MAX_EDIT_ROUNDS'] ?? 10));
+			$editRound = ($set?->editRound ?? 0) + 1;
+			if ($set !== null && $set->editRound >= $maxRounds) {
+				$fail("This event has already been edited {$set->editRound} times (limit {$maxRounds}). Submit the page again to start over.");
+				return;
+			}
+
+			$sourceUrl = $set?->sourceUrl;
+			if ($set !== null) {
+				$frame = static function (string $pageContent, ?string $title) use ($sourceUrl): string {
+					if (trim($pageContent) === '') {
+						return $sourceUrl !== null ? "Source URL: {$sourceUrl}\n\n(no stored page content; rely on the previous output below)" : '(no source content)';
+					}
+					return ($sourceUrl !== null ? "{$sourceUrl}\n\n--- HTML content fetched from URL above ---\n" : '') . $pageContent;
+				};
+				$provider = new StaticContentProvider((string)$set->sourceContent, $frame);
+				$sourceContent = $set->sourceContent;
+				$sourceLabel = $set->sourceLabel;
+				$recipientEmail = $set->recipientEmail;
+				$tentative = $set->tentative;
+				$editContext = [
+					'round' => $editRound,
+					'previousIcs' => implode("\n\n", array_map(static fn(Candidate $c): string => $c->ics, $set->candidates)),
+					'previousEventJson' => json_encode(array_map(static fn(Candidate $c): array => $c->eventData, $set->candidates), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
+				];
+			} else {
+				$sourceUrl = $reply->quotedSourceUrl;
+				if ($sourceUrl === null) {
+					$fail('The stored events for this email have expired and no source URL was found in the quoted email. Keep the quoted original in your reply, or submit the page again.');
+					return;
+				}
+				$sourceUrl = $this->stripTrackingParameters($sourceUrl);
+				$frame = static fn(string $pageContent, ?string $title): string => "{$sourceUrl}\n\n--- HTML content fetched from URL above ---\n{$pageContent}";
+				$provider = new UrlLevelContentProvider($this->urlFetcher, $this->contentExtractor, $sourceUrl, $frame);
+				if (!$provider->hasAnyContent()) {
+					$fail("The stored events have expired and the source page could not be fetched again: {$sourceUrl}. " . json_encode($provider->fetchSummary()));
+					return;
+				}
+				$sourceContent = null; // filled from the winning variant below
+				$sourceLabel = 'email reply';
+				$fromAddress = strtolower((string)($body['From'] ?? ''));
+				$confirmed = $fromAddress !== '' && (str_contains($fromAddress, strtolower($this->toConfirmedEmail)) || strcasecmp((string)($body['ToFull'][0]['Email'] ?? ''), $this->inboundConfirmedEmail) === 0);
+				$recipientEmail = $confirmed ? $this->toConfirmedEmail : $this->toTentativeEmail;
+				$tentative = !$confirmed;
+				$editContext = [
+					'round' => $editRound,
+					'stateMissing' => true,
+					'previousOutputText' => $reply->quotedOriginalText,
+				];
+			}
+
+			$multiMode = $reply->multiRequested || ($set?->multiMode ?? false);
+			$outcome = $this->runGeneration(
+				$this->generationModels($reply->modelOverride),
+				$provider,
+				$reply->instructions,
+				null,
+				null,
+				$multiMode,
+				$sourceUrl,
+				$cliDebug,
+				$editContext
+			);
+			$eventDetails = $outcome->eventDetails;
+			if (!$outcome->success || empty($eventDetails['eventData'])) {
+				$fail('Regenerating the event(s) with your changes failed: ' . ($eventDetails['errorMessage'] ?? 'unknown error'), $outcome);
+				return;
+			}
+
+			if ($sourceContent === null) {
+				$sourceContent = $outcome->contentUsed?->pageContent;
+			}
+
+			$newSet = $this->buildCandidateSet(
+				$eventDetails,
+				$outcome,
+				'edit',
+				$sourceUrl,
+				$sourceLabel,
+				$this->buildPostmarkSourceDataHtml($body),
+				$sourceContent,
+				$reply->instructions,
+				$multiMode,
+				$tentative,
+				$recipientEmail,
+				$body,
+				null
+			);
+			$newSet = $newSet->with([
+				'previousKey' => $key,
+				'rootKey' => $set?->rootKey ?? $key,
+				'editRound' => $editRound,
+			]);
+			$this->candidateStore->save($newSet);
+
+			$plan = DeliveryPlanner::plan($newSet->count(), $reply->multiRequested);
+			if ($plan === DeliveryPlanner::CANDIDATES) {
+				$this->sendCandidateChoiceEmail($newSet);
+				$sent = 0;
+				$status = 'candidates_pending';
+			} else {
+				$sent = $this->sendCandidateEvents($newSet, $newSet->allIndexes());
+				$status = 'edit_success';
+			}
+			errlog("Edit reply processed: new key {$newSet->key} (round {$editRound}), plan {$plan}, emails sent {$sent}");
+
+			if ($messageId) {
+				$this->recordProcessingAttempt($messageId, $subject, $status, $newSet->candidates[0]->ics ?? null, null, null, $sourceContent, null, null, (string)($body['HtmlBody'] ?? ''), $this->buildProcessingMetadata($sourceUrl, $outcome->contentUsed?->title, $eventDetails, $outcome) + ['candidateKey' => $newSet->key, 'editOfKey' => $key, 'editRound' => $editRound, 'stateMissing' => $stateMissing, 'quotedSourceUrl' => $reply->quotedSourceUrl]);
+			}
+
+			echo json_encode([
+				'status' => 'success',
+				'message' => $plan === DeliveryPlanner::CANDIDATES
+					? $newSet->count() . ' candidate events regenerated; choice email sent'
+					: ($sent > 1 ? "{$sent} edited calendar emails sent" : 'Edited calendar email sent'),
+				'candidateKey' => $newSet->key,
+				'editOfKey' => $key,
+			]);
+		} catch (\Throwable $e) {
+			errlog('Exception processing edit reply: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+			$fail('Exception: ' . $e->getMessage() . "\n\nStack Trace:\n" . $e->getTraceAsString());
+		}
+	}
+
+	/**
 	 * Sends one calendar email per selected candidate (never a combined ICS) and records what was sent.
 	 *
 	 * @param list<int> $indexes
@@ -2643,7 +2834,7 @@ BODY;
 				}
 				$ics = $this->addAttachmentLinksToIcs($ics, $links);
 			}
-			$this->sendEmail($ics, $set->recipientEmail, $subject, $set->htmlBody, $set->attachments, $inReplyTo ?? $set->inReplyTo);
+			$this->sendEmail($ics, $set->recipientEmail, $subject, $set->htmlBody, $set->attachments, $inReplyTo ?? $set->inReplyTo, $this->editReplyAddress($set->key));
 		}
 
 		$this->candidateStore->save($set->withSent(array_map(static fn(Candidate $c): int => $c->index, $selected)));
@@ -2657,7 +2848,7 @@ BODY;
 	public function sendCandidateChoiceEmail(CandidateSet $set): void
 	{
 		$built = CandidateEmailBuilder::build($set, CandidateLinks::baseUrl());
-		$this->sendEmail(null, $set->recipientEmail, $built['subject'], $built['htmlBody'], [], $set->inReplyTo);
+		$this->sendEmail(null, $set->recipientEmail, $built['subject'], $built['htmlBody'], [], $set->inReplyTo, $this->editReplyAddress($set->key));
 	}
 
 	public function candidateStore(): CandidateStore
@@ -2794,7 +2985,7 @@ BODY;
 		errlog("Final ICS {$context}:\n{$ics}");
 	}
 
-	public function sendEmail($ics, $toEmail, $subject, $htmlBody, array $otherAttachments = [], $inReplyTo = null) {
+	public function sendEmail($ics, $toEmail, $subject, $htmlBody, array $otherAttachments = [], $inReplyTo = null, ?string $replyTo = null) {
 		$attachments = [];
 		if (!empty($ics)) {
 			$this->logFinalIcs("email to {$toEmail} subject '{$subject}'", $ics);
@@ -2832,8 +3023,23 @@ BODY;
 			$subject,
 			$htmlBody,
 			$attachments,
-			$headers
+			$headers,
+			$replyTo
 		));
+	}
+
+	/**
+	 * Unique Reply-To for a candidate set: replies to edit-<key>@INBOUND_REPLY_DOMAIN come back through the
+	 * inbound webhook and regenerate the events with the reply text as instructions.
+	 */
+	public function editReplyAddress(string $key): ?string
+	{
+		$domain = trim((string)($_ENV['INBOUND_REPLY_DOMAIN'] ?? ''), " \t\n\r@");
+		if ($domain === '' || !CandidateStore::isValidKey($key)) {
+			return null;
+		}
+
+		return "edit-{$key}@{$domain}";
 	}
 
 	private function sendGeocoderLookupErrorEmail(array $lookupError, array $aiResponse): void

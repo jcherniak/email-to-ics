@@ -60,9 +60,10 @@ final class FakeEmailProcessor extends EmailProcessor
         return new Response(200, ['Content-Type' => 'application/json'], $body);
     }
 
-    public function sendEmail($ics, $toEmail, $subject, $htmlBody, array $otherAttachments = [], $inReplyTo = null)
+    public function sendEmail($ics, $toEmail, $subject, $htmlBody, array $otherAttachments = [], $inReplyTo = null, ?string $replyTo = null)
     {
         $this->sentEmails[] = [
+            'replyTo' => $replyTo,
             'ics' => $ics,
             'toEmail' => $toEmail,
             'subject' => $subject,

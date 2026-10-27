@@ -17,6 +17,7 @@ final class EmailMessage
         public readonly string $htmlBody,
         public readonly array $attachments = [],
         public readonly array $headers = [],
+        public readonly ?string $replyTo = null,
     ) {
     }
 
@@ -31,6 +32,10 @@ final class EmailMessage
             'Subject' => $this->subject,
             'HTMLBody' => $this->htmlBody,
         ];
+
+        if ($this->replyTo !== null && $this->replyTo !== '') {
+            $payload['ReplyTo'] = $this->replyTo;
+        }
 
         if ($this->attachments !== []) {
             $payload['Attachments'] = array_map(

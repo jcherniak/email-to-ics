@@ -1,0 +1,12 @@
+Add a 30 minute reminder and <multiple> please.
+
+________________________________
+From: Email to ICS <calendar@example.test>
+Sent: Friday, May 1, 2026 9:00 AM
+To: Recipient <recipient@example.test>
+Subject: Opera Parallele - Doubt
+
+Source URL: https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre
+[source-url: https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre]
+
+-----Source data (email input)-----

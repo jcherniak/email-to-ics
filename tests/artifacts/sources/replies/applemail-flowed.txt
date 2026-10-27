@@ -1,0 +1,10 @@
+Change the location to the main stage and make it 3 hours.
+--model ~anthropic/claude-sonnet-latest
+
+> On May 1, 2026, at 9:00 AM, Email to ICS <calendar@example.test> wrote:
+> 
+> Source URL: https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre
+> [source-url: https://www.presidiotheatre.org/show-details/opera-parallele-
+> doubt-at-the-presidio-theatre]
+> 
+> -----Source data (email input)-----

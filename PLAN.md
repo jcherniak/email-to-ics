@@ -16,8 +16,8 @@ Branch `multi-event-and-retry` (items 1-5), then branch `model-driven-fetch` (it
 | C2 Readability (node + jsdom) snippet with lightened full-HTML fallback; delete PHP 8.4-only `extractMainContent` | 39c3ad6 | done |
 | C3 Shared retry runner: per model, snippet then full on first level, full on later levels, then next model; opis validation back on | 727d50c | done |
 | C4a Multi-event candidates: always-array schema, `CandidateStore` keyed state, choice email with confirm-page links, routes before auth | 2772030 | done |
-| C4b Chrome extension: candidate checkbox picker in the local JS processor, Reply-To + source-url marker | this commit | done |
-| C5 Reply-to-edit: unique Reply-To `edit-<key>@INBOUND_REPLY_DOMAIN`, stored state path with previous ICS, URL fallback from quoted email | | todo |
+| C4b Chrome extension: candidate checkbox picker in the local JS processor, Reply-To + source-url marker | c8c4fec | done |
+| C5 Reply-to-edit: unique Reply-To `edit-<key>@INBOUND_REPLY_DOMAIN`, stored state path with previous ICS, URL fallback from quoted email | this commit | done |
 | C6 Model-driven fetch via tool loop (`fetch_direct`, `fetch_with_firecrawl`, `fetch_with_tinyfish`, `render_with_tinyfish_browser`) on `model-driven-fetch` | | todo |
 
 Decisions for this work (confirmed with the owner):
@@ -27,6 +27,14 @@ Decisions for this work (confirmed with the owner):
 - Item 6 level 1 is a PHP `fetch_direct` function tool (not `openrouter:web_fetch`) so PHP always sees page content for emails and edits.
 - Retry failure = transport error, unparseable JSON, schema-invalid JSON, zero events or missing dtstart, or model `success:false`.
 - Extension keeps local processing; candidates are ported into `email-processor.js`.
+
+C5 notes:
+- `EmailMessage` gained `replyTo` (Postmark `ReplyTo`); `EmailProcessor::sendEmail(..., ?string $replyTo)`; every candidate send and choice email uses `editReplyAddress($key)` = `edit-<key>@INBOUND_REPLY_DOMAIN` (empty domain disables the header).
+- `src/Input/ReplyEmailParser` + `ParsedReply`: key from ToFull/CcFull/BccFull/OriginalRecipient/To/Cc; new text from Postmark `StrippedTextReply` or by cutting at the first quote marker (`>`, `On ... wrote:`, Original Message, Outlook From/Sent block, underscores, signature); HTML-only replies strip blockquote/gmail_quote/divRplyFwdMsg; `--model <id>`/`model:` override line; `<multiple>`/MULTI request; quoted source URL from the `[source-url: ...]` marker (soft wraps rejoined), the HTML link after "Source URL:", or a bare URL.
+- `processPostmarkRequest` routes `edit-<key>@` replies to `processEditReply`: stored state -> `StaticContentProvider` over the stored page content plus an `*** EDIT REQUEST (round n) ***` system block with the previous ICS verbatim and previous event JSON; missing/expired state -> re-fetch the quoted source URL through the normal chain with an `*** EDIT REQUEST (previous structured output unavailable) ***` block carrying the quoted email text (8000 char cap). Results get a new key (`previousKey`, `rootKey`, `editRound`), go through the same single/all/choice delivery, thread under the reply (`In-Reply-To`), and show the reply as the "Source data" block. `MAX_EDIT_ROUNDS=10`.
+- Processed records: `edit_success`/`edit_failure`/`candidates_pending` with `editOfKey`, `editRound`, `stateMissing`, `quotedSourceUrl`; `PROCESSED_DIR` env override (tests use a temp dir).
+- README has a "Reply to Edit" section (Postmark inbound subdomain MX -> `inbound.postmarkapp.com`).
+- Verified: `php -l`, `vendor/bin/phpunit` (120 tests, 3 expected skips) including reply fixtures for Gmail text/HTML, Apple Mail (wrapped marker) and Outlook, and the state, round-cap, URL-fallback, no-URL and `<multiple>` edit flows.
 
 C4b notes:
 - The popup keeps processing locally (`email-processor.js` calls OpenRouter/Postmark itself); the server candidate flow is not used by the popup. Only the context menu posts to the server (now with `fromExtension=true`).
@@ -47,35 +55,11 @@ C4a notes:
 - Artifacts: `tests/artifacts/outputs/presidio-candidate-email.expected.{html,subject.txt}` via `tests/generate-artifacts.php`.
 - Verified: `php -l`, `vendor/bin/phpunit` (108 tests, 3 expected skips), smoke runs of `processUrl` for choice email, send-all and review.
 
-C3 notes:
-- `src/Generation/`: `ContentVariant`, `ContentVariantProvider`, `UrlLevelContentProvider` (lazy per-level fetch + Readability, cached across models), `StaticContentProvider` (provided HTML/email content), `ModelOrder`, `EventResponseValidator`, `GenerationAttempt`, `GenerationOutcome`, `GenerationRetryRunner`.
-- Order per model: snippet then full on the first fetch level that yields content, full only on later levels, then the next model from level 1. `UrlLevelContentProvider(..., snippetOnEveryLevel: true)` flips that if ever wanted.
-- Model order: explicitly requested model first (web form `model`, CLI `--model`), then `DEFAULT_MODEL`, `ALTERNATE_MODEL`, remaining `ALLOWED_MODELS`; ids missing from the OpenRouter catalog are dropped. A requested model is no longer the only model tried.
-- Both `processUrl` and `processPostmarkRequest` go through `EmailProcessor::runGeneration()`; `generateEventWithRetries`/`tryAllModelsWithContent`/`isValidEventData` are gone.
-- `generateIcalEvent` is split into `buildGenerationRequest` (also removed the stray `'provider'` element from the request body), `parseGenerationContent` (opis schema validation re-enabled for `success:true` replies), and `finalizeEventDetails` (ICS generation errors are now retryable failures instead of uncaught exceptions). Signatures are `protected` so tests and later phases can reuse them.
-- Failure definition: transport error, unparseable JSON, schema-invalid JSON, `success:false`, zero events, or an event missing `summary`/`dtstart`.
-- Caps: `MAX_GENERATION_ATTEMPTS=24`, `GENERATION_TIME_BUDGET_SECONDS=600`; web runs raise `set_time_limit` to budget + 120 s.
-- Postmark path writes a `started` processed record before generation (same record key is overwritten with the final status) so webhook retries during a long run are deduped by `MAX_EMAIL_RETRIES`.
-- Processed records and the debug view carry `generationAttempts`, `fetchLevels`, `winningAttempt`, `contentUsed`, `stopReason`; error emails append the attempt log; CLI `--json` output includes `generation`.
-- `FakeEmailProcessor::setFakeAiResponses([...])` queues model replies for retry tests.
-- Verified: `php -l`, `vendor/bin/phpunit` (93 tests, 3 expected skips), plus a CLI smoke run of `processUrl` for provided HTML and for a URL whose direct level fails and whose firecrawl level succeeds.
-
-C2 notes:
-- `scripts/readability.mjs` (stdin HTML, argv URL, JSON out) + root `package.json` deps `@mozilla/readability`, `jsdom`; no scripts run, nothing fetched.
-- `src/Content/ReadabilityExtractor` (symfony/process, injectable runner for tests) returns `ExtractedContent{snippetHtml, fullHtml, title, textContent, method, fallbackReason}`; fallback reasons: disabled, node_missing, process_failed, timeout, invalid_json, too_short, plain_text.
-- "Snippet" = Readability HTML; "full page" = `HtmlLightener::lighten()` (script/style/svg/iframe/comments/data-URI blobs removed, no truncation). TinyFish browser text is wrapped in `<pre>` for both tiers.
-- `extractMainContent` and the `\Dom\HTMLDocument` helpers are deleted, so PHP 8.3 can run the whole app and test suite.
-- New env: `READABILITY_ENABLED`, `READABILITY_NODE_BINARY`, `READABILITY_TIMEOUT`, `READABILITY_MIN_TEXT_LENGTH`.
-- Verified: `node --check scripts/readability.mjs`, `php -l`, `vendor/bin/phpunit` (81 tests, 3 expected skips; the real-node Presidio test extracts 1088 text chars from 65 KB).
-
-C1 notes:
-- `FetchResult` gained `finalUrl`, `title`, `statusCode`, `contentType` (`html`|`text`) and `toSummary()`.
-- `ChainUrlFetcher` exposes `levelNames()`, `hasLevel()`, `fetchLevel()` (exceptions propagate) for the C3 runner; `fetch()` keeps first-success semantics.
-- Removed `OxylabsProxyUrlFetcher`, `ScrapeflyUrlFetcher`, `PuphpeteerRenderer.php`, the dead curl/2captcha fetch methods in `index.php`, `zoon/puphpeteer` and unused `html2text/html2text`; added `symfony/process` (used by C2) explicitly. `$scrapeflyScreenshot` is now `$fetchedScreenshot`.
-- New env: `FIRECRAWL_API_KEY`, `TINYFISH_API_KEY`, `FETCH_*_TIMEOUT`, `FETCH_FIRECRAWL_WAIT_MS`, `FETCH_TINYFISH_BROWSER_PROFILE` (default `stealth` because that level only runs after three cheaper levels failed).
-- Firecrawl is called with `onlyMainContent:false` so the full-page tier gets the whole document; Readability (C2) does main-content extraction.
-- Verified: `php -l` on touched files, `vendor/bin/phpunit` (69 tests, 3 expected geocoder skips without live keys).
-- Environment notes: tests need a local `.env` (copy of `.env.template`); `chrome-extension/node_modules` is tracked in git with a darwin-arm64 esbuild binary, so on Linux run the bundle with `node_modules/@esbuild/linux-x64/bin/esbuild` or reinstall; do not commit `node_modules` changes.
+C1-C3 summary (details in commits a7ac750, 39c3ad6, 727d50c):
+- Fetch chain is direct -> firecrawl -> tinyfish_fetch -> tinyfish_browser (`ChainUrlFetcher::levelNames()/fetchLevel()`), keyed by `FIRECRAWL_API_KEY`/`TINYFISH_API_KEY` with `FETCH_*` timeouts; Oxylabs, Scrapefly, Puphpeteer and dead curl code are gone; `FetchResult` carries finalUrl/title/statusCode/contentType.
+- Readability runs through `scripts/readability.mjs` (node + jsdom) via `src/Content/ReadabilityExtractor`; "snippet" = Readability HTML, "full page" = `HtmlLightener::lighten()` (no truncation); any failure degrades to the full page; the PHP 8.4-only DOM cleanup is deleted so PHP 8.3 runs everything.
+- `src/Generation/GenerationRetryRunner` drives both input paths: per model, snippet then full on the first level with content, full on later levels, then the next model (requested, DEFAULT_MODEL, ALTERNATE_MODEL, remaining ALLOWED_MODELS). Failure = transport error, unparseable or schema-invalid JSON (opis validation re-enabled), `success:false`, zero events, or missing summary/dtstart. Caps `MAX_GENERATION_ATTEMPTS=24`, `GENERATION_TIME_BUDGET_SECONDS=600`. `generateIcalEvent` is split into `buildGenerationRequest`/`parseGenerationContent`/`finalizeEventDetails`. Attempt logs land in processed records, the debug view, error emails and CLI `--json`. A `started` processed record dedupes Postmark webhook retries during long runs.
+- Environment notes: tests need `.env` (copy of the template); `chrome-extension/node_modules` is tracked with a darwin esbuild binary, so on Linux build with `node_modules/@esbuild/linux-x64/bin/esbuild`; never commit `node_modules` changes.
 
 ## Current State
 

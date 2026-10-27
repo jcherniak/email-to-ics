@@ -16,6 +16,8 @@ $_ENV['GEOCODER_ORDER'] ??= 'mapbox,google';
 $_ENV['DEFAULT_MODEL'] = 'test/model';
 $_ENV['LOG_LEVEL'] ??= 'error';
 $_ENV['CANDIDATES_DIR'] = sys_get_temp_dir() . '/email-to-ics-test-candidates';
+$_ENV['PROCESSED_DIR'] = sys_get_temp_dir() . '/email-to-ics-test-processed';
+$_ENV['MAX_EDIT_ROUNDS'] ??= '10';
 $_ENV['PUBLIC_BASE_URL'] ??= 'https://example.test/ics/';
 $_ENV['INBOUND_REPLY_DOMAIN'] ??= 'reply.example.test';
 
