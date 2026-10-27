@@ -13,8 +13,8 @@ Branch `multi-event-and-retry` (items 1-5), then branch `model-driven-fetch` (it
 | Phase | Commit | Status |
 | --- | --- | --- |
 | C1 Fetch chain direct -> firecrawl -> tinyfish_fetch -> tinyfish_browser; remove Oxylabs/Scrapefly/Puphpeteer | a7ac750 | done |
-| C2 Readability (node + jsdom) snippet with lightened full-HTML fallback; delete PHP 8.4-only `extractMainContent` | this commit | done |
-| C3 Shared retry runner: per model, snippet then full on first level, full on later levels, then next model; opis validation back on | | todo |
+| C2 Readability (node + jsdom) snippet with lightened full-HTML fallback; delete PHP 8.4-only `extractMainContent` | 39c3ad6 | done |
+| C3 Shared retry runner: per model, snippet then full on first level, full on later levels, then next model; opis validation back on | this commit | done |
 | C4a Multi-event candidates: always-array schema, `CandidateStore` keyed state, choice email with confirm-page links, routes before auth | | todo |
 | C4b Chrome extension: candidate checkbox picker in the local JS processor, Reply-To + source-url marker | | todo |
 | C5 Reply-to-edit: unique Reply-To `edit-<key>@INBOUND_REPLY_DOMAIN`, stored state path with previous ICS, URL fallback from quoted email | | todo |
@@ -27,6 +27,19 @@ Decisions for this work (confirmed with the owner):
 - Item 6 level 1 is a PHP `fetch_direct` function tool (not `openrouter:web_fetch`) so PHP always sees page content for emails and edits.
 - Retry failure = transport error, unparseable JSON, schema-invalid JSON, zero events or missing dtstart, or model `success:false`.
 - Extension keeps local processing; candidates are ported into `email-processor.js`.
+
+C3 notes:
+- `src/Generation/`: `ContentVariant`, `ContentVariantProvider`, `UrlLevelContentProvider` (lazy per-level fetch + Readability, cached across models), `StaticContentProvider` (provided HTML/email content), `ModelOrder`, `EventResponseValidator`, `GenerationAttempt`, `GenerationOutcome`, `GenerationRetryRunner`.
+- Order per model: snippet then full on the first fetch level that yields content, full only on later levels, then the next model from level 1. `UrlLevelContentProvider(..., snippetOnEveryLevel: true)` flips that if ever wanted.
+- Model order: explicitly requested model first (web form `model`, CLI `--model`), then `DEFAULT_MODEL`, `ALTERNATE_MODEL`, remaining `ALLOWED_MODELS`; ids missing from the OpenRouter catalog are dropped. A requested model is no longer the only model tried.
+- Both `processUrl` and `processPostmarkRequest` go through `EmailProcessor::runGeneration()`; `generateEventWithRetries`/`tryAllModelsWithContent`/`isValidEventData` are gone.
+- `generateIcalEvent` is split into `buildGenerationRequest` (also removed the stray `'provider'` element from the request body), `parseGenerationContent` (opis schema validation re-enabled for `success:true` replies), and `finalizeEventDetails` (ICS generation errors are now retryable failures instead of uncaught exceptions). Signatures are `protected` so tests and later phases can reuse them.
+- Failure definition: transport error, unparseable JSON, schema-invalid JSON, `success:false`, zero events, or an event missing `summary`/`dtstart`.
+- Caps: `MAX_GENERATION_ATTEMPTS=24`, `GENERATION_TIME_BUDGET_SECONDS=600`; web runs raise `set_time_limit` to budget + 120 s.
+- Postmark path writes a `started` processed record before generation (same record key is overwritten with the final status) so webhook retries during a long run are deduped by `MAX_EMAIL_RETRIES`.
+- Processed records and the debug view carry `generationAttempts`, `fetchLevels`, `winningAttempt`, `contentUsed`, `stopReason`; error emails append the attempt log; CLI `--json` output includes `generation`.
+- `FakeEmailProcessor::setFakeAiResponses([...])` queues model replies for retry tests.
+- Verified: `php -l`, `vendor/bin/phpunit` (93 tests, 3 expected skips), plus a CLI smoke run of `processUrl` for provided HTML and for a URL whose direct level fails and whose firecrawl level succeeds.
 
 C2 notes:
 - `scripts/readability.mjs` (stdin HTML, argv URL, JSON out) + root `package.json` deps `@mozilla/readability`, `jsdom`; no scripts run, nothing fetched.

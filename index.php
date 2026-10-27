@@ -63,6 +63,14 @@ use Jcherniak\EmailToIcs\Content\HtmlTitle;
 use Jcherniak\EmailToIcs\Content\ReadabilityExtractor;
 use Jcherniak\EmailToIcs\Fetch\ChainUrlFetcher;
 use Jcherniak\EmailToIcs\Fetch\UrlFetcherInterface;
+use Jcherniak\EmailToIcs\Generation\ContentVariant;
+use Jcherniak\EmailToIcs\Generation\ContentVariantProvider;
+use Jcherniak\EmailToIcs\Generation\EventResponseValidator;
+use Jcherniak\EmailToIcs\Generation\GenerationOutcome;
+use Jcherniak\EmailToIcs\Generation\GenerationRetryRunner;
+use Jcherniak\EmailToIcs\Generation\ModelOrder;
+use Jcherniak\EmailToIcs\Generation\StaticContentProvider;
+use Jcherniak\EmailToIcs\Generation\UrlLevelContentProvider;
 use Jcherniak\EmailToIcs\Geocode\ChainGeocoder;
 use Jcherniak\EmailToIcs\Geocode\GeocoderInterface;
 use Jcherniak\EmailToIcs\Input\CliInputSource;
@@ -333,6 +341,7 @@ class EmailProcessor
 	private UrlFetcherInterface $urlFetcher;
 	private GeocoderInterface $geocoder;
 	private ReadabilityExtractor $contentExtractor;
+	private ?string $currentProcessingKey = null;
 
 	private $aiModel;
 	private $openRouterKey;
@@ -713,11 +722,27 @@ class EmailProcessor
             );
         }
 
+		// If a specific model was requested, check if it's valid and override the default
+		$requestedModelForRun = null;
+		if ($requestedModel && isset($this->availableModels[$requestedModel])) {
+			$this->aiModel = $requestedModel;
+			$requestedModelForRun = $requestedModel;
+			errlog("Using requested model: {$this->aiModel}");
+		} else {
+			// Ensure a valid default model is set if the requested one is invalid
+			$this->aiModel = $this->getDefaultModelId(); // This can throw if no models available
+			errlog("Requested model '{$requestedModel}' invalid or not provided. Using default model: {$this->aiModel}");
+		}
+
+		$frame = static function (string $pageContent, ?string $title) use (&$url): string {
+			return "{$url}\n\n--- HTML content fetched from URL above ---\n{$pageContent}";
+		};
+
 		if (empty(trim($downloadedText)) && !empty(trim($url))) { // Only fetch if URL is given and no downloadedText
 			// Strip tracking parameters from URL
 			$url = $this->stripTrackingParameters($url);
 			errlog("URL after stripping tracking params: {$url}");
-			
+
 			if (!$this->is_valid_url($url)) {
                 errlog('BAD url: ' . $url);
                 ErrorHandler::handle(
@@ -726,14 +751,14 @@ class EmailProcessor
                 );
 			}
 
-			$downloadedText = $this->fetch_url($url);
-            if ($downloadedText === false) {
-                errlog('Failed to fetch URL: ' . $url);
+			$provider = new UrlLevelContentProvider($this->urlFetcher, $this->contentExtractor, $url, $frame);
+			if (!$provider->hasAnyContent()) {
+                errlog('Failed to fetch URL: ' . $url . ' - ' . json_encode($provider->fetchSummary()));
 
                 // For Postmark webhooks, continue processing instead of failing
                 if (defined('IS_POSTMARK_WEBHOOK') && IS_POSTMARK_WEBHOOK) {
                     errlog('Continuing processing for Postmark webhook despite URL fetch failure');
-                    $downloadedText = ''; // Set empty content and continue
+                    $provider = new StaticContentProvider('', $frame);
                 } else {
                     ErrorHandler::handle(
                         new \RuntimeException("Failed to fetch URL: {$url}"),
@@ -741,30 +766,20 @@ class EmailProcessor
                     );
                 }
             }
-		} elseif (substr($downloadedText, 0, 1) === '\'' &&
-			substr($downloadedText, -1, 1) === '\''
-		) {
-			$downloadedText = trim($downloadedText);
-			$dec = json_decode($downloadedText);
-			if (json_last_error() === JSON_ERROR_NONE)
-			{
-				$downloadedText = $dec;
-			}
-		}
-
-		// If a specific model was requested, check if it's valid and override the default
-		if ($requestedModel && isset($this->availableModels[$requestedModel])) {
-			$this->aiModel = $requestedModel;
-			errlog("Using requested model: {$this->aiModel}");
 		} else {
-			// Ensure a valid default model is set if the requested one is invalid
-			$this->aiModel = $this->getDefaultModelId(); // This can throw if no models available
-			errlog("Requested model '{$requestedModel}' invalid or not provided. Using default model: {$this->aiModel}");
+			if (substr((string)$downloadedText, 0, 1) === '\'' &&
+				substr((string)$downloadedText, -1, 1) === '\''
+			) {
+				$downloadedText = trim($downloadedText);
+				$dec = json_decode($downloadedText);
+				if (json_last_error() === JSON_ERROR_NONE)
+				{
+					$downloadedText = $dec;
+				}
+			}
+			// Provided HTML (extension capture, CLI --html, debug replay): Readability snippet first, then the lightened full page.
+			$provider = new StaticContentProvider((string)$downloadedText, $frame, $this->contentExtractor, !empty(trim((string)$url)) ? $url : null);
 		}
-
-		$extractedContent = $this->contentExtractor->extract($downloadedText, $url);
-		errlog("Content extraction: " . json_encode($extractedContent->toSummary()));
-		$downloadedText = $extractedContent->primaryHtml();
 
 		// Process screenshot if provided
 		$screenshotBase64 = null;
@@ -778,19 +793,24 @@ class EmailProcessor
 			errlog("Screenshot provided: " . substr($screenshotBase64, 0, 50) . "... (" . strlen($screenshotBase64) . " bytes)");
 		}
 
-		$combinedText = <<<TEXT
-{$url}
-
---- HTML content fetched from URL above ---
-{$downloadedText}
-TEXT;
-
-		if (!$allowMultiDay && $this->shouldExtractEqualPerformances($combinedText, $instructions)) {
+		if (!$allowMultiDay && $this->shouldExtractEqualPerformances((string)$provider->fullText(), $instructions)) {
 			$allowMultiDay = true;
 			errlog("Multi-day mode enabled automatically for equal performance schedule");
 		}
 
-		$eventDetails = $this->generateIcalEvent($combinedText, $instructions, $screenshotViewport, $screenshotZoomed, $requestedModel, $cliDebug, $allowMultiDay, $url);
+		$outcome = $this->runGeneration(
+			$this->generationModels($requestedModelForRun),
+			$provider,
+			$instructions,
+			$screenshotViewport,
+			$screenshotZoomed,
+			$allowMultiDay,
+			!empty(trim((string)$url)) ? $url : null,
+			$cliDebug
+		);
+		$eventDetails = $outcome->eventDetails;
+		// Content actually used for the winning attempt feeds the email body's "Source page" section.
+		$downloadedText = $outcome->contentUsed?->pageContent ?? (string)$downloadedText;
 
 		// Handle --json flag for CLI output if requested - This takes precedence over other CLI outputs.
 		if ($outputJsonOnly && defined('IS_CLI_RUN') && IS_CLI_RUN) {
@@ -822,6 +842,7 @@ TEXT;
 				'eventData'      => $eventDataValue, // Use the fetched value
 				'emailSubject'   => $eventDetails['emailSubject'] ?? null,
 				'locationLookup' => $eventDetails['locationLookup'] ?? null,
+				'generation'     => $outcome->toMetadata(),
 			];
 
 			// We're only concerned about a missing eventData when success is true
@@ -1023,7 +1044,7 @@ TEXT;
 		return HtmlTitle::extract($html);
 	}
 
-	private function buildProcessingMetadata(?string $downloadedUrl, ?string $pageTitle, array $eventDetails = []): array
+	private function buildProcessingMetadata(?string $downloadedUrl, ?string $pageTitle, array $eventDetails = [], ?GenerationOutcome $outcome = null): array
 	{
 		$eventData = $eventDetails['eventData'] ?? null;
 		$events = $this->eventDataItems($eventData);
@@ -1034,13 +1055,13 @@ TEXT;
 			}
 		}
 
-		return [
+		return array_merge([
 			'downloadedUrl' => $downloadedUrl,
 			'pageTitle' => $pageTitle,
 			'parsedTitle' => $events[0]['summary'] ?? ($eventDetails['emailSubject'] ?? null),
 			'parsedDates' => $parsedDates,
 			'generatedJson' => $eventDetails ?: null,
-		];
+		], $outcome?->toMetadata() ?? []);
 	}
 
 	/**
@@ -1139,7 +1160,7 @@ TEXT;
 		$existingFile = $this->findProcessingFile($messageId);
 		$filename = $existingFile ?: $this->getProcessingFilename($messageId, $subject);
 
-		$dateStarted = date('Y-m-d H:i:s');
+		$dateStarted = $this->currentProcessingKey ?? date('Y-m-d H:i:s');
 
 		// Open file with exclusive lock
 		$fp = fopen($filename, 'c+');
@@ -1191,6 +1212,11 @@ TEXT;
 			'parsedTitle' => $metadata['parsedTitle'] ?? null,
 			'parsedDates' => $metadata['parsedDates'] ?? null,
 			'generatedJson' => $metadata['generatedJson'] ?? null,
+			'generationAttempts' => $metadata['generationAttempts'] ?? null,
+			'fetchLevels' => $metadata['fetchLevels'] ?? null,
+			'winningAttempt' => $metadata['winningAttempt'] ?? null,
+			'contentUsed' => $metadata['contentUsed'] ?? null,
+			'stopReason' => $metadata['stopReason'] ?? null,
 		], static fn($value) => $value !== null));
 
 		// Write updated content
@@ -1252,6 +1278,13 @@ TEXT;
 			return;
 		}
 
+		// One processed-record key per run: a 'started' entry is written now and overwritten with the final status,
+		// so a Postmark webhook retry that arrives while this run is still going is deduped by shouldProcessEmail().
+		$this->currentProcessingKey = date('Y-m-d H:i:s');
+		if ($messageId) {
+			$this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'started');
+		}
+
 		// Wrap entire processing in try-catch to record status
 		try {
         
@@ -1283,40 +1316,68 @@ TEXT;
 		$downloadedUrlContent = null;
 		$downloadedPageTitle = null;
 		$screenshotData = null;
+		$this->fetchedScreenshot = null;
+		$emailContextText = $combinedText;
+		$frame = static function (string $pageContent, ?string $title) use ($emailContextText): string {
+			if (trim($pageContent) === '') {
+				return $emailContextText;
+			}
+			return $emailContextText . "\n\n--- HTML content fetched from URL found in email TextBody ---\n```html\n" . $pageContent . "\n```";
+		};
+
 		if ($extractedUrl) {
 			// Strip tracking parameters from extracted URL
 			$extractedUrl = $this->stripTrackingParameters($extractedUrl);
-            errlog("URL found in TextBody (after stripping tracking): {$extractedUrl}. Fetching...");
-			// Clear any previous screenshot
-			$this->fetchedScreenshot = null;
-			$fetchedContent = $this->fetch_url($extractedUrl); // Returns raw HTML/content
-            if ($fetchedContent) {
-                $extractedContent = $this->contentExtractor->extract($fetchedContent, $extractedUrl);
-                errlog("Content extraction: " . json_encode($extractedContent->toSummary()));
-                $downloadedPageTitle = $extractedContent->title ?? $this->extractPageTitleFromHtml($fetchedContent);
-                $downloadedUrlContent = $extractedContent->primaryHtml(); // Readability snippet, or lightened full page
-    			$combinedText .= "\n\n--- HTML content fetched from URL found in email TextBody ---\n```html\n" . $downloadedUrlContent . "\n```";
-				// Get screenshot if the fetch level captured one
-				if ($this->fetchedScreenshot) {
-					$screenshotData = $this->fetchedScreenshot;
-					errlog("Using screenshot from fetch level for AI processing");
-				}
-            } else {
-                errlog("Failed to fetch content from URL found in TextBody: {$extractedUrl}");
+            errlog("URL found in TextBody (after stripping tracking): {$extractedUrl}. Fetching through levels as needed...");
+			$provider = new UrlLevelContentProvider($this->urlFetcher, $this->contentExtractor, $extractedUrl, $frame);
+			if (!$provider->hasAnyContent()) {
+                errlog("Failed to fetch content from URL found in TextBody: {$extractedUrl}. Continuing with email content only. " . json_encode($provider->fetchSummary()));
+                $provider = new StaticContentProvider('', $frame);
             }
+		} else {
+			$provider = new StaticContentProvider('', $frame);
 		}
 
-        // Use comprehensive retry strategy
-        $eventDetails = $this->generateEventWithRetries(
-            $combinedText,
+        // Check if multi-day mode should be enabled
+        $allowMultiDay = false;
+        if ($hasMultiFlag) {
+            $allowMultiDay = true;
+            errlog("Multi-day mode enabled via standalone MULTI keyword");
+        } elseif (!empty($extractedInstructions) && stripos($extractedInstructions, 'MULTI') !== false) {
+            $allowMultiDay = true;
+            errlog("Multi-day mode enabled via MULTI in Instructions field");
+        } elseif ($this->shouldExtractEqualPerformances((string)$provider->fullText(), $extractedInstructions)) {
+            $allowMultiDay = true;
+            errlog("Multi-day mode enabled automatically for equal performance schedule");
+        }
+
+        // Retry strategy: per model, snippet then full page on the first fetch level that worked,
+        // full page on later levels, then the next model from the start.
+        $outcome = $this->runGeneration(
+            $this->generationModels(),
+            $provider,
             $extractedInstructions,
-            $extractedUrl,
-            $htmlBodyForAI,
-            $pdfText,
+            null,
             $screenshotData,
-            $cliDebug,
-            $hasMultiFlag
+            $allowMultiDay,
+            $extractedUrl ?: null,
+            $cliDebug
         );
+        $eventDetails = $outcome->eventDetails;
+        if ($provider instanceof UrlLevelContentProvider) {
+            $usedVariant = $outcome->contentUsed;
+            if ($usedVariant === null) {
+                foreach ($provider->levels() as $level) {
+                    $variants = $provider->variantsForLevel($level);
+                    if ($variants !== []) {
+                        $usedVariant = $variants[0];
+                        break;
+                    }
+                }
+            }
+            $downloadedUrlContent = $usedVariant?->pageContent;
+            $downloadedPageTitle = $usedVariant?->title;
+        }
 
         // Handle --json flag for CLI output if requested and in CLI context
         // This check is more for future-proofing if this method is called from a CLI context that sets outputJsonOnly
@@ -1349,6 +1410,7 @@ TEXT;
                 'eventData'      => $eventDataValue, // Use the fetched value
                 'emailSubject'   => $eventDetails['emailSubject'] ?? null,
                 'locationLookup' => $eventDetails['locationLookup'] ?? null,
+                'generation'     => $outcome->toMetadata(),
             ];
 
             // We're only concerned about a missing eventData when success is true
@@ -1422,7 +1484,7 @@ TEXT;
 
             // Record successful processing
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'success', $calendarEvent, null, null, $downloadedUrlContent, $this->fetchedScreenshot, $pdfText, $htmlBodyForAI, $this->buildProcessingMetadata($extractedUrl, $downloadedPageTitle, $eventDetails));
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'success', $calendarEvent, null, null, $downloadedUrlContent, $this->fetchedScreenshot, $pdfText, $htmlBodyForAI, $this->buildProcessingMetadata($extractedUrl, $downloadedPageTitle, $eventDetails, $outcome));
             }
 
             echo json_encode([
@@ -1437,13 +1499,13 @@ TEXT;
             $errorMessage = $eventDetails['errorMessage'] ?? 'Unknown error occurred during processing';
             $this->sendErrorEmail(
                 'Email-to-ICS Processing Failed: ' . ($body['Subject'] ?? 'No Subject'),
-                $errorMessage,
+                $errorMessage . "\n\nGeneration attempts:\n" . $outcome->attemptLog(),
                 $body
             );
 
             // Record failed processing
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'failure', null, $errorMessage, null, $downloadedUrlContent, $this->fetchedScreenshot, $pdfText, $htmlBodyForAI, $this->buildProcessingMetadata($extractedUrl, $downloadedPageTitle, $eventDetails));
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'failure', null, $errorMessage, null, $downloadedUrlContent, $this->fetchedScreenshot, $pdfText, $htmlBodyForAI, $this->buildProcessingMetadata($extractedUrl, $downloadedPageTitle, $eventDetails, $outcome));
             }
 
             echo json_encode(['status' => 'error', 'message' => 'Failed to process email - error notification sent']);
@@ -1457,13 +1519,13 @@ TEXT;
             errlog("Stack trace: " . $stackTrace);
 
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'exception', null, $errorMessage, $stackTrace, $downloadedUrlContent ?? null, $this->fetchedScreenshot ?? null, $pdfText ?? null, $htmlBodyForAI ?? null, $this->buildProcessingMetadata($extractedUrl ?? null, $downloadedPageTitle ?? null, $eventDetails ?? []));
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'exception', null, $errorMessage, $stackTrace, $downloadedUrlContent ?? null, $this->fetchedScreenshot ?? null, $pdfText ?? null, $htmlBodyForAI ?? null, $this->buildProcessingMetadata($extractedUrl ?? null, $downloadedPageTitle ?? null, $eventDetails ?? [], $outcome ?? null));
             }
 
             // Send error email
             $this->sendErrorEmail(
                 'Email-to-ICS Processing Exception: ' . ($body['Subject'] ?? 'No Subject'),
-                $errorMessage . "\n\nStack Trace:\n" . $stackTrace,
+                $errorMessage . "\n\nStack Trace:\n" . $stackTrace . (isset($outcome) ? "\n\nGeneration attempts:\n" . $outcome->attemptLog() : ''),
                 $body
             );
 
@@ -1586,120 +1648,65 @@ TEXT;
     }
 
     /**
-     * Try all allowed models with given content, skipping already-tried models
-     * Returns event details on success, or last failure result
+     * Models to try, in order: explicitly requested, DEFAULT_MODEL, ALTERNATE_MODEL, remaining ALLOWED_MODELS.
+     * Unknown model ids (not in the OpenRouter catalog) are dropped.
+     *
+     * @return list<string>
      */
-    private function tryAllModelsWithContent($combinedText, $instructions, $screenshotData, $url, $cliDebug, $triedModels, $contentLabel, $allowMultiDay = false)
+    private function generationModels(?string $requested = null): array
     {
-        // Build priority list: DEFAULT_MODEL, then ALTERNATE_MODEL, then remaining allowed models
-        $priorityModels = [];
-
-        // Add DEFAULT_MODEL first (if not already tried)
-        $defaultModel = $_ENV['DEFAULT_MODEL'] ?? $this->aiModel;
-        if (!in_array($defaultModel, $triedModels)) {
-            $priorityModels[] = $defaultModel;
-        }
-
-        // Add ALTERNATE_MODEL second (if configured, different from default, and not already tried)
-        if (!empty($_ENV['ALTERNATE_MODEL']) &&
-            $_ENV['ALTERNATE_MODEL'] !== $defaultModel &&
-            !in_array($_ENV['ALTERNATE_MODEL'], $triedModels)) {
-            $priorityModels[] = $_ENV['ALTERNATE_MODEL'];
-        }
-
-        // Add all other allowed models (excluding ones already tried or in priority list)
-        $allowedModels = $this->getAllowedModelIds();
-        foreach ($allowedModels as $modelId) {
-            if (!in_array($modelId, $triedModels) && !in_array($modelId, $priorityModels)) {
-                $priorityModels[] = $modelId;
-            }
-        }
-
-        // Try each model
-        $lastEventDetails = null;
-        foreach ($priorityModels as $modelId) {
-            errlog("Trying model {$modelId} with {$contentLabel}");
-            $triedModels[] = $modelId; // Mark as tried
-
-            $eventDetails = $this->generateIcalEvent($combinedText, $instructions, null, $screenshotData, $modelId, $cliDebug, $allowMultiDay, $url);
-            $lastEventDetails = $eventDetails;
-
-            if (isset($eventDetails['success']) && $eventDetails['success'] && $this->isValidEventData($eventDetails)) {
-                errlog("Successfully generated event with model {$modelId} using {$contentLabel}");
-                return ['success' => true, 'eventDetails' => $eventDetails, 'triedModels' => $triedModels];
-            }
-
-            errlog("Model {$modelId} failed with {$contentLabel}: " . ($eventDetails['errorMessage'] ?? 'unknown error'));
-        }
-
-        return ['success' => false, 'eventDetails' => $lastEventDetails, 'triedModels' => $triedModels];
-    }
-
-    /**
-     * Simple retry strategy - try all models once with provided content
-     * Content fetching (direct -> firecrawl -> tinyfish) already happened before this
-     */
-    private function generateEventWithRetries($combinedText, $instructions, $url, $htmlBodyForAI, $pdfText, $screenshotData, $cliDebug = false, $hasMultiFlag = false)
-    {
-        // Check if multi-day mode should be enabled
-        $allowMultiDay = false;
-        if ($hasMultiFlag) {
-            $allowMultiDay = true;
-            errlog("Multi-day mode enabled via standalone MULTI keyword");
-        } elseif (!empty($instructions) && stripos($instructions, 'MULTI') !== false) {
-            $allowMultiDay = true;
-            errlog("Multi-day mode enabled via MULTI in Instructions field");
-        } elseif ($this->shouldExtractEqualPerformances($combinedText, $instructions)) {
-            $allowMultiDay = true;
-            errlog("Multi-day mode enabled automatically for equal performance schedule");
-        }
-
-        // Try all models ONCE with the provided content
-        // (Content was already fetched using the direct -> firecrawl -> tinyfish chain in processPostmarkRequest)
-        errlog("Trying all models with provided content");
-        $triedModels = [];
-        $result = $this->tryAllModelsWithContent(
-            $combinedText,
-            $instructions,
-            $screenshotData,
-            $url,
-            $cliDebug,
-            $triedModels,
-            "provided content",
-            $allowMultiDay
+        $isKnown = fn(string $model): bool => $this->availableModels === [] || isset($this->availableModels[$model]);
+        $models = ModelOrder::build(
+            $_ENV['DEFAULT_MODEL'] ?? $this->aiModel,
+            $_ENV['ALTERNATE_MODEL'] ?? null,
+            $this->getAllowedModelIds(),
+            $requested,
+            $isKnown
         );
 
-        if ($result['success']) {
-            return $result['eventDetails'];
-        }
-
-        // All models failed
-        errlog("All models failed. Tried " . count($result['triedModels']) . " model(s): " . implode(', ', $result['triedModels']));
-        return $result['eventDetails'];
+        return $models === [] ? [$this->aiModel] : $models;
     }
 
     /**
-     * Check if event data is valid (has required date/time fields)
+     * Shared retry flow for every input path. For each model: snippet then full page on the first
+     * fetch level with content, full page on each later level, then the next model from the start.
+     *
+     * @param list<string> $models
      */
-    private function isValidEventData($eventDetails)
+    protected function runGeneration(array $models, ContentVariantProvider $provider, $instructions, $screenshotViewport, $screenshotZoomed, bool $allowMultiDay, ?string $sourceUrl, bool $cliDebug = false, array $editContext = []): GenerationOutcome
     {
-        if (!isset($eventDetails['eventData']) || !is_array($eventDetails['eventData'])) {
-            return false;
+        $maxAttempts = max(1, (int)($_ENV['MAX_GENERATION_ATTEMPTS'] ?? 24));
+        $budget = max(1, (int)($_ENV['GENERATION_TIME_BUDGET_SECONDS'] ?? 600));
+        if (!(defined('IS_CLI_RUN') && IS_CLI_RUN)) {
+            @set_time_limit(max((int)ini_get('max_execution_time'), $budget + 120));
         }
 
-        $eventData = $eventDetails['eventData'];
+        $runner = new GenerationRetryRunner(
+            fn(string $model, ContentVariant $variant): array => $this->generateIcalEvent(
+                $variant->text,
+                $instructions,
+                $screenshotViewport,
+                $screenshotZoomed,
+                $model,
+                $cliDebug,
+                $allowMultiDay,
+                $sourceUrl,
+                $editContext
+            ),
+            new EventResponseValidator(),
+            $maxAttempts,
+            $budget
+        );
 
-        // Check for single event
-        if (isset($eventData['dtstart']) && !empty($eventData['dtstart'])) {
-            return true;
+        errlog("Generation plan: models [" . implode(', ', $models) . "], levels [" . implode(', ', $provider->levels()) . "], max attempts {$maxAttempts}, budget {$budget}s");
+        $outcome = $runner->run($models, $provider);
+        errlog("Generation outcome: " . ($outcome->success ? 'success' : 'failure') . "\n" . $outcome->attemptLog());
+
+        if ($outcome->success && $outcome->winning !== null) {
+            $this->aiModel = $outcome->winning->model;
         }
 
-        // Check for multiple events (array of events)
-        if (isset($eventData[0]) && is_array($eventData[0]) && !empty($eventData[0]['dtstart'])) {
-            return true;
-        }
-
-        return false;
+        return $outcome;
     }
 
 	protected function postOpenRouterChatCompletion(array $data)
@@ -1722,7 +1729,7 @@ TEXT;
      * @param bool $cliDebug If true and in CLI, output AI request/response to STDERR.
      * @return array Array containing ICS content and metadata
      */
-    private function generateIcalEvent($combinedText, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $cliDebug = false, $allowMultiDay = false, $sourceUrl = null)
+    protected function generateIcalEvent($combinedText, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, $requestedModel = null, $cliDebug = false, $allowMultiDay = false, $sourceUrl = null, array $editContext = [])
     {
         // If a specific model was requested, use it
         if ($requestedModel) {
@@ -1731,6 +1738,177 @@ TEXT;
             errlog("Switching model from {$previousModel} to {$requestedModel} for this request");
         }
 
+        [$data, $responseSchema] = $this->buildGenerationRequest($this->aiModel, $combinedText, $instructions, $screenshotViewport, $screenshotZoomed, (bool)$allowMultiDay, $sourceUrl, $editContext);
+
+        if ($cliDebug && defined('IS_CLI_RUN') && IS_CLI_RUN) {
+            fwrite(STDERR, "\n--- AI REQUEST DATA (DEBUG) ---\n");
+            fwrite(STDERR, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+            fwrite(STDERR, "--- END AI REQUEST DATA ---\n\n");
+        }
+
+        errlog('Sending OpenRouter request to model: ' . $this->aiModel);
+        $api_start_time = microtime(true);
+
+        try {
+            // Make direct POST request to OpenRouter
+            $guzzleResponse = $this->postOpenRouterChatCompletion($data);
+
+            $api_duration = microtime(true) - $api_start_time;
+            $statusCode = $guzzleResponse->getStatusCode();
+            $responseBody = (string) $guzzleResponse->getBody();
+
+            errlog('Received OpenRouter response in ' . number_format($api_duration, 4) . ' seconds');
+            errlog('Response status code: ' . $statusCode);
+            errlog('Response body (first 1000 non-leading-whitespace chars): ' . substr(ltrim($responseBody), 0, 1000));
+
+            // Parse JSON response
+            $response = json_decode($responseBody, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                $jsonError = json_last_error_msg();
+                errlog("Failed to parse OpenRouter JSON response: " . $jsonError);
+                errlog("Raw response: " . $responseBody);
+
+                return [
+                    'success' => false,
+                    'errorMessage' => "Invalid JSON from API: " . $jsonError,
+                    'eventData' => null,
+                    'emailSubject' => 'Error: Invalid API Response',
+                    'locationLookup' => null
+                ];
+            }
+
+            // Check for HTTP error status
+            if ($statusCode >= 400) {
+                $errorMsg = "OpenRouter API returned error status {$statusCode}";
+                if (isset($response['error'])) {
+                    $errorMsg .= ": " . ($response['error']['message'] ?? json_encode($response['error']));
+                }
+                errlog($errorMsg);
+                errlog("Full error response: " . json_encode($response, JSON_PRETTY_PRINT));
+
+                // These are retryable errors - try next model
+                return [
+                    'success' => false,
+                    'errorMessage' => $errorMsg,
+                    'eventData' => null,
+                    'emailSubject' => 'Error: API Error',
+                    'locationLookup' => null
+                ];
+            }
+
+            // Check if response has expected structure
+            if (!isset($response['choices']) || !isset($response['choices'][0]) || !isset($response['choices'][0]['message']['content'])) {
+                errlog("OpenRouter response missing expected 'choices' structure.");
+                errlog("Full response: " . json_encode($response, JSON_PRETTY_PRINT));
+
+                // Check for error field in response
+                if (isset($response['error'])) {
+                    $errorMsg = "OpenRouter API error: " . ($response['error']['message'] ?? json_encode($response['error']));
+                    errlog($errorMsg);
+
+                    return [
+                        'success' => false,
+                        'errorMessage' => $errorMsg,
+                        'eventData' => null,
+                        'emailSubject' => 'Error: API Error',
+                        'locationLookup' => null
+                    ];
+                }
+
+                return [
+                    'success' => false,
+                    'errorMessage' => "Malformed API response (missing 'choices' field)",
+                    'eventData' => null,
+                    'emailSubject' => 'Error: Malformed Response',
+                    'locationLookup' => null
+                ];
+            }
+
+        } catch (\Throwable $e) {
+            errlog("Exception during OpenRouter request: " . $e->getMessage());
+            errlog("Error class: " . get_class($e));
+            errlog("Stack trace: " . $e->getTraceAsString());
+
+            // All exceptions during API call are retryable - try next model
+            return [
+                'success' => false,
+                'errorMessage' => "HTTP request failed: " . $e->getMessage(),
+                'eventData' => null,
+                'emailSubject' => 'Error: Request Failed',
+                'locationLookup' => null
+            ];
+        }
+
+        $returnedData = $response['choices'][0]['message']['content'];
+        // $jsonData = trim($returnedData); // Old simple trim
+
+        if ($cliDebug && defined('IS_CLI_RUN') && IS_CLI_RUN) {
+            fwrite(STDERR, "\n--- AI RAW RESPONSE CONTENT (DEBUG) ---\n");
+            fwrite(STDERR, $returnedData . "\n"); // Show raw string before JSON extraction attempts
+            fwrite(STDERR, "--- END AI RAW RESPONSE CONTENT ---\n\n");
+        }
+
+        // Debug: Output token usage and cost if $cliDebug is true
+        if ($cliDebug && defined('IS_CLI_RUN') && IS_CLI_RUN) {
+            $promptTokens = 0;
+            $completionTokens = 0;
+
+            // Access usage data - structure might vary slightly based on exact client library version for OpenRouter
+            // Common structures: $response->usage->promptTokens or $response['usage']['prompt_tokens']
+            if (isset($response['usage'])) { // Array access
+                $promptTokens = $response['usage']['prompt_tokens'] ?? 0;
+                $completionTokens = $response['usage']['completion_tokens'] ?? 0;
+            } elseif (isset($response->usage) && is_object($response->usage)) { // Object access
+                $promptTokens = $response->usage->promptTokens ?? ($response->usage->prompt_tokens ?? 0);
+                $completionTokens = $response->usage->completionTokens ?? ($response->usage->completion_tokens ?? 0);
+            }
+            $totalTokens = $promptTokens + $completionTokens;
+
+            $modelInfo = $this->availableModels[$this->aiModel] ?? null;
+            $costString = "N/A (pricing info unavailable for model: {$this->aiModel})";
+
+            if ($modelInfo && isset($modelInfo['pricing'])) {
+                $pricePromptPer1k = (float)($modelInfo['pricing']['prompt'] ?? 0);
+                $priceCompletionPer1k = (float)($modelInfo['pricing']['completion'] ?? 0);
+                $priceRequest = (float)($modelInfo['pricing']['request'] ?? 0);
+
+                $promptCost = ($promptTokens / 1000) * $pricePromptPer1k;
+                $completionCost = ($completionTokens / 1000) * $priceCompletionPer1k;
+                $totalCalculatedCost = $promptCost + $completionCost + $priceRequest;
+                
+                $costString = '$' . number_format($totalCalculatedCost, 6);
+            } else if (!$modelInfo) {
+                errlog("Debug Cost Calc: Model info not found for ID: {$this->aiModel}");
+            } else if (!isset($modelInfo['pricing'])){
+                errlog("Debug Cost Calc: Pricing info missing for model ID: {$this->aiModel}. Model Data: " . json_encode($modelInfo));
+            }
+
+            fwrite(STDERR, "\n--- AI TOKEN USAGE & ESTIMATED COST (DEBUG) ---\n");
+            fwrite(STDERR, "Model Used:         " . $this->aiModel . "\n");
+            fwrite(STDERR, "Prompt Tokens:      " . $promptTokens . "\n");
+            fwrite(STDERR, "Completion Tokens:  " . $completionTokens . "\n");
+            fwrite(STDERR, "Total Tokens:       " . $totalTokens . "\n");
+            fwrite(STDERR, "Estimated Cost:     " . $costString . "\n");
+            fwrite(STDERR, "--- END AI TOKEN USAGE & ESTIMATED COST ---\n\n");
+        }
+
+        $ret = $this->parseGenerationContent($returnedData, $responseSchema);
+        if (($ret['success'] ?? false) !== true) {
+            return $ret;
+        }
+
+        return $this->finalizeEventDetails($ret);
+    }
+
+    /**
+     * Builds the OpenRouter chat-completion request and the response schema for one generation attempt.
+     *
+     * @param array<string, mixed> $editContext optional previous output for reply-to-edit flows
+     * @return array{0: array<string, mixed>, 1: array<string, mixed>} [$requestData, $responseSchema]
+     */
+    protected function buildGenerationRequest(string $model, $combinedText, $instructions = null, $screenshotViewport = null, $screenshotZoomed = null, bool $allowMultiDay = false, ?string $sourceUrl = null, array $editContext = []): array
+    {
         // Define the NEW schema for structured event data
         $eventSchema = [
             'type' => 'object',
@@ -2019,7 +2197,7 @@ PROMPT;
         ];
 
         $data = [
-            'model' => $this->aiModel,
+            'model' => $model,
             'messages' => $messages,
             'response_format' => [
                 'type' => 'json_schema',
@@ -2033,166 +2211,21 @@ PROMPT;
                 'effort' => 'high'
             ],
             'max_tokens' => $this->maxTokens,
-						'provider' 
         ];
 
 		if ($this->aiSeed !== null) {
 			$data['seed'] = $this->aiSeed;
 		}
 
-        if ($cliDebug && defined('IS_CLI_RUN') && IS_CLI_RUN) {
-            fwrite(STDERR, "\n--- AI REQUEST DATA (DEBUG) ---\n");
-            fwrite(STDERR, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
-            fwrite(STDERR, "--- END AI REQUEST DATA ---\n\n");
-        }
+        return [$data, $responseSchema];
+    }
 
-        errlog('Sending OpenRouter request to model: ' . $this->aiModel);
-        $api_start_time = microtime(true);
-
-        try {
-            // Make direct POST request to OpenRouter
-            $guzzleResponse = $this->postOpenRouterChatCompletion($data);
-
-            $api_duration = microtime(true) - $api_start_time;
-            $statusCode = $guzzleResponse->getStatusCode();
-            $responseBody = (string) $guzzleResponse->getBody();
-
-            errlog('Received OpenRouter response in ' . number_format($api_duration, 4) . ' seconds');
-            errlog('Response status code: ' . $statusCode);
-            errlog('Response body (first 1000 non-leading-whitespace chars): ' . substr(ltrim($responseBody), 0, 1000));
-
-            // Parse JSON response
-            $response = json_decode($responseBody, true);
-
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                $jsonError = json_last_error_msg();
-                errlog("Failed to parse OpenRouter JSON response: " . $jsonError);
-                errlog("Raw response: " . $responseBody);
-
-                return [
-                    'success' => false,
-                    'errorMessage' => "Invalid JSON from API: " . $jsonError,
-                    'eventData' => null,
-                    'emailSubject' => 'Error: Invalid API Response',
-                    'locationLookup' => null
-                ];
-            }
-
-            // Check for HTTP error status
-            if ($statusCode >= 400) {
-                $errorMsg = "OpenRouter API returned error status {$statusCode}";
-                if (isset($response['error'])) {
-                    $errorMsg .= ": " . ($response['error']['message'] ?? json_encode($response['error']));
-                }
-                errlog($errorMsg);
-                errlog("Full error response: " . json_encode($response, JSON_PRETTY_PRINT));
-
-                // These are retryable errors - try next model
-                return [
-                    'success' => false,
-                    'errorMessage' => $errorMsg,
-                    'eventData' => null,
-                    'emailSubject' => 'Error: API Error',
-                    'locationLookup' => null
-                ];
-            }
-
-            // Check if response has expected structure
-            if (!isset($response['choices']) || !isset($response['choices'][0]) || !isset($response['choices'][0]['message']['content'])) {
-                errlog("OpenRouter response missing expected 'choices' structure.");
-                errlog("Full response: " . json_encode($response, JSON_PRETTY_PRINT));
-
-                // Check for error field in response
-                if (isset($response['error'])) {
-                    $errorMsg = "OpenRouter API error: " . ($response['error']['message'] ?? json_encode($response['error']));
-                    errlog($errorMsg);
-
-                    return [
-                        'success' => false,
-                        'errorMessage' => $errorMsg,
-                        'eventData' => null,
-                        'emailSubject' => 'Error: API Error',
-                        'locationLookup' => null
-                    ];
-                }
-
-                return [
-                    'success' => false,
-                    'errorMessage' => "Malformed API response (missing 'choices' field)",
-                    'eventData' => null,
-                    'emailSubject' => 'Error: Malformed Response',
-                    'locationLookup' => null
-                ];
-            }
-
-        } catch (\Throwable $e) {
-            errlog("Exception during OpenRouter request: " . $e->getMessage());
-            errlog("Error class: " . get_class($e));
-            errlog("Stack trace: " . $e->getTraceAsString());
-
-            // All exceptions during API call are retryable - try next model
-            return [
-                'success' => false,
-                'errorMessage' => "HTTP request failed: " . $e->getMessage(),
-                'eventData' => null,
-                'emailSubject' => 'Error: Request Failed',
-                'locationLookup' => null
-            ];
-        }
-
-        $returnedData = $response['choices'][0]['message']['content'];
-        // $jsonData = trim($returnedData); // Old simple trim
-
-        if ($cliDebug && defined('IS_CLI_RUN') && IS_CLI_RUN) {
-            fwrite(STDERR, "\n--- AI RAW RESPONSE CONTENT (DEBUG) ---\n");
-            fwrite(STDERR, $returnedData . "\n"); // Show raw string before JSON extraction attempts
-            fwrite(STDERR, "--- END AI RAW RESPONSE CONTENT ---\n\n");
-        }
-
-        // Debug: Output token usage and cost if $cliDebug is true
-        if ($cliDebug && defined('IS_CLI_RUN') && IS_CLI_RUN) {
-            $promptTokens = 0;
-            $completionTokens = 0;
-
-            // Access usage data - structure might vary slightly based on exact client library version for OpenRouter
-            // Common structures: $response->usage->promptTokens or $response['usage']['prompt_tokens']
-            if (isset($response['usage'])) { // Array access
-                $promptTokens = $response['usage']['prompt_tokens'] ?? 0;
-                $completionTokens = $response['usage']['completion_tokens'] ?? 0;
-            } elseif (isset($response->usage) && is_object($response->usage)) { // Object access
-                $promptTokens = $response->usage->promptTokens ?? ($response->usage->prompt_tokens ?? 0);
-                $completionTokens = $response->usage->completionTokens ?? ($response->usage->completion_tokens ?? 0);
-            }
-            $totalTokens = $promptTokens + $completionTokens;
-
-            $modelInfo = $this->availableModels[$this->aiModel] ?? null;
-            $costString = "N/A (pricing info unavailable for model: {$this->aiModel})";
-
-            if ($modelInfo && isset($modelInfo['pricing'])) {
-                $pricePromptPer1k = (float)($modelInfo['pricing']['prompt'] ?? 0);
-                $priceCompletionPer1k = (float)($modelInfo['pricing']['completion'] ?? 0);
-                $priceRequest = (float)($modelInfo['pricing']['request'] ?? 0);
-
-                $promptCost = ($promptTokens / 1000) * $pricePromptPer1k;
-                $completionCost = ($completionTokens / 1000) * $priceCompletionPer1k;
-                $totalCalculatedCost = $promptCost + $completionCost + $priceRequest;
-                
-                $costString = '$' . number_format($totalCalculatedCost, 6);
-            } else if (!$modelInfo) {
-                errlog("Debug Cost Calc: Model info not found for ID: {$this->aiModel}");
-            } else if (!isset($modelInfo['pricing'])){
-                errlog("Debug Cost Calc: Pricing info missing for model ID: {$this->aiModel}. Model Data: " . json_encode($modelInfo));
-            }
-
-            fwrite(STDERR, "\n--- AI TOKEN USAGE & ESTIMATED COST (DEBUG) ---\n");
-            fwrite(STDERR, "Model Used:         " . $this->aiModel . "\n");
-            fwrite(STDERR, "Prompt Tokens:      " . $promptTokens . "\n");
-            fwrite(STDERR, "Completion Tokens:  " . $completionTokens . "\n");
-            fwrite(STDERR, "Total Tokens:       " . $totalTokens . "\n");
-            fwrite(STDERR, "Estimated Cost:     " . $costString . "\n");
-            fwrite(STDERR, "--- END AI TOKEN USAGE & ESTIMATED COST ---\n\n");
-        }
-
+    /**
+     * Extracts and validates the JSON object from the model's reply. Never throws: failures return a
+     * ['success' => false, ...] structure so the retry runner can move on.
+     */
+    protected function parseGenerationContent(string $returnedData, array $responseSchema): array
+    {
         // --- Improved JSON Extraction Logic ---
         $jsonData = null;
         $decodedJson = null;
@@ -2251,29 +2284,35 @@ PROMPT;
         $ret = $decodedJson;
 
 
-			// NOTE: Validation logic using Opis/JsonSchema was removed in a previous step.
-            // Consider re-adding if strict schema validation against $ret is needed here.
-            /*
-            $validator = new \Opis\JsonSchema\Validator();
-            $validationResult = $validator->validate($ret, json_encode($responseSchema));
-
-            if (!$validationResult->isValid()) {
-                $validationError = $validationResult->error();
-                $this->handleValidationError($validationError, $ret, $responseSchema);
-                // Decide how to handle validation failure - e.g., throw, return error structure
-                 $errorMsg = "AI response failed schema validation.";
-                 errlog($errorMsg . " Validation Errors: " . json_encode($this->formatValidationErrors($validationError)));
-                 throw new \RuntimeException($errorMsg);
-            }
-            */
-
 			if (isset($ret['success']) && $ret['success'] === false) {
 				$errorMessage = $ret['errorMessage'] ?? 'AI indicated failure with no specific message.';
 				errlog("AI returned success = false: {$errorMessage}\nJSON: {$jsonData}");
 
 				// Don't throw exception - return the failed result so retry logic can continue
-				// The comprehensive retry strategy in generateEventWithRetries will try other models
+				// The retry runner (runGeneration) will try other content tiers, fetch levels and models
 				return $ret;
+			}
+
+			// Strict schema validation of successful responses (opis/json-schema validates object trees, so decode as objects).
+			try {
+				$validator = new \Opis\JsonSchema\Validator();
+				$validationResult = $validator->validate(json_decode($jsonData), json_encode($responseSchema));
+			} catch (\Throwable $validationException) {
+				errlog("Schema validation could not run: " . $validationException->getMessage());
+				$validationResult = null;
+			}
+			if ($validationResult !== null && !$validationResult->isValid()) {
+				$validationError = $validationResult->error();
+				$formatted = $validationError !== null ? (new \Opis\JsonSchema\Errors\ErrorFormatter())->format($validationError, false) : [];
+				$errorMsg = 'AI response failed schema validation: ' . json_encode($formatted ?: $this->formatValidationErrors($validationError), JSON_UNESCAPED_SLASHES);
+				errlog($errorMsg . " JSON: {$jsonData}");
+				return [
+					'success' => false,
+					'errorMessage' => $errorMsg,
+					'eventData' => $ret['eventData'] ?? null,
+					'emailSubject' => $ret['emailSubject'] ?? 'Error: Schema Validation Failed',
+					'locationLookup' => $ret['locationLookup'] ?? null
+				];
 			}
 
 			// Check for valid eventData structure (single event or array of events)
@@ -2314,6 +2353,14 @@ PROMPT;
 				];
 			}
 
+			return $ret;
+	}
+
+    /**
+     * Geocodes the location and renders the ICS for a validated response.
+     */
+    protected function finalizeEventDetails(array $ret): array
+    {
 			if (!empty($ret['locationLookup'])) {
 				try {
 					$geocodingResult = $this->geocoder->geocode($ret['locationLookup']);
@@ -2342,8 +2389,20 @@ PROMPT;
 				}
 			}
 
-			$generator = new IcalGenerator();
-			$icsString = $generator->convertJsonToIcs($ret['eventData'], $this->fromEmail);
+			try {
+				$generator = new IcalGenerator();
+				$icsString = $generator->convertJsonToIcs($ret['eventData'], $this->fromEmail);
+			} catch (\Throwable $icsError) {
+				$errorMsg = 'ICS generation failed: ' . $icsError->getMessage();
+				errlog($errorMsg);
+				return [
+					'success' => false,
+					'errorMessage' => $errorMsg,
+					'eventData' => $ret['eventData'] ?? null,
+					'emailSubject' => $ret['emailSubject'] ?? 'Error: ICS Generation Failed',
+					'locationLookup' => $ret['locationLookup'] ?? null
+				];
+			}
 			$this->logFinalIcs('ai result', $icsString);
 
 			$ret['ICS'] = $icsString;

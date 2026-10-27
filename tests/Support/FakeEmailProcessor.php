@@ -11,20 +11,47 @@ final class FakeEmailProcessor extends EmailProcessor
 
     private ?string $fakeAiJson = null;
 
+    /** @var list<string|Response> queued responses, consumed one per AI request */
+    private array $aiResponseQueue = [];
+
     public function setFakeAiJson(string $json): void
     {
         $this->fakeAiJson = $json;
+    }
+
+    /**
+     * Queue raw JSON strings (model content) or full Guzzle Responses, consumed in order.
+     * When the queue is empty the fixed fake JSON (default: Presidio) is returned.
+     *
+     * @param list<string|Response> $responses
+     */
+    public function setFakeAiResponses(array $responses): void
+    {
+        $this->aiResponseQueue = array_values($responses);
     }
 
     protected function postOpenRouterChatCompletion(array $data): Response
     {
         $this->aiRequests[] = $data;
 
+        if ($this->aiResponseQueue !== []) {
+            $next = array_shift($this->aiResponseQueue);
+            if ($next instanceof Response) {
+                return $next;
+            }
+            return $this->contentResponse((string)$next);
+        }
+
+        return $this->contentResponse($this->fakeAiJson ?? json_encode(PresidioExpected::aiJson(), JSON_UNESCAPED_SLASHES));
+    }
+
+    private function contentResponse(string $content): Response
+    {
         $body = json_encode([
             'choices' => [
                 [
                     'message' => [
-                        'content' => $this->fakeAiJson ?? json_encode(PresidioExpected::aiJson(), JSON_UNESCAPED_SLASHES),
+                        'content' => $content,
                     ],
                 ],
             ],

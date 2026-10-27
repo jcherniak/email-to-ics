@@ -50,9 +50,7 @@ final class ReadabilityExtractorTest extends TestCase
         $this->assertSame(7.5, $calls[0]['timeout']);
     }
 
-    /**
-     * @dataProvider fallbackCases
-     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('fallbackCases')]
     public function testFallbackReasons(array $runResult, string $expectedReason): void
     {
         $extractor = new ReadabilityExtractor('/usr/bin/env', __FILE__, 20.0, 200, $this->fakeRunner($runResult));

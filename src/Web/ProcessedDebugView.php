@@ -83,6 +83,7 @@ HTML);
         $safeParsedTitle = $this->e($parsedTitle);
         $safeParsedDates = $this->e($parsedDates);
         $urlLink = $this->link($url);
+        $attemptsHtml = $this->renderAttempts($record->latestAttempt);
 
         return $this->page('Processed Debug Detail', <<<HTML
 <div class="d-flex align-items-center justify-content-between mb-3">
@@ -104,6 +105,7 @@ HTML);
   <dt class="col-sm-2">Parsed Title</dt><dd class="col-sm-10">{$safeParsedTitle}</dd>
   <dt class="col-sm-2">Parsed Dates</dt><dd class="col-sm-10">{$safeParsedDates}</dd>
 </dl>
+{$attemptsHtml}
 <div class="debug-grid">
   <section>
     <h2>Processed JSON</h2>
@@ -129,6 +131,56 @@ HTML);
   });
 </script>
 HTML);
+    }
+
+    /**
+     * @param array<string, mixed> $attempt
+     */
+    private function renderAttempts(array $attempt): string
+    {
+        $attempts = $attempt['generationAttempts'] ?? null;
+        if (!is_array($attempts) || $attempts === []) {
+            return '';
+        }
+
+        $rows = '';
+        foreach ($attempts as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $status = !empty($entry['success']) ? '<span class="text-success">OK</span>' : '<span class="text-danger">failed</span>';
+            $seconds = number_format(((int)($entry['durationMs'] ?? 0)) / 1000, 1);
+            $rows .= '<tr>'
+                . '<td>' . $this->e((string)($entry['index'] ?? '')) . '</td>'
+                . '<td>' . $this->e((string)($entry['model'] ?? '')) . '</td>'
+                . '<td>' . $this->e((string)($entry['level'] ?? '') . '/' . (string)($entry['variant'] ?? '')) . '</td>'
+                . '<td>' . $status . '</td>'
+                . '<td>' . $this->e($seconds) . 's</td>'
+                . '<td class="text-break">' . $this->e((string)($entry['error'] ?? '')) . '</td>'
+                . '</tr>';
+        }
+
+        $stop = $this->e((string)($attempt['stopReason'] ?? ''));
+        $used = $this->e((string)($attempt['contentUsed'] ?? ''));
+        $levels = '';
+        foreach (($attempt['fetchLevels'] ?? []) as $level => $summary) {
+            if (!is_array($summary)) {
+                continue;
+            }
+            $levels .= '<li>' . $this->e((string)$level) . ': ' . $this->e((string)($summary['status'] ?? ''))
+                . (isset($summary['error']) ? ' - ' . $this->e((string)$summary['error']) : '') . '</li>';
+        }
+
+        return <<<HTML
+<section class="mb-3">
+  <h2 class="h6">Generation attempts <span class="small text-muted">(stop: {$stop}, content used: {$used})</span></h2>
+  <table class="table table-sm small">
+    <thead><tr><th>#</th><th>Model</th><th>Content</th><th>Result</th><th>Time</th><th>Error</th></tr></thead>
+    <tbody>{$rows}</tbody>
+  </table>
+  <ul class="small">{$levels}</ul>
+</section>
+HTML;
     }
 
     private function renderSourceTabs(ProcessedRecord $record, string $url): string
