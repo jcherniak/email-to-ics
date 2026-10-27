@@ -30,8 +30,9 @@ final class WebFormInputSource implements InputSourceInterface
             screenshotZoomed: $zoomed !== null ? (string)$zoomed : null,
             requestedModel: isset($this->request['model']) ? (string)$this->request['model'] : null,
             needsReview: ($this->request['review'] ?? '0') === '1',
-            fromExtension: ($this->request['fromExtension'] ?? 'false') === 'true',
-            allowMultiDay: ($this->request['multiday'] ?? '0') === '1',
+            fromExtension: in_array((string)($this->request['fromExtension'] ?? 'false'), ['true', '1'], true),
+            allowMultiDay: ($this->request['multiday'] ?? '0') === '1'
+                || EmailInputSource::containsMultipleToken(isset($this->request['instructions']) ? (string)$this->request['instructions'] : null),
             metadata: ['source' => 'webform'],
         );
     }

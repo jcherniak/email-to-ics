@@ -7,6 +7,7 @@ namespace Jcherniak\EmailToIcs\Web;
 use EmailProcessor;
 use ErrorHandler;
 use Jcherniak\EmailToIcs\Processed\ProcessedRecordStore;
+use Jcherniak\EmailToIcs\Web\CandidateController;
 use Throwable;
 use function errlog;
 use function is_cli;
@@ -35,6 +36,17 @@ class WebPage
         if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
             header("HTTP/1.1 204 No Content");
             exit;
+        }
+
+        // Key-authenticated candidate links (from emails) and the review confirmation endpoint.
+        // The 32-hex key is the credential; these run before Basic Auth on purpose.
+        if (isset($_GET['candidates'])) {
+            $this->candidateController()->handle($_SERVER['REQUEST_METHOD'], $_GET, $_POST);
+            return;
+        }
+        if (($_GET['confirm'] ?? '') === 'true' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+            $this->candidateController()->handleConfirm($_POST);
+            return;
         }
 
         // Check if this is a Postmark webhook (bypasses auth)
@@ -107,6 +119,11 @@ class WebPage
             default:
                 echo 'Unsupported request method.';
         }
+    }
+
+    private function candidateController(): CandidateController
+    {
+        return CandidateController::fromEnvironment($this->projectRoot(), static fn(): EmailProcessor => new EmailProcessor());
     }
 
     private function checkSessionAuth()

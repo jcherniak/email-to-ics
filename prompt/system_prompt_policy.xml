@@ -1,4 +1,4 @@
-<prompt-policy id="email-to-ics-event-selection" version="1">
+<prompt-policy id="email-to-ics-event-selection" version="2">
   <event-selection>
     <primary-event-rule>
       In default single-event behavior, identify the main event and ignore unrelated secondary events, related events, sidebars, recommendations, and events mentioned only in passing.
@@ -23,6 +23,22 @@
     <specific-date-instruction-exception>
       If the email, page, or user instructions explicitly say to focus on a specific date, performance, session, or showtime, return only that requested date/performance.
     </specific-date-instruction-exception>
+
+    <candidate-rule>
+      Output is always a list of candidate events. In default behavior return exactly one candidate: the primary event. Return several candidates only when the equal-performance rule applies, when the user explicitly asked for multiple events, or when the content genuinely describes distinct events with no identifiable primary one; in that case put the most likely intended event first.
+    </candidate-rule>
+
+    <ambiguity-rule>
+      When several candidates are returned, each must be a complete, independent calendar event with its own date, time, location, and description. Never return the same performance twice and never pad the list with secondary or related events that the primary-event rule says to ignore.
+    </ambiguity-rule>
+
+    <candidate-rule>
+      Output is always a list of candidate events. In default behavior return exactly one candidate: the primary event. Return several candidates only when the equal-performance rule applies, when the user explicitly asked for multiple events, or when the content genuinely describes distinct events with no identifiable primary one; in that case put the most likely intended event first.
+    </candidate-rule>
+
+    <ambiguity-rule>
+      When several candidates are returned, each must be a complete, independent calendar event with its own date, time, location, and description. Never return the same performance twice and never pad the list with secondary or related events that the primary-event rule says to ignore.
+    </ambiguity-rule>
 
     <email-delivery-rule>
       When multiple equal performances are extracted, the application must send a separate email with a single calendar event for each extracted performance unless explicit instructions say otherwise.

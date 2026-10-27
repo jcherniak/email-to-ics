@@ -6,5 +6,6 @@ confirm_cache
 worktrees
 uploads
 processed
+candidates
 *.local.md
 .phpunit.result.cache

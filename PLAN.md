@@ -14,8 +14,8 @@ Branch `multi-event-and-retry` (items 1-5), then branch `model-driven-fetch` (it
 | --- | --- | --- |
 | C1 Fetch chain direct -> firecrawl -> tinyfish_fetch -> tinyfish_browser; remove Oxylabs/Scrapefly/Puphpeteer | a7ac750 | done |
 | C2 Readability (node + jsdom) snippet with lightened full-HTML fallback; delete PHP 8.4-only `extractMainContent` | 39c3ad6 | done |
-| C3 Shared retry runner: per model, snippet then full on first level, full on later levels, then next model; opis validation back on | this commit | done |
-| C4a Multi-event candidates: always-array schema, `CandidateStore` keyed state, choice email with confirm-page links, routes before auth | | todo |
+| C3 Shared retry runner: per model, snippet then full on first level, full on later levels, then next model; opis validation back on | 727d50c | done |
+| C4a Multi-event candidates: always-array schema, `CandidateStore` keyed state, choice email with confirm-page links, routes before auth | this commit | done |
 | C4b Chrome extension: candidate checkbox picker in the local JS processor, Reply-To + source-url marker | | todo |
 | C5 Reply-to-edit: unique Reply-To `edit-<key>@INBOUND_REPLY_DOMAIN`, stored state path with previous ICS, URL fallback from quoted email | | todo |
 | C6 Model-driven fetch via tool loop (`fetch_direct`, `fetch_with_firecrawl`, `fetch_with_tinyfish`, `render_with_tinyfish_browser`) on `model-driven-fetch` | | todo |
@@ -27,6 +27,18 @@ Decisions for this work (confirmed with the owner):
 - Item 6 level 1 is a PHP `fetch_direct` function tool (not `openrouter:web_fetch`) so PHP always sees page content for emails and edits.
 - Retry failure = transport error, unparseable JSON, schema-invalid JSON, zero events or missing dtstart, or model `success:false`.
 - Extension keeps local processing; candidates are ported into `email-processor.js`.
+
+C4a notes:
+- Schema: `eventData` is always an array (1..10). Prompt gains a CANDIDATE POLICY (one event by default; several only for equal performances, explicit multi requests, or genuinely ambiguous pages, most likely first). `prompt/system_prompt_policy.xml` v2 adds `<candidate-rule>` and `<ambiguity-rule>`; the extension copy is identical.
+- `src/Candidates/`: `Candidate`, `CandidateSet` (candidates + ICS, source, precomputed email body, recipient, Postmark attachments, In-Reply-To, lineage fields for edits), `CandidateStore` (`candidates/<key>.json.gz`, 30-day TTL, size cap, startup cleanup), `CandidateLinks`, `CandidateEmailBuilder`, `DeliveryPlanner`.
+- Delivery: one candidate -> sent directly; several + explicit `<multiple>`/`MULTI`/form checkbox -> one email per event; several otherwise -> one "choose" email (create all / use only this one per candidate / choose events). Auto-detected equal performances only widen the prompt, so a Presidio-style page now yields a choice email unless the sender asked for multiple. Email delivery never attaches a combined ICS.
+- Every link opens a confirm page served by `src/Web/CandidateController` (`?candidates=<key>&action=all|one&idx=N|pick`, `POST action=send idx[]`), routed in `WebPage` before Basic Auth; `CANDIDATE_LINKS_REQUIRE_CONFIRM=0` sends on GET instead. `POST ?confirm=true` (extension/web review) moved there too, fixing the old unreachable confirm block; review responses now include `candidateKey` and `candidates[]`, and `confirmationToken` is the candidate key.
+- `EmailProcessor::sendCandidateEvents(set, indexes)` sends one email per selected candidate (sorted by index) and records `sentIndexes`; `sendCandidateChoiceEmail(set)` sends the choice email. Postmark attachments are forwarded as-is on candidate sends (the uploads/ rename step only runs on the direct path).
+- `src/Mail/CalendarEmailBody` now owns the body layout and adds a visible `[source-url: ...]` marker line after the Source URL line (used by reply-to-edit when server state is gone). `src/Calendar/EventSubject` owns the date suffix.
+- `<multiple>` is detected on raw/entity-decoded bodies and instructions (`EmailInputSource::containsMultipleToken`); the web form accepts `fromExtension=1`.
+- New env: `PUBLIC_BASE_URL`, `CANDIDATES_DIR`, `CANDIDATE_TTL_DAYS`, `MAX_CANDIDATES_DIR_SIZE`, `CANDIDATE_LINKS_REQUIRE_CONFIRM`. Tests use a temp `CANDIDATES_DIR` (bootstrap).
+- Artifacts: `tests/artifacts/outputs/presidio-candidate-email.expected.{html,subject.txt}` via `tests/generate-artifacts.php`.
+- Verified: `php -l`, `vendor/bin/phpunit` (108 tests, 3 expected skips), smoke runs of `processUrl` for choice email, send-all and review.
 
 C3 notes:
 - `src/Generation/`: `ContentVariant`, `ContentVariantProvider`, `UrlLevelContentProvider` (lazy per-level fetch + Readability, cached across models), `StaticContentProvider` (provided HTML/email content), `ModelOrder`, `EventResponseValidator`, `GenerationAttempt`, `GenerationOutcome`, `GenerationRetryRunner`.

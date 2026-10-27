@@ -42,4 +42,8 @@ foreach (PresidioExpected::eventData() as $index => $eventData) {
 
 $writeJson($outputDir . '/presidio-email-summary.expected.json', $emailSummaries);
 
+$choiceEmail = \Jcherniak\EmailToIcs\Candidates\CandidateEmailBuilder::build(CandidateFixtures::presidioSet(), CandidateFixtures::BASE_URL);
+file_put_contents($outputDir . '/presidio-candidate-email.expected.html', $choiceEmail['htmlBody'] . "\n");
+file_put_contents($outputDir . '/presidio-candidate-email.expected.subject.txt', $choiceEmail['subject'] . "\n");
+
 echo "Generated output artifacts in {$outputDir}\n";

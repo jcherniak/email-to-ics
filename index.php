@@ -57,7 +57,14 @@ use Spatie\PdfToText\Pdf;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizerConfig;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
 use Opis\JsonSchema\Errors\ValidationError;
+use Jcherniak\EmailToIcs\Calendar\EventSubject;
 use Jcherniak\EmailToIcs\Calendar\IcalGenerator;
+use Jcherniak\EmailToIcs\Candidates\Candidate;
+use Jcherniak\EmailToIcs\Candidates\CandidateEmailBuilder;
+use Jcherniak\EmailToIcs\Candidates\CandidateLinks;
+use Jcherniak\EmailToIcs\Candidates\CandidateSet;
+use Jcherniak\EmailToIcs\Candidates\CandidateStore;
+use Jcherniak\EmailToIcs\Candidates\DeliveryPlanner;
 use Jcherniak\EmailToIcs\Config\Environment;
 use Jcherniak\EmailToIcs\Content\HtmlTitle;
 use Jcherniak\EmailToIcs\Content\ReadabilityExtractor;
@@ -77,6 +84,7 @@ use Jcherniak\EmailToIcs\Input\CliInputSource;
 use Jcherniak\EmailToIcs\Input\EmailInputSource;
 use Jcherniak\EmailToIcs\Input\RawEmailTextInputSource;
 use Jcherniak\EmailToIcs\Input\WebFormInputSource;
+use Jcherniak\EmailToIcs\Mail\CalendarEmailBody;
 use Jcherniak\EmailToIcs\Mail\EmailAttachment;
 use Jcherniak\EmailToIcs\Mail\EmailMessage;
 use Jcherniak\EmailToIcs\Mail\MailerInterface;
@@ -99,6 +107,11 @@ Environment::load(__DIR__);
 error_log('Dotenv loaded'); // Add log to confirm loading
 
 (new ProcessedRecordStore(__DIR__ . '/processed'))->enforceMaxSize($_ENV['MAX_PROCESSED_DIR_SIZE'] ?? '100M');
+try {
+	CandidateStore::fromEnvironment(__DIR__)->cleanup();
+} catch (Throwable $candidateCleanupError) {
+	errlog('Candidate store cleanup failed: ' . $candidateCleanupError->getMessage());
+}
 
 // Define cache settings
 define('MODEL_CACHE_FILE', sys_get_temp_dir() . '/.models_cache.json');
@@ -342,6 +355,7 @@ class EmailProcessor
 	private GeocoderInterface $geocoder;
 	private ReadabilityExtractor $contentExtractor;
 	private ?string $currentProcessingKey = null;
+	private CandidateStore $candidateStore;
 
 	private $aiModel;
 	private $openRouterKey;
@@ -398,20 +412,7 @@ class EmailProcessor
 
 	private function eventSubjectWithDate(string $subject, array $eventData, int $eventCount): string
 	{
-		if ($eventCount <= 1 || empty($eventData['dtstart'])) {
-			return $subject;
-		}
-
-		try {
-			$timezone = new \DateTimeZone($eventData['timezone'] ?? 'America/Los_Angeles');
-			$date = new \DateTimeImmutable($eventData['dtstart'], $timezone);
-			$dateText = !empty($eventData['isAllDay'])
-				? $date->format('M j, Y')
-				: $date->format('M j, Y g:i A');
-			return str_contains($subject, $dateText) ? $subject : "{$subject} - {$dateText}";
-		} catch (\Throwable $e) {
-			return $subject;
-		}
+		return EventSubject::withDate($subject, $eventData, $eventCount);
 	}
 
 	public function sendCalendarEmailsForEventData($eventData, string $recipientEmail, string $subject, string $htmlBody): int
@@ -454,31 +455,9 @@ class EmailProcessor
 		return $url !== '' ? $url : $fallbackUrl;
 	}
 
-	private function sourceUrlLine(?string $sourceUrl): string
-	{
-		$sourceUrl = trim((string)$sourceUrl);
-		if ($sourceUrl === '') {
-			return '<p>Source URL: (none)</p>';
-		}
-
-		$escapedUrl = htmlspecialchars($sourceUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-		return '<p>Source URL: <a href="' . $escapedUrl . '">' . $escapedUrl . '</a></p>';
-	}
-
 	private function buildCalendarEmailBody(?string $sourceUrl, string $sourceLabel, string $sourceDataHtml, ?string $downloadedText = null): string
 	{
-		$sourceLabel = htmlspecialchars($sourceLabel, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-		$sourceDataHtml = str_replace("\xEF\xBB\xBF", '', $sourceDataHtml);
-		$htmlBody = $this->sourceUrlLine($sourceUrl)
-			. "\n\n<p>-----Source data ({$sourceLabel})-----</p>\n"
-			. "<div>{$sourceDataHtml}</div>";
-
-		if (!empty($downloadedText)) {
-			$downloadedText = $this->html_sanitize($downloadedText);
-			$htmlBody .= "\n\n<p>-----Source page (cleaned)-----</p>\n<div>\n\t{$downloadedText}\n</div>";
-		}
-
-		return $htmlBody;
+		return CalendarEmailBody::build($sourceUrl, $sourceLabel, $sourceDataHtml, $downloadedText);
 	}
 
 	private function buildFormSourceDataHtml(?string $url, ?string $instructions): string
@@ -551,7 +530,7 @@ class EmailProcessor
 		)));
 	}
 
-    public function __construct(?MailerInterface $mailer = null, ?UrlFetcherInterface $urlFetcher = null, ?GeocoderInterface $geocoder = null, ?ReadabilityExtractor $contentExtractor = null)
+    public function __construct(?MailerInterface $mailer = null, ?UrlFetcherInterface $urlFetcher = null, ?GeocoderInterface $geocoder = null, ?ReadabilityExtractor $contentExtractor = null, ?CandidateStore $candidateStore = null)
     {
         $this->openRouterKey = $_ENV['OPENROUTER_KEY'];
         $this->postmarkApiKey = $_ENV['POSTMARK_API_KEY'];
@@ -589,6 +568,7 @@ class EmailProcessor
 		$this->urlFetcher = $urlFetcher ?? ChainUrlFetcher::fromEnvironment();
 		$this->geocoder = $geocoder ?? ChainGeocoder::fromEnvironment();
 		$this->contentExtractor = $contentExtractor ?? ReadabilityExtractor::fromEnvironment();
+		$this->candidateStore = $candidateStore ?? CandidateStore::fromEnvironment(__DIR__);
 	}
 
 
@@ -793,6 +773,9 @@ class EmailProcessor
 			errlog("Screenshot provided: " . substr($screenshotBase64, 0, 50) . "... (" . strlen($screenshotBase64) . " bytes)");
 		}
 
+		// Explicit request for every event (form checkbox, CLI flag, or <multiple> in instructions) sends all events
+		// directly; an auto-detected equal-performance page only widens the prompt and yields a choice email.
+		$sendAllRequested = (bool)$allowMultiDay || EmailInputSource::containsMultipleToken($instructions);
 		if (!$allowMultiDay && $this->shouldExtractEqualPerformances((string)$provider->fullText(), $instructions)) {
 			$allowMultiDay = true;
 			errlog("Multi-day mode enabled automatically for equal performance schedule");
@@ -868,10 +851,30 @@ class EmailProcessor
 		// If not outputting JSON directly, proceed with standard logic
 		// Generate ICS only if not outputting JSON and if eventData is present and AI was successful
 		$ics = null;
+		$candidateSet = null;
+		$recipientEmail = $tentative ? $this->toTentativeEmail : $this->toConfirmedEmail;
+		$sourceLabel = (defined('IS_CLI_RUN') && IS_CLI_RUN) ? 'cli input' : 'form input';
+		if ($fromExtension) {
+			$sourceLabel = 'form input';
+		}
+		$origin = $fromExtension ? 'extension' : ((defined('IS_CLI_RUN') && IS_CLI_RUN) ? 'cli' : 'web');
 		if (($eventDetails['success'] ?? false) && !empty($eventDetails['eventData'])) {
 			$generator = new IcalGenerator();
 			$ics = $generator->convertJsonToIcs($eventDetails['eventData'], $this->fromEmail);
 			$this->logFinalIcs('web/generated event', $ics);
+			$candidateSet = $this->buildCandidateSet(
+				$eventDetails,
+				$outcome,
+				$origin,
+				!empty(trim((string)$url)) ? $url : null,
+				$sourceLabel,
+				$this->buildFormSourceDataHtml($url, $instructions),
+				$downloadedText,
+				$instructions,
+				$allowMultiDay,
+				$tentative,
+				$recipientEmail
+			);
 		} elseif (($eventDetails['success'] ?? false) === false) {
 			errlog("Skipping ICS generation because AI processing failed: " . ($eventDetails['errorMessage'] ?? 'Unknown AI error'));
 		} else { // Success was true, but eventData was empty/missing
@@ -879,43 +882,31 @@ class EmailProcessor
 		}
 
 		$subject = $eventDetails['emailSubject'] ?? 'Calendar Event'; // Use a default subject
+		$plan = $candidateSet !== null ? DeliveryPlanner::plan($candidateSet->count(), $sendAllRequested) : DeliveryPlanner::SINGLE;
 
 		// Check if review is needed AND the request came from the extension
 		if ($needsReview && $fromExtension) {
-			// Determine recipient email based on tentative flag for review screen
-			$recipientEmail = $tentative ? $this->toTentativeEmail : $this->toConfirmedEmail;
-
-			// --- Generate and store confirmation token ---
-			$confirmationToken = bin2hex(random_bytes(16)); // Generate a unique token
-			$cacheDir = sys_get_temp_dir() . '/confirm_cache';
-			if (!is_dir($cacheDir)) {
-				mkdir($cacheDir, 0770, true); // Create cache dir if it doesn't exist (adjust permissions if needed)
+			if ($candidateSet === null) {
+				$errorMessage = $eventDetails['errorMessage'] ?? 'No event could be generated.';
+				if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+					echo json_encode(['success' => false, 'error' => $errorMessage], JSON_PRETTY_PRINT) . "\n";
+				} else {
+					http_response_code(500);
+					echo json_encode(['success' => false, 'error' => $errorMessage]);
+				}
+				exit;
 			}
-			$cacheFile = $cacheDir . '/' . $confirmationToken . '.json';
-			$dataToStore = [
-				'ics' => $ics,
-				'recipient' => $recipientEmail,
-				'subject' => $subject,
-				'timestamp' => time()
-			];
 
-			if (file_put_contents($cacheFile, json_encode($dataToStore)) === false) {
-				 errlog("Error writing confirmation token cache file: {$cacheFile}");
-                 if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
-                    echo "Error: Failed to store confirmation data.\n";
-                 } else {
-				    http_response_code(500);
-				    echo json_encode(['error' => 'Failed to store confirmation data.']);
-                 }
-				 exit; // Or exit(1) for CLI
-			}
-			// --- End Token Handling ---
+			// The candidate set is the review state; its key doubles as the confirmation token.
+			$this->candidateStore->save($candidateSet);
             $reviewOutput = [
 				'needsReview' => true,
 				'icsContent' => $ics,
 				'emailSubject' => $subject,
 				'recipientEmail' => $recipientEmail, // Send intended recipient to extension
-				'confirmationToken' => $confirmationToken // Include the token
+				'confirmationToken' => $candidateSet->key, // Include the token
+				'candidateKey' => $candidateSet->key,
+				'candidates' => $candidateSet->clientCandidates(),
 			];
 
             if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
@@ -979,19 +970,54 @@ class EmailProcessor
             exit;
 		}
 
-		$recipientEmail = $tentative ? $this->toTentativeEmail : $this->toConfirmedEmail;
-		$sourceLabel = (defined('IS_CLI_RUN') && IS_CLI_RUN) ? 'cli input' : 'form input';
-		if ($fromExtension) {
-			$sourceLabel = 'form input';
-		}
-		$htmlBody = $this->buildCalendarEmailBody(
-			$this->eventSourceUrl($eventDetails, $url),
-			$sourceLabel,
-			$this->buildFormSourceDataHtml($url, $instructions),
-			$downloadedText
-		);
+		$htmlBody = $candidateSet->htmlBody;
 
-		$emailsSent = $this->sendCalendarEmailsForEventData($eventDetails['eventData'] ?? null, $recipientEmail, $subject, $htmlBody);
+		if ($plan === DeliveryPlanner::CANDIDATES) {
+			// Several candidates and no explicit "send all": store them and send one email with choice links.
+			$this->candidateStore->save($candidateSet);
+			$this->sendCandidateChoiceEmail($candidateSet);
+			$candidateCount = $candidateSet->count();
+			$message = "{$candidateCount} possible events found; a choice email was sent to {$recipientEmail}";
+			errlog($message);
+			if ($fromExtension) {
+				$choiceOutput = [
+					'status' => 'candidates',
+					'message' => $message,
+					'recipientEmail' => $recipientEmail,
+					'emailSubject' => $subject,
+					'candidateKey' => $candidateSet->key,
+					'candidates' => $candidateSet->clientCandidates(),
+					'icsContent' => $ics,
+				];
+				if (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+					echo json_encode($choiceOutput, JSON_PRETTY_PRINT) . "\n";
+				} else {
+					header('Content-Type: application/json');
+					echo json_encode($choiceOutput);
+				}
+			} elseif (defined('IS_CLI_RUN') && IS_CLI_RUN) {
+				echo $message . "\n";
+				foreach ($candidateSet->candidates as $candidate) {
+					echo "  [{$candidate->index}] {$candidate->summary()} - {$candidate->when()}\n";
+				}
+			} else {
+				http_response_code(200);
+				$baseUrl = CandidateLinks::baseUrl();
+				echo '<h1>' . htmlspecialchars($message, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</h1>';
+				echo '<p><a href="' . htmlspecialchars(CandidateLinks::url($baseUrl, $candidateSet->key, CandidateLinks::ACTION_ALL), ENT_QUOTES) . '">Create all events</a> | ';
+				echo '<a href="' . htmlspecialchars(CandidateLinks::url($baseUrl, $candidateSet->key, CandidateLinks::ACTION_PICK), ENT_QUOTES) . '">Choose events</a></p><ol>';
+				foreach ($candidateSet->candidates as $candidate) {
+					echo '<li>' . htmlspecialchars($candidate->summary() . ' - ' . $candidate->when(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+						. ' <a href="' . htmlspecialchars(CandidateLinks::url($baseUrl, $candidateSet->key, CandidateLinks::ACTION_ONE, $candidate->index), ENT_QUOTES) . '">Use only this one</a></li>';
+				}
+				echo '</ol>';
+			}
+			exit;
+		}
+
+		// One candidate, or an explicit request for every event: one email per event, never a combined ICS.
+		$this->candidateStore->save($candidateSet);
+		$emailsSent = $this->sendCandidateEvents($candidateSet, $candidateSet->allIndexes());
 
 		// --- Respond based on origin ---
 		if ($fromExtension) {
@@ -1217,6 +1243,7 @@ class EmailProcessor
 			'winningAttempt' => $metadata['winningAttempt'] ?? null,
 			'contentUsed' => $metadata['contentUsed'] ?? null,
 			'stopReason' => $metadata['stopReason'] ?? null,
+			'candidateKey' => $metadata['candidateKey'] ?? null,
 		], static fn($value) => $value !== null));
 
 		// Write updated content
@@ -1436,19 +1463,30 @@ class EmailProcessor
         // If not outputting JSON directly, proceed with standard logic
         // Generate ICS only if not outputting JSON and if eventData is present and AI was successful
         $calendarEvent = null;
-        $calendarEventItems = [];
+        $candidateSet = null;
+        $recipientEmail = $this->toTentativeEmail;
+        if (strcasecmp($body['ToFull'][0]['Email'] ?? '', $this->inboundConfirmedEmail) === 0) {
+            $recipientEmail = $this->toConfirmedEmail;
+        }
         if (($eventDetails['success'] ?? false) && !empty($eventDetails['eventData'])) {
             $generator = new IcalGenerator();
             $calendarEvent = $generator->convertJsonToIcs($eventDetails['eventData'], $this->fromEmail);
             $this->logFinalIcs('postmark/generated event', $calendarEvent);
-            foreach ($this->eventDataItems($eventDetails['eventData']) as $singleEventData) {
-                $singleIcs = $generator->convertJsonToIcs($singleEventData, $this->fromEmail);
-                $this->logFinalIcs('postmark/generated single event', $singleIcs);
-                $calendarEventItems[] = [
-                    'eventData' => $singleEventData,
-                    'ics' => $singleIcs,
-                ];
-            }
+            $candidateSet = $this->buildCandidateSet(
+                $eventDetails,
+                $outcome,
+                'postmark',
+                $extractedUrl ?: null,
+                'email input',
+                $this->buildPostmarkSourceDataHtml($body),
+                $downloadedUrlContent,
+                $extractedInstructions,
+                $allowMultiDay,
+                $recipientEmail === $this->toTentativeEmail,
+                $recipientEmail,
+                $body,
+                $pdfText
+            );
         } elseif (($eventDetails['success'] ?? false) === false) {
             errlog("Skipping ICS generation for Postmark email because AI processing failed: " . ($eventDetails['errorMessage'] ?? 'Unknown AI error'));
         } else { // Success was true, but eventData was empty/missing
@@ -1456,31 +1494,32 @@ class EmailProcessor
         }
 
         // Only send email if we successfully generated a calendar event
-        if ($calendarEvent) {
+        if ($calendarEvent && $candidateSet !== null) {
             // If in CLI mode and --display flag set, output ICS to stdout
             if ($outputIcsOnly && defined('IS_CLI_RUN') && IS_CLI_RUN) {
                 echo $calendarEvent;
                 exit(0);
             }
 
-            $subject = $eventDetails['emailSubject'] ?? 'Calendar Event'; // Use a default subject
-            $recipientEmail = $this->toTentativeEmail;
+            $sendAllRequested = $hasMultiFlag || (!empty($extractedInstructions) && stripos($extractedInstructions, 'MULTI') !== false);
+            $plan = DeliveryPlanner::plan($candidateSet->count(), $sendAllRequested);
+            $this->candidateStore->save($candidateSet);
 
-            if (strcasecmp($body['ToFull'][0]['Email'], $this->inboundConfirmedEmail) === 0) {
-                $recipientEmail = $this->toConfirmedEmail;
-            }
-
-            if (count($calendarEventItems) > 1) {
-                foreach ($calendarEventItems as $calendarEventItem) {
-                    $singleSubject = $this->eventSubjectWithDate($subject, $calendarEventItem['eventData'], count($calendarEventItems));
-                    $singleEventDetails = $eventDetails;
-                    $singleEventDetails['eventData'] = $calendarEventItem['eventData'];
-                    $singleEventDetails['emailSubject'] = $singleSubject;
-                    $this->sendEmailWithAttachment($recipientEmail, $calendarEventItem['ics'], $singleSubject, $body, $singleEventDetails, $pdfText, $downloadedUrlContent);
+            if ($plan === DeliveryPlanner::CANDIDATES) {
+                $this->sendCandidateChoiceEmail($candidateSet);
+                errlog("{$candidateSet->count()} candidate events found; choice email sent to {$recipientEmail} (key {$candidateSet->key})");
+                if ($messageId) {
+                    $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'candidates_pending', $calendarEvent, null, null, $downloadedUrlContent, $this->fetchedScreenshot, $pdfText, $htmlBodyForAI, $this->buildProcessingMetadata($extractedUrl, $downloadedPageTitle, $eventDetails, $outcome) + ['candidateKey' => $candidateSet->key]);
                 }
-            } else {
-                $this->sendEmailWithAttachment($recipientEmail, $calendarEvent, $subject, $body, $eventDetails, $pdfText, $downloadedUrlContent);
+                echo json_encode([
+                    'status' => 'success',
+                    'message' => $candidateSet->count() . ' candidate events found; choice email sent',
+                    'candidateKey' => $candidateSet->key,
+                ]);
+                return;
             }
+
+            $emailsSent = $this->sendCandidateEvents($candidateSet, $candidateSet->allIndexes());
 
             // Record successful processing
             if ($messageId) {
@@ -1489,9 +1528,10 @@ class EmailProcessor
 
             echo json_encode([
                 'status' => 'success',
-                'message' => count($calendarEventItems) > 1
-                    ? count($calendarEventItems) . ' calendar emails processed successfully'
-                    : 'Email processed successfully'
+                'message' => $emailsSent > 1
+                    ? $emailsSent . ' calendar emails processed successfully'
+                    : 'Email processed successfully',
+                'candidateKey' => $candidateSet->key,
             ]);
         } else {
             // Send error email since ICS generation failed
@@ -1928,13 +1968,14 @@ class EmailProcessor
             'additionalProperties' => false
         ];
 
-        // For multi-day mode, eventData is ALWAYS an array (no oneOf - not supported by providers)
-        $eventDataSchema = $allowMultiDay ? [
-            'type' => 'array',  // Array of event objects
+        // eventData is ALWAYS an array of candidate events (one element in the default case).
+        // No oneOf: not supported by providers; maxItems kept small because Google rejects schemas with many array states.
+        $eventDataSchema = [
+            'type' => 'array',
             'items' => $eventSchema,
             'minItems' => 1,
-            'maxItems' => 10  // Reduced from 50 - Google rejects schemas with too many array states
-        ] : $eventSchema;
+            'maxItems' => 10,
+        ];
 
         $responseSchema = [
             'type' => 'object',
@@ -1973,8 +2014,8 @@ Create SEPARATE events for each performance, each with:
 - Different start_date, start_time, end_date, end_time for each performance
 - Same timezone
 
-RETURN FORMAT FOR MULTI-DAY MODE:
-ALWAYS return eventData as an ARRAY of event objects, even if there's only ONE event.
+RETURN FORMAT:
+eventData is ALWAYS an ARRAY of event objects, even if there's only ONE event.
 - One event found: [{event}]
 - Multiple events found: [{event1}, {event2}, ...]
 
@@ -1986,7 +2027,11 @@ This applies to:
             "## Single Event Mode (DEFAULT):
 Focus on extracting ONLY the main/primary event. Ignore secondary or related events.
 
-However, follow the shared prompt policy exactly: if the content is clearly one event/show with multiple equal peer performance date/time options and no selected or primary date, extract each equal performance as its own event when multi-event output is available.";
+CANDIDATE POLICY: eventData is always an ARRAY. In this mode return exactly ONE event object in it.
+Return more than one candidate ONLY when:
+- the shared prompt policy's equal-performance rule applies (one show with several peer performance date/times and no selected or primary date), or
+- the content genuinely describes several distinct events and none can be identified as the primary one.
+In that case put the most likely intended event first. Never add secondary, related, or \"you might also like\" events as extra candidates, and never list the same performance twice.";
 
         // Primary event identification instructions - only in single-event mode
         $primaryEventInstructions = $allowMultiDay ? "" :
@@ -2035,7 +2080,7 @@ If a date is given but no specific time, set 'isAllDay' to true and format dtsta
 Do not include details about sponsors or policy disclaimers unless they are explicitly part of the main event content.
 
 # OUTPUT FORMAT - JSON STRUCTURE
-Return a JSON object containing the structured event data. DO NOT return an ICS file string.
+Return a JSON object containing the structured event data. eventData is ALWAYS an ARRAY of candidate events (exactly one element unless the candidate policy requires more). DO NOT return an ICS file string.
 The JSON object MUST conform EXACTLY to the following schema:
 ```json
 {
@@ -2044,6 +2089,11 @@ The JSON object MUST conform EXACTLY to the following schema:
     "success": { "type": "boolean" },
     "errorMessage": { "type": "string", "description": "Error message if success is false." },
     "eventData": {
+      "type": "array",
+      "description": "Candidate events. Exactly one element unless the candidate policy requires more (max 10).",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
       "type": "object",
       "properties": {
         "summary": { "type": "string", "description": "Concise title for the event, formatted as '<organization name:optional> - <event name>' without unnecessary venue prefixes." },
@@ -2057,8 +2107,9 @@ The JSON object MUST conform EXACTLY to the following schema:
         "isAllDay": { "type": "boolean", "description": "True for all-day events.", "default": false }
       },
       "required": ["summary", "description", "htmlDescription", "dtstart", "dtend", "timezone", "location", "url", "isAllDay"]
+      }
     },
-    "emailSubject": { "type": "string", "description": "Use the generated summary here." },
+    "emailSubject": { "type": "string", "description": "Use the generated summary here (the first candidate's summary when several are returned)." },
     "locationLookup": { "type": "string", "description": "Location string for Google Maps lookup." }
   },
   "required": ["success", "errorMessage", "eventData", "emailSubject", "locationLookup"]
@@ -2460,6 +2511,160 @@ PROMPT;
 		return false;
 	}
 
+	/**
+	 * "Source data" block for emails that originate from an inbound Postmark message.
+	 *
+	 * @param array<string, mixed> $originalEmail
+	 */
+	private function buildPostmarkSourceDataHtml(array $originalEmail): string
+	{
+		$origBody = $originalEmail['HtmlBody'] ?? nl2br((string)($originalEmail['TextBody'] ?? ''));
+		$fromName = (string)($originalEmail['FromName'] ?? '');
+		$from = (string)($originalEmail['From'] ?? '');
+		$date = (string)($originalEmail['Date'] ?? '');
+		$to = (string)($originalEmail['To'] ?? '');
+		$subject = (string)($originalEmail['Subject'] ?? '');
+
+		return <<<BODY
+<p>
+<b>From</b>: {$fromName} <{$from}><br>
+<b>Date</b>: {$date}<br>
+<b>To</b>: {$to}<br>
+<b>Subject</b>: {$subject}<br>
+
+
+{$origBody}
+BODY;
+	}
+
+	/**
+	 * @param array<string, mixed> $originalEmail
+	 */
+	private function buildPostmarkEmailBody(array $originalEmail, ?string $sourceUrl, ?string $pdfText, ?string $downloadedText): string
+	{
+		$htmlBody = $this->buildCalendarEmailBody($sourceUrl, 'email input', $this->buildPostmarkSourceDataHtml($originalEmail), $downloadedText);
+
+		if (!empty($pdfText)) {
+			$htmlBody .= <<<BODY
+
+
+---------- PDF contents ----------<br>
+{$pdfText}
+BODY;
+		}
+
+		return $htmlBody;
+	}
+
+	/**
+	 * Packs a successful generation into the server-side candidate state: one single-event ICS per
+	 * candidate plus everything needed to send (or re-send, or edit) later without regenerating.
+	 *
+	 * @param array<string, mixed> $eventDetails
+	 * @param array<string, mixed>|null $originalEmail Postmark body for inbound-email origins
+	 */
+	private function buildCandidateSet(array $eventDetails, ?GenerationOutcome $outcome, string $origin, ?string $sourceUrl, string $sourceLabel, string $sourceDataHtml, ?string $sourceContent, ?string $instructions, bool $multiMode, bool $tentative, string $recipientEmail, ?array $originalEmail = null, ?string $pdfText = null): CandidateSet
+	{
+		$generator = new IcalGenerator();
+		$candidates = [];
+		foreach ($this->eventDataItems($eventDetails['eventData'] ?? null) as $index => $singleEventData) {
+			$candidates[] = new Candidate($index, $singleEventData, $generator->convertJsonToIcs($singleEventData, $this->fromEmail));
+		}
+
+		$resolvedSourceUrl = $this->eventSourceUrl($eventDetails, $sourceUrl);
+		$htmlBody = $originalEmail !== null
+			? $this->buildPostmarkEmailBody($originalEmail, $resolvedSourceUrl, $pdfText, $sourceContent)
+			: $this->buildCalendarEmailBody($resolvedSourceUrl, $sourceLabel, $sourceDataHtml, $sourceContent);
+
+		$attachments = [];
+		foreach (($originalEmail['Attachments'] ?? []) as $attachment) {
+			if (is_array($attachment) && !empty($attachment['Name']) && isset($attachment['Content'])) {
+				$attachments[] = $attachment;
+			}
+		}
+
+		$key = $this->candidateStore->newKey();
+		$now = time();
+
+		return new CandidateSet(
+			key: $key,
+			createdAt: date('c', $now),
+			expiresAt: $this->candidateStore->expiresAtFor($now),
+			candidates: $candidates,
+			baseSubject: (string)($eventDetails['emailSubject'] ?? 'Calendar Event'),
+			sourceUrl: $resolvedSourceUrl !== '' ? $resolvedSourceUrl : null,
+			sourceLabel: $sourceLabel,
+			sourceContent: $sourceContent,
+			htmlBody: $htmlBody,
+			model: $this->aiModel,
+			instructions: $instructions,
+			multiMode: $multiMode,
+			tentative: $tentative,
+			recipientEmail: $recipientEmail,
+			originalEmail: $originalEmail !== null ? array_intersect_key($originalEmail, array_flip(['MessageID', 'From', 'FromName', 'To', 'Subject', 'Date', 'TextBody', 'HtmlBody'])) : [],
+			attachments: $attachments,
+			inReplyTo: isset($originalEmail['MessageID']) ? (string)$originalEmail['MessageID'] : null,
+			origin: $origin,
+			previousKey: null,
+			rootKey: $key,
+			editRound: 0,
+			generation: $outcome?->toMetadata() ?? [],
+		);
+	}
+
+	/**
+	 * Sends one calendar email per selected candidate (never a combined ICS) and records what was sent.
+	 *
+	 * @param list<int> $indexes
+	 */
+	public function sendCandidateEvents(CandidateSet $set, array $indexes, ?string $inReplyTo = null): int
+	{
+		$indexes = array_values(array_unique(array_map('intval', $indexes)));
+		sort($indexes);
+		$selected = [];
+		foreach ($indexes as $index) {
+			$candidate = $set->candidate($index);
+			if ($candidate !== null) {
+				$selected[] = $candidate;
+			}
+		}
+		if ($selected === []) {
+			throw new \InvalidArgumentException('No matching candidate events to send.');
+		}
+
+		$count = count($selected);
+		foreach ($selected as $candidate) {
+			$subject = EventSubject::withDate($set->baseSubject, $candidate->eventData, $count);
+			$ics = $candidate->ics;
+			if ($set->attachments !== []) {
+				$links = '';
+				foreach ($set->attachments as $attachment) {
+					$links .= "\n\nAttachment: " . basename((string)$attachment['Name']);
+				}
+				$ics = $this->addAttachmentLinksToIcs($ics, $links);
+			}
+			$this->sendEmail($ics, $set->recipientEmail, $subject, $set->htmlBody, $set->attachments, $inReplyTo ?? $set->inReplyTo);
+		}
+
+		$this->candidateStore->save($set->withSent(array_map(static fn(Candidate $c): int => $c->index, $selected)));
+
+		return $count;
+	}
+
+	/**
+	 * Sends the "choose events" email with create-all / use-only-this / choose links.
+	 */
+	public function sendCandidateChoiceEmail(CandidateSet $set): void
+	{
+		$built = CandidateEmailBuilder::build($set, CandidateLinks::baseUrl());
+		$this->sendEmail(null, $set->recipientEmail, $built['subject'], $built['htmlBody'], [], $set->inReplyTo);
+	}
+
+	public function candidateStore(): CandidateStore
+	{
+		return $this->candidateStore;
+	}
+
 	private function sendEmailWithAttachment($toEmail, $ics, $subject, $originalEmail, $eventDetails = null, $pdfText = null, $downloadedText = null)
 	{
 		$attachments = [];
@@ -2480,30 +2685,8 @@ PROMPT;
 			}
 		}
 
-		$origBody = $originalEmail['HtmlBody'] ?? nl2br($originalEmail['TextBody']);
 		$sourceUrl = $this->eventSourceUrl($eventDetails);
-
-		$sourceDataHtml = <<<BODY
-<p>
-<b>From</b>: {$originalEmail['FromName']} <{$originalEmail['From']}><br>
-<b>Date</b>: {$originalEmail['Date']}<br>
-<b>To</b>: {$originalEmail['To']}<br>
-<b>Subject</b>: {$originalEmail['Subject']}<br>
-
-
-{$origBody}
-BODY;
-
-		$htmlBody = $this->buildCalendarEmailBody($sourceUrl, 'email input', $sourceDataHtml, $downloadedText);
-
-		if (!empty($pdfText)) {
-			$htmlBody .= <<<BODY
-
-
----------- PDF contents ----------<br>
-{$pdfText}
-BODY;
-		}
+		$htmlBody = $this->buildPostmarkEmailBody($originalEmail, $sourceUrl, $pdfText, $downloadedText);
 
 		// Add attachment links to ICS description if any attachments were processed
 		$updatedIcs = $ics;
@@ -2621,7 +2804,7 @@ BODY;
 				'text/calendar; method=PUBLISH; charset=UTF-8'
 			);
 		} else {
-			errlog("Attempted to send email with empty ICS content to {$toEmail} with subject '{$subject}'. This indicates an issue upstream.");
+			errlog("Sending email without an ICS attachment to {$toEmail} with subject '{$subject}'.");
 		}
 
 		foreach ($otherAttachments as $attachment) {
@@ -2700,39 +2883,7 @@ BODY;
      * @return string Sanitized HTML content
      */
 	private function html_sanitize($html) : string {
-		// By default, an element not added to the allowed or blocked elements
-		// will be dropped, including its children
-		$config = (new HtmlSanitizerConfig())
-			// Allow "safe" elements and attributes. All scripts will be removed
-			// as well as other dangerous behaviors like CSS injection
-			->allowSafeElements()
-
-		// Allow all static elements and attributes from the W3C Sanitizer API
-		// standard. All scripts will be removed but the output may still contain
-		// other dangerous behaviors like CSS injection (click-jacking), CSS
-		// expressions, ...
-			->allowStaticElements()
-
-		// Allow the "div" element, and no attribute can be on it
-			->allowElement('div')
-
-		// Allow the "a" element, and the "title" attribute to be on it
-			->allowElement('a', ['href', 'title'])
-
-		// Allow the "span" element, and any attribute from the Sanitizer API is allowed
-		// (see https://wicg.github.io/sanitizer-api/#default-configuration)
-			->allowElement('span', '*')
-
-		// Forcefully set the value of all "rel" attributes on "a"
-		// elements to "noopener noreferrer"
-			->forceAttribute('a', 'rel', 'noopener noreferrer')
-
-		// Configure which schemes are allowed in links (others will be dropped)
-			->allowLinkSchemes(['https', 'http', 'mailto']);
-
-		$sanitizer = new HtmlSanitizer($config);
-
-		return $sanitizer->sanitizeFor('div', $html);
+		return CalendarEmailBody::sanitize((string)$html);
 	}
 
     /**
@@ -3095,55 +3246,7 @@ function dd($var)
 	die;
 }
 
-// --- NEW: Handle Confirmation Endpoint ---
-if (isset($_GET['confirm']) && $_GET['confirm'] === 'true' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    header('Content-Type: application/json');
-    $token = $_POST['confirmationToken'] ?? null;
-    $cacheDir = sys_get_temp_dir() . '/confirm_cache';
-    define('CONFIRMATION_TTL', 60 * 60); // Token valid for 1 hour
-
-    if (!$token || !preg_match('/^[a-f0-9]{32}$/', $token)) { // Basic token validation
-        http_response_code(400);
-        echo json_encode(['error' => 'Invalid or missing confirmation token.']);
-        exit;
-    }
-
-    $cacheFile = $cacheDir . '/' . basename($token) . '.json';
-
-    if (!file_exists($cacheFile)) {
-        http_response_code(404);
-        echo json_encode(['error' => 'Confirmation token not found or expired.']);
-        exit;
-    }
-
-    $storedData = json_decode(file_get_contents($cacheFile), true);
-
-    if (!$storedData || !isset($storedData['timestamp']) || (time() - $storedData['timestamp'] > CONFIRMATION_TTL)) {
-        unlink($cacheFile); // Clean up invalid/expired token file
-        http_response_code(410); // Gone (expired)
-        echo json_encode(['error' => 'Confirmation token expired or data invalid.']);
-        exit;
-    }
-
-    try {
-        // Need EmailProcessor to send the email
-        $processor = new EmailProcessor(); 
-        $processor->sendEmail(
-            $storedData['ics'], 
-            $storedData['recipient'], 
-            $storedData['subject'], 
-            '<p>Confirmed event from extension review.</p>' // Simple body
-        );
-        unlink($cacheFile); // Successfully used, remove token
-        echo json_encode(['status' => 'success', 'message' => 'Email confirmed and sent successfully.']);
-    } catch (Throwable $e) {
-        errlog("Error sending confirmed email for token {$token}: " . $e->getMessage());
-        http_response_code(500);
-        echo json_encode(['error' => 'Failed to send confirmed email.']);
-    }
-    exit; // IMPORTANT: Stop script execution after handling confirmation
-}
-// --- End NEW Confirmation Handling ---
+// Confirmation and candidate-link endpoints live in Jcherniak\EmailToIcs\Web\CandidateController (routed by WebPage).
 
 // --- Continue with original script logic ---
 }

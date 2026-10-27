@@ -62,6 +62,16 @@ final class EmailInputSource
     }
 
 
+    public static function containsMultipleToken(?string $text): bool
+    {
+        if ($text === null || $text === '') {
+            return false;
+        }
+        $decoded = html_entity_decode($text, ENT_QUOTES | ENT_HTML5);
+
+        return preg_match('/<\s*multiple\s*>/i', $decoded) === 1;
+    }
+
     /**
      * @param array<string, mixed> $postmarkBody
      * @return array{url: ?string, instructions: ?string, hasMultiFlag: bool, textBody: string, htmlBody: string}
@@ -78,7 +88,8 @@ final class EmailInputSource
 
         $url = null;
         $instructions = null;
-        $hasMultiFlag = false;
+        // "<multiple>" (any case, raw or entity-encoded) anywhere in the mail means: send every candidate event.
+        $hasMultiFlag = self::containsMultipleToken($textBody) || self::containsMultipleToken($originalHtmlBody);
         $directiveText = $this->bodyTextForDirectives($textBody, $originalHtmlBody);
         [$directiveText, $separatedInstructions] = $this->splitSeparatedInstructions($directiveText);
 
@@ -106,6 +117,10 @@ final class EmailInputSource
 
         if ($separatedInstructions !== null) {
             $instructions = $separatedInstructions;
+        }
+
+        if ($instructions !== null && self::containsMultipleToken($instructions)) {
+            $hasMultiFlag = true;
         }
 
         if ($url === null) {

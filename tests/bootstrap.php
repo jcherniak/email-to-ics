@@ -15,6 +15,9 @@ $_ENV['MAPBOX_API_KEY'] ??= 'test-mapbox-key';
 $_ENV['GEOCODER_ORDER'] ??= 'mapbox,google';
 $_ENV['DEFAULT_MODEL'] = 'test/model';
 $_ENV['LOG_LEVEL'] ??= 'error';
+$_ENV['CANDIDATES_DIR'] = sys_get_temp_dir() . '/email-to-ics-test-candidates';
+$_ENV['PUBLIC_BASE_URL'] ??= 'https://example.test/ics/';
+$_ENV['INBOUND_REPLY_DOMAIN'] ??= 'reply.example.test';
 
 $modelCache = [
     'timestamp' => time(),
@@ -38,3 +41,4 @@ require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../index.php';
 require_once __DIR__ . '/Support/PresidioExpected.php';
 require_once __DIR__ . '/Support/FakeEmailProcessor.php';
+require_once __DIR__ . '/Support/CandidateFixtures.php';
