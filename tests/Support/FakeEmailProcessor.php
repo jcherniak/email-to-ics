@@ -45,6 +45,31 @@ final class FakeEmailProcessor extends EmailProcessor
         return $this->contentResponse($this->fakeAiJson ?? json_encode(PresidioExpected::aiJson(), JSON_UNESCAPED_SLASHES));
     }
 
+    /**
+     * A chat-completion response in which the model asks for one tool call.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    public static function toolCallResponse(string $toolName, array $arguments, string $callId = 'call_1'): Response
+    {
+        $body = json_encode([
+            'choices' => [[
+                'finish_reason' => 'tool_calls',
+                'message' => [
+                    'role' => 'assistant',
+                    'content' => null,
+                    'tool_calls' => [[
+                        'id' => $callId,
+                        'type' => 'function',
+                        'function' => ['name' => $toolName, 'arguments' => json_encode($arguments)],
+                    ]],
+                ],
+            ]],
+        ]);
+
+        return new Response(200, ['Content-Type' => 'application/json'], $body);
+    }
+
     private function contentResponse(string $content): Response
     {
         $body = json_encode([

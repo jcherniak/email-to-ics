@@ -39,21 +39,26 @@ final class DependencyInjectionRefactorTest extends TestCase
         $this->assertSame('text/calendar; method=PUBLISH; charset=UTF-8', $mailer->messages[0]->attachments[0]->contentType);
     }
 
-    public function testEmailProcessorUsesInjectedFetcher(): void
+    public function testEmailProcessorExposesInjectedFetcherAsTheDirectFetchTool(): void
     {
         $fetcher = new DummyFetcher(new FetchResult(
             'https://example.test/event',
-            '<html><title>Injected Fetch</title><body>Event</body></html>',
+            '<html><title>Injected Fetch</title><body>Event<script>x</script></body></html>',
             'dummy',
             'base64-screenshot'
         ));
         $processor = new EmailProcessor(new DummyMailer(), $fetcher);
-        $method = new ReflectionMethod($processor, 'fetch_url');
-        $method->setAccessible(true);
+        $property = new ReflectionProperty($processor, 'toolRegistry');
+        $property->setAccessible(true);
+        $registry = $property->getValue($processor);
 
-        $content = $method->invoke($processor, 'https://example.test/event');
+        $this->assertSame(['fetch_direct'], $registry->orderedNames());
+        $result = $registry->execute('fetch_direct', ['url' => 'https://example.test/event']);
 
-        $this->assertSame('<html><title>Injected Fetch</title><body>Event</body></html>', $content);
+        $this->assertSame('ok', $result['status']);
+        $this->assertSame('Injected Fetch', $result['title']);
+        $this->assertStringContainsString('Event', $result['content']);
+        $this->assertStringNotContainsString('<script>', $result['content']);
         $this->assertSame(['https://example.test/event'], $fetcher->requestedUrls);
     }
 

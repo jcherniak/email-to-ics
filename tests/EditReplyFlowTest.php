@@ -142,15 +142,22 @@ final class EditReplyFlowTest extends TestCase
         $html = file_get_contents(__DIR__ . '/artifacts/sources/presidio-opera-parallele-doubt.html');
         $fetcher = new DummyFetcher(new FetchResult(PresidioExpected::URL, $html, 'dummy'));
         $processor = $this->processor($fetcher);
+        // Model-driven fetch: the model asks for fetch_direct on the quoted URL, then answers.
+        $processor->setFakeAiResponses([FakeEmailProcessor::toolCallResponse('fetch_direct', ['url' => PresidioExpected::URL])]);
         $text = file_get_contents(__DIR__ . '/artifacts/sources/replies/gmail-text.txt');
 
         $result = $this->runReply($processor, $this->replyBody($unknownKey, $text, ['From' => 'confirmed@example.test']));
 
         $this->assertSame('success', $result['status'] ?? null, json_encode($result));
-        $this->assertSame([PresidioExpected::URL], $fetcher->requestedUrls, 'the quoted source URL is fetched again');
-        $this->assertNotEmpty($processor->aiRequests);
+        $this->assertSame([PresidioExpected::URL], $fetcher->requestedUrls, 'the quoted source URL is fetched again through the fetch tool');
+        $this->assertCount(2, $processor->aiRequests);
+        $this->assertSame(['fetch_direct'], array_column(array_column($processor->aiRequests[0]['tools'], 'function'), 'name'));
         $requestText = $this->allRequestText($processor->aiRequests[0]);
+        $this->assertStringContainsString('# FETCHING PROCEDURE', $requestText);
         $this->assertStringContainsString('previous structured output unavailable', $requestText);
+        $toolMessages = array_values(array_filter($processor->aiRequests[1]['messages'], static fn(array $m): bool => ($m['role'] ?? '') === 'tool'));
+        $this->assertCount(1, $toolMessages);
+        $this->assertStringContainsString('Opera Parall', $toolMessages[0]['content'], 'fetched page content goes back to the model');
         $this->assertStringContainsString('Opera Parallele presents Doubt', $requestText, 'quoted email text is passed as context');
         $this->assertStringContainsString('Please move it to 8pm', $requestText);
         $this->assertStringNotContainsString('--- PREVIOUS ICS ---', $requestText);
@@ -165,6 +172,7 @@ final class EditReplyFlowTest extends TestCase
         $this->assertSame($unknownKey, $newSet?->previousKey);
         $this->assertSame(1, $newSet?->editRound);
         $this->assertFalse($newSet?->tentative);
+        $this->assertStringContainsString('Doubt', (string)$newSet?->sourceContent, 'the fetched content is stored for later edits');
         $this->assertSame([], $this->mailer->messages);
     }
 

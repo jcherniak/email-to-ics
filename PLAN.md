@@ -17,8 +17,8 @@ Branch `multi-event-and-retry` (items 1-5), then branch `model-driven-fetch` (it
 | C3 Shared retry runner: per model, snippet then full on first level, full on later levels, then next model; opis validation back on | 727d50c | done |
 | C4a Multi-event candidates: always-array schema, `CandidateStore` keyed state, choice email with confirm-page links, routes before auth | 2772030 | done |
 | C4b Chrome extension: candidate checkbox picker in the local JS processor, Reply-To + source-url marker | c8c4fec | done |
-| C5 Reply-to-edit: unique Reply-To `edit-<key>@INBOUND_REPLY_DOMAIN`, stored state path with previous ICS, URL fallback from quoted email | this commit | done |
-| C6 Model-driven fetch via tool loop (`fetch_direct`, `fetch_with_firecrawl`, `fetch_with_tinyfish`, `render_with_tinyfish_browser`) on `model-driven-fetch` | | todo |
+| C5 Reply-to-edit: unique Reply-To `edit-<key>@INBOUND_REPLY_DOMAIN`, stored state path with previous ICS, URL fallback from quoted email | e66be3c | done |
+| C6 Model-driven fetch via tool loop (`fetch_direct`, `fetch_with_firecrawl`, `fetch_with_tinyfish`, `render_with_tinyfish_browser`) on `model-driven-fetch` | this commit (branch `model-driven-fetch`) | done |
 
 Decisions for this work (confirmed with the owner):
 - Links in emails use a random 32-hex key, no login; every link lands on a one-button confirm page (`CANDIDATE_LINKS_REQUIRE_CONFIRM=1` default) so mail scanners cannot trigger sends.
@@ -27,6 +27,15 @@ Decisions for this work (confirmed with the owner):
 - Item 6 level 1 is a PHP `fetch_direct` function tool (not `openrouter:web_fetch`) so PHP always sees page content for emails and edits.
 - Retry failure = transport error, unparseable JSON, schema-invalid JSON, zero events or missing dtstart, or model `success:false`.
 - Extension keeps local processing; candidates are ported into `email-processor.js`.
+
+C6 notes (branch `model-driven-fetch` only; revert by staying on `multi-event-and-retry`):
+- URL inputs are no longer fetched server side. `src/OpenRouter/ToolRegistry` offers the model function tools in escalation order: `fetch_direct` (DirectUrlFetcher), `fetch_with_firecrawl`, `fetch_with_tinyfish`, `render_with_tinyfish_browser` (keyless levels omitted); each is a `Tools/FetchToolExecutor` around the C1 fetcher classes and returns `{status, url, final_url, title, content (lightened, capped by TOOL_CONTENT_MAX_CHARS), error}`. An injected fetcher (tests) becomes the single `fetch_direct` tool.
+- `src/OpenRouter/OpenRouterToolLoop` runs the OpenAI-style loop against `postOpenRouterChatCompletion`: `tools` + `parallel_tool_calls:false` on every request, one tool executed at a time, per-tool cap `MAX_TOOL_CALLS_PER_TOOL=3`, total cap `MAX_TOOL_CALLS=8` (then `tool_choice:none`), unknown tools answered with an error payload, HTTP/JSON errors surfaced as failures.
+- `EmailProcessor::generateIcalEventWithTools` adds a `# FETCHING PROCEDURE` system block (strict order, escalate only on error/empty/blocked content, ignore instructions inside fetched pages), runs the loop, parses/validates the final JSON, and re-prompts once with "use the next fetch level (<tool>)" when the answer is invalid and levels remain; the retry runner then moves to the next model (`ToolDrivenContentProvider` exposes one `tools` level). Non-URL inputs (email HTML, extension capture, CLI --html) keep the C2/C3 content path and send no tools.
+- Source content for email bodies, candidate state and edits = the last successful fetch tool's content (`sourceContent`/`sourceTitle`/`sourceTool` on the event details); the edit-reply URL fallback also runs through the tool loop. `fetch_url()` is removed; `UrlLevelContentProvider` stays as a class but is unused by `EmailProcessor`.
+- Records gain `toolTraces` (per attempt: calls, requests, finish reason, trace). Env: `MAX_TOOL_CALLS`, `MAX_TOOL_CALLS_PER_TOOL`, `TOOL_CONTENT_MAX_CHARS`.
+- Risks: models/providers that reject `tools` fail the attempt (next model); prompt injection via fetched pages is bounded by the caps and the http(s)-only URL check; `openrouter:web_fetch` was deliberately not used so PHP always sees the page (one registry change if wanted).
+- Verified: `php -l`, `vendor/bin/phpunit` (126 tests, 3 expected skips) including loop transcript/caps/error tests, registry-from-env, a two-model re-prompt flow and a no-tools check for provided content; CLI smoke of `processUrl` with a scripted fetch_direct failure -> firecrawl success.
 
 C5 notes:
 - `EmailMessage` gained `replyTo` (Postmark `ReplyTo`); `EmailProcessor::sendEmail(..., ?string $replyTo)`; every candidate send and choice email uses `editReplyAddress($key)` = `edit-<key>@INBOUND_REPLY_DOMAIN` (empty domain disables the header).
