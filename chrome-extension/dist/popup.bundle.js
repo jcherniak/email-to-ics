@@ -12676,6 +12676,7 @@
     const reviewRadioGroup = document.querySelectorAll('input[name="review-option"]');
     const reviewSection = document.getElementById("review-section");
     const reviewContent = document.getElementById("review-content");
+    const reviewCandidates = document.getElementById("review-candidates");
     const reviewRecipient = document.getElementById("review-recipient");
     const reviewSubject = document.getElementById("review-subject");
     const sendButton = document.getElementById("send-button");
@@ -13308,10 +13309,17 @@
       }
       showReviewStatus("Sending confirmation...", "loading");
       disableReviewButtons();
+      const selectedIndexes = selectedCandidateIndexes();
+      if (reviewData.candidates && reviewData.candidates.length > 1 && selectedIndexes.length === 0) {
+        showReviewStatus("Select at least one event to send.", "error");
+        disableReviewButtons(false);
+        return;
+      }
       try {
         const response = await chrome.runtime.sendMessage({
           action: "confirmEvent",
-          confirmationToken: reviewData.confirmationToken
+          confirmationToken: reviewData.confirmationToken,
+          indexes: selectedIndexes
         });
         if (!response) {
           throw new Error("No response from background script. Please check extension status and try again.");
@@ -13403,6 +13411,31 @@
       applyContextMenuInstructions();
       setInterval(() => tabStateManager.cleanup(), 36e5);
     });
+    function renderReviewCandidates(candidates) {
+      if (!reviewCandidates)
+        return;
+      if (!candidates || candidates.length <= 1) {
+        reviewCandidates.style.display = "none";
+        reviewCandidates.innerHTML = "";
+        return;
+      }
+      const escape = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      let html = `<p class="mb-1"><strong>${candidates.length} possible events found.</strong> Choose which to send (one email each):</p>`;
+      for (const candidate of candidates) {
+        const id = `review-candidate-${candidate.index}`;
+        html += `<div class="form-check">
+                <input class="form-check-input review-candidate-checkbox" type="checkbox" id="${id}" value="${candidate.index}" checked>
+                <label class="form-check-label" for="${id}"><strong>${escape(candidate.summary)}</strong><br><small>${escape(candidate.start)}${candidate.location ? " - " + escape(candidate.location) : ""}</small></label>
+            </div>`;
+      }
+      reviewCandidates.innerHTML = html;
+      reviewCandidates.style.display = "block";
+    }
+    function selectedCandidateIndexes() {
+      if (!reviewCandidates || reviewCandidates.style.display === "none")
+        return [];
+      return Array.from(reviewCandidates.querySelectorAll(".review-candidate-checkbox:checked")).map((box) => parseInt(box.value, 10));
+    }
     function hideReviewSection() {
       reviewSection.style.display = "none";
       formSection.style.display = "block";
@@ -13508,9 +13541,11 @@
         // Keep for display
         emailSubject: data.emailSubject,
         // Keep for display
-        icsContent: data.icsContent
+        icsContent: data.icsContent,
         // Keep for display/debugging
+        candidates: Array.isArray(data.candidates) ? data.candidates : []
       };
+      renderReviewCandidates(reviewData.candidates);
       console.log("reviewData set:", reviewData);
       reviewRecipient.textContent = data.recipientEmail || "Unknown";
       reviewSubject.textContent = data.emailSubject || "No Subject";
