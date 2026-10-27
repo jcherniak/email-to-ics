@@ -59,7 +59,7 @@ Replaces the user's Apple Shortcut "Add To Calendar With AI 2" (web page → sha
 - [x] 3. Core jobs, stages, background transfer, settings, Keychain + tests.
 - [x] 4. Swift ICS generator with byte-parity tests against the Presidio fixtures.
 - [x] 5. Cleaner JS (vendored Readability + PageCleaner + Safari shim, generated `ShareJS.js`).
-- [ ] 6. Share extension (options sheet, capture tiers incl. offscreen web view, handoff).
+- [x] 6. Share extension (options sheet, capture tiers incl. offscreen web view, handoff).
 - [ ] 7. App wake handling, stage coordinator, MapKit geocoding, Inbox UI, deep links.
 - [ ] 8. Queue Live Activity.
 - [ ] 9. Destinations: Apple edit sheet, ICS share sheet, Google OAuth + Calendar API.
@@ -75,6 +75,7 @@ Replaces the user's Apple Shortcut "Add To Calendar With AI 2" (web page → sha
 - Commit 3 (jobs/stages/transfer/settings): `check-structure.sh` passed in the sandbox; 9 more XCTest files (store, state machine incl. raw-HTML retry, snapshot weights, settings). `swift test` pending locally. Design notes: `StageRunner` is the single state machine used by both processes; per-attempt background session identifiers `com.justin-c.web-to-ics.job.<uuid>.<stage>.<attempt>`; `activity.json` holds the batch id and tells the extension whether to open the app; job files are written atomically (temp + rename inside `NSFileCoordinator`).
 - Commit 4 (ICS generator): `check-structure.sh` incl. fixture sync passed in the sandbox. Parity tests compare each generated single-event calendar with `presidio-email-{1,2,3}.expected.ics` after masking UID/DTSTAMP (PRODID set to the eluceo string for the test); VTIMEZONE blocks are compared line by line. `swift test` pending locally. Deviation kept for parity: VTIMEZONE DTSTART is the local time after each transition (as eluceo writes it).
 - Commit 5 (cleaner JS): `check-structure.sh` (incl. generated-bundle drift check and `node --check` on all four JS files) passed in the sandbox. `ios/scripts/smoke-cleaner.mjs` run with jsdom against the three HTML fixtures: on the real Presidio page Readability dropped all 9 date tokens and the guard correctly fell back to the heuristic (9/9 dates kept); the two synthetic fixtures are below Readability's 500-char floor and also use the heuristic. Vendored Mozilla Readability 0.6.0 (Apache-2.0, sha256 recorded in `ios/Shared/JS/vendor/README.md`).
+- Commit 6 (share extension): `check-structure.sh` passed in the sandbox; Swift cannot be compiled here, so the first local `xcodegen generate` + build is the gate. Host-app opening tries the responder-chain `openURL:` first, then SwiftUI's `OpenURLAction`, then `extensionContext.open`.
 
 ## Recent Verification Baseline
 
