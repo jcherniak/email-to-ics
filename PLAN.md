@@ -61,7 +61,7 @@ Replaces the user's Apple Shortcut "Add To Calendar With AI 2" (web page → sha
 - [x] 5. Cleaner JS (vendored Readability + PageCleaner + Safari shim, generated `ShareJS.js`).
 - [x] 6. Share extension (options sheet, capture tiers incl. offscreen web view, handoff).
 - [x] 7. App wake handling, stage coordinator, MapKit geocoding, Inbox UI, deep links.
-- [ ] 8. Queue Live Activity.
+- [x] 8. Queue Live Activity.
 - [ ] 9. Destinations: Apple edit sheet, ICS share sheet, Google OAuth + Calendar API.
 - [ ] 10. Settings UI, model list, Firecrawl toggle, Google calendar pickers.
 - [ ] 11. Docs: README, AGENTS.md, ARCHITECTURE.md, PLAN.md wrap-up.
@@ -77,6 +77,7 @@ Replaces the user's Apple Shortcut "Add To Calendar With AI 2" (web page → sha
 - Commit 5 (cleaner JS): `check-structure.sh` (incl. generated-bundle drift check and `node --check` on all four JS files) passed in the sandbox. `ios/scripts/smoke-cleaner.mjs` run with jsdom against the three HTML fixtures: on the real Presidio page Readability dropped all 9 date tokens and the guard correctly fell back to the heuristic (9/9 dates kept); the two synthetic fixtures are below Readability's 500-char floor and also use the heuristic. Vendored Mozilla Readability 0.6.0 (Apache-2.0, sha256 recorded in `ios/Shared/JS/vendor/README.md`).
 - Commit 6 (share extension): `check-structure.sh` passed in the sandbox; Swift cannot be compiled here, so the first local `xcodegen generate` + build is the gate. Host-app opening tries the responder-chain `openURL:` first, then SwiftUI's `OpenURLAction`, then `extensionContext.open`.
 - Commit 7 (app core): `check-structure.sh` passed in the sandbox; Xcode build pending locally. `StageCoordinator` (actor) is the only writer in the app process; `rescan` runs on launch, foreground, deep link and after every wake, and marks in-flight jobs whose background session has no task left and no result after 90 s as retryable.
+- Commit 8 (Live Activity): `check-structure.sh` passed in the sandbox; device test items 3–4 pending. One activity per batch; started only in the foreground, adopted after relaunch from `Activity.activities`, ended with a 120 s dismissal once every job in the batch is added or dismissed (failed and ready jobs keep it alive); `activity.json` gets `disabled: true` when Live Activities are turned off so the extension stops opening the app.
 
 ## Recent Verification Baseline
 
