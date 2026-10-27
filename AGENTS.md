@@ -14,11 +14,11 @@ Every 5 commits, summarize older detailed `PLAN.md` entries into a concise histo
 
 ## Project Overview
 
-Email-to-ICS is a web application and Chrome extension that converts emails and web content into ICS (iCalendar) files using AI models. It can extract event information from HTML content, emails, or URLs and send calendar invites via email.
+Email-to-ICS is a web application, Chrome extension and iOS share-sheet app that converts emails and web content into ICS (iCalendar) files and calendar events using AI models. It can extract event information from HTML content, emails, or URLs and send calendar invites via email.
 
 ## Architecture
 
-The project has three main components:
+The project has four main components:
 
 1. **PHP Backend Server** (`index.php`, `IcalGenerator.php`)
    - EmailProcessor class handles core logic
@@ -37,6 +37,12 @@ The project has three main components:
    - Simple form for manual ICS generation
    - Options for tentative/confirmed events
 
+4. **iOS App** (`ios/`, XcodeGen project; see `PLAN.md` "iOS App" and the README section)
+   - Share extension + app + widget extension (Live Activity); SwiftPM package `ios/Packages/WebToICSCore` holds the platform-agnostic logic
+   - Calls OpenRouter directly from the device through background `URLSession` uploads; no PHP backend dependency
+   - Destinations: Apple Calendar edit sheet, Google Calendar API (OAuth), on-device ICS generation
+   - Bundles byte-identical copies of `prompt/system_prompt_policy.xml` and `chrome-extension/custom-prompt.default.txt` (checked by `ios/scripts/check-policy-sync.sh`)
+
 ## Commands
 
 ### Backend Development
@@ -49,6 +55,21 @@ php -S localhost:8000
 
 # Process email from CLI
 php index.php < email.txt
+```
+
+### iOS App Development
+```bash
+# One-time: brew install xcodegen; copy ios/Config/Secrets.xcconfig.template to Secrets.xcconfig
+cd ios && xcodegen generate            # creates WebToICS.xcodeproj (gitignored)
+
+# Structural checks (work without Xcode)
+ios/scripts/check-structure.sh
+
+# Full local verification on macOS: checks + swift test + xcodegen + simulator build
+ios/scripts/verify.sh
+
+# After editing ios/Shared/JS/* regenerate the Safari preprocessor bundle
+ios/scripts/build-js.sh
 ```
 
 ### Chrome Extension Development
@@ -108,6 +129,9 @@ Copy `.env.template` to `.env` and configure:
 - `chrome-extension/popup.js`: Extension UI logic (1354 lines)
 - `chrome-extension/manifest.json`: Extension configuration
 - `form.html`: Web interface
+- `ios/project.yml`: XcodeGen spec for the iOS app, share extension and widget extension
+- `ios/Packages/WebToICSCore/`: Swift package (job state machine `Stages/StageRunner.swift`, `ICS/ICSGenerator.swift`, prompt/schema, network builders) with XCTest parity fixtures
+- `ios/Shared/JS/PageCleaner.js`: page cleaning shared by the Safari preprocessor and the offscreen web view (generated bundle: `ios/ShareExtension/ShareJS.js`)
 
 ## Critical Implementation Notes
 
@@ -151,6 +175,7 @@ The server returns different response formats:
   - Do not run the Chrome extension build for PHP-only changes.
   - Do not run the full PHP test suite for JavaScript-only changes unless the change affects shared contracts or backend behavior.
   - When a change crosses both PHP/backend and Chrome extension code, run both relevant PHP verification and extension verification.
+  - When editing anything under `ios/`, run `ios/scripts/check-structure.sh` before the commit (it works without Xcode). On a Mac also run `ios/scripts/verify.sh` (Core package `swift test`, `xcodegen generate`, simulator build); when no Swift toolchain is available, state that explicitly in the commit message and `PLAN.md`. When editing `ios/Shared/JS/*`, run `ios/scripts/build-js.sh` and commit the regenerated `ios/ShareExtension/ShareJS.js`. When editing `prompt/system_prompt_policy.xml` or `chrome-extension/custom-prompt.default.txt`, update the copies under `ios/Packages/WebToICSCore/Sources/WebToICSCore/Resources/` (checked by `ios/scripts/check-policy-sync.sh`).
 - Do not create a code-changing commit with failing tests, skipped required tests, or tests that were not run. Fix the issue first, or explicitly separate the work into a documentation-only commit when no code/runtime/test behavior changed.
 - Documentation-only commits do not require running the test suite, but they must not be mixed with code changes. When tests are not run because a commit is documentation-only, say that clearly in the final status.
 - Every coding-agent commit must include an `Assisted-by` trailer in this exact form: `Assisted-by: AGENT_NAME:MODEL_VERSION`.

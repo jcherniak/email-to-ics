@@ -64,22 +64,21 @@ Replaces the user's Apple Shortcut "Add To Calendar With AI 2" (web page → sha
 - [x] 8. Queue Live Activity.
 - [x] 9. Destinations: Apple edit sheet, ICS share sheet, Google OAuth + Calendar API.
 - [x] 10. Settings UI, model list, Firecrawl toggle, Google calendar pickers.
-- [ ] 11. Docs: README, AGENTS.md, ARCHITECTURE.md, PLAN.md wrap-up.
+- [x] 11. Docs: README, AGENTS.md, ARCHITECTURE.md, PLAN.md wrap-up.
 
 ### Device test checklist (user, recorded here when run)
 1. Share 3 Safari tabs back-to-back: app opens once, all reach Ready. 2. Force-quit app, share again: background wake advances the job. 3. Activity shows `N of M · P%`, tap opens Inbox, ends ~120 s after last add, failed job keeps it open. 4. Manual dismissal → next share opens the app. 5. Apple: sequential edit sheets. 6. ICS import honours VTIMEZONE. 7. Google: calendars by tentative flag. 8. Airplane mode → Failed + Retry. 9. Orion bare URL with/without Firecrawl key. 10. Selection share prefills instructions. 11. No-events page triggers the raw-HTML retry.
 
-### iOS verification log
-- Commit 1 (scaffold): `ios/scripts/check-structure.sh` passed in the coding sandbox. `xcodegen generate`, `swift test` and the simulator build are pending on the user's Mac (no Xcode here).
-- Commit 2 (Core models/prompt/schema/extractor): `check-structure.sh` incl. policy + fixture sync passed in the sandbox; 10 XCTest files written (`swift test` pending locally, no Swift toolchain in the sandbox). The iOS system prompt lives in `ios/Packages/WebToICSCore/Sources/WebToICSCore/Resources/ios_system_prompt.txt`: the shortcut's prompt rewritten for JSON output, with the shared policy XML and the Chrome custom prompt substituted at runtime.
-- Commit 3 (jobs/stages/transfer/settings): `check-structure.sh` passed in the sandbox; 9 more XCTest files (store, state machine incl. raw-HTML retry, snapshot weights, settings). `swift test` pending locally. Design notes: `StageRunner` is the single state machine used by both processes; per-attempt background session identifiers `com.justin-c.web-to-ics.job.<uuid>.<stage>.<attempt>`; `activity.json` holds the batch id and tells the extension whether to open the app; job files are written atomically (temp + rename inside `NSFileCoordinator`).
-- Commit 4 (ICS generator): `check-structure.sh` incl. fixture sync passed in the sandbox. Parity tests compare each generated single-event calendar with `presidio-email-{1,2,3}.expected.ics` after masking UID/DTSTAMP (PRODID set to the eluceo string for the test); VTIMEZONE blocks are compared line by line. `swift test` pending locally. Deviation kept for parity: VTIMEZONE DTSTART is the local time after each transition (as eluceo writes it).
-- Commit 5 (cleaner JS): `check-structure.sh` (incl. generated-bundle drift check and `node --check` on all four JS files) passed in the sandbox. `ios/scripts/smoke-cleaner.mjs` run with jsdom against the three HTML fixtures: on the real Presidio page Readability dropped all 9 date tokens and the guard correctly fell back to the heuristic (9/9 dates kept); the two synthetic fixtures are below Readability's 500-char floor and also use the heuristic. Vendored Mozilla Readability 0.6.0 (Apache-2.0, sha256 recorded in `ios/Shared/JS/vendor/README.md`).
-- Commit 6 (share extension): `check-structure.sh` passed in the sandbox; Swift cannot be compiled here, so the first local `xcodegen generate` + build is the gate. Host-app opening tries the responder-chain `openURL:` first, then SwiftUI's `OpenURLAction`, then `extensionContext.open`.
-- Commit 7 (app core): `check-structure.sh` passed in the sandbox; Xcode build pending locally. `StageCoordinator` (actor) is the only writer in the app process; `rescan` runs on launch, foreground, deep link and after every wake, and marks in-flight jobs whose background session has no task left and no result after 90 s as retryable.
-- Commit 8 (Live Activity): `check-structure.sh` passed in the sandbox; device test items 3–4 pending. One activity per batch; started only in the foreground, adopted after relaunch from `Activity.activities`, ended with a 120 s dismissal once every job in the batch is added or dismissed (failed and ready jobs keep it alive); `activity.json` gets `disabled: true` when Live Activities are turned off so the extension stops opening the app.
-- Commit 9 (destinations): `check-structure.sh` passed in the sandbox; `GoogleCalendarAPITests` cover PKCE (RFC 7636 vector), authorization/token/refresh requests, stored-token refresh semantics, timed and all-day event bodies, calendar-list parsing and error envelopes. Apple Calendar uses `EKEventEditViewController` in a SwiftUI sheet one event at a time (swipe-dismiss resumes as cancelled); ICS builds one calendar for all selected events and opens the share sheet; Google inserts into the confirmed or tentative calendar chosen in Settings with one 401 retry after refresh. Device items 5–7 pending.
-- Commit 10 (settings): `check-structure.sh` passed in the sandbox. Keys are written to the Keychain as typed; the model list refreshes from OpenRouter and is cached in the App Group for the share extension; Google calendars load after sign-in with primary preselected for both pickers. Device items 8 and 10 pending.
+### iOS verification log (condensed)
+- Commits 1–10 plus the debug-timeout fix each passed `ios/scripts/check-structure.sh` in the coding sandbox (YAML/plist keys, JSON/XML validity, generated-JS drift, policy and fixture sync, `node --check`). The cleaner JS was additionally exercised with jsdom (`ios/scripts/smoke-cleaner.mjs`): on the real Presidio page Readability dropped all 9 date tokens and the heuristic fallback kept 9/9.
+- Not run anywhere yet (no Swift toolchain in the sandbox; swift.org and apt packages were unreachable): `swift test` on `WebToICSCore` (≈25 XCTest files incl. byte parity with `presidio-email-{1,2,3}.expected.ics`), `xcodegen generate`, the simulator build, and the on-device checklist above. Run `ios/scripts/verify.sh` on a Mac first; expect a round of compile fixes since ~7,300 lines of Swift were written blind.
+- An independent compile-level review of the Swift code was requested in the coding session; any findings land as a follow-up commit on `ios-share-app`.
+- Design notes worth keeping: `StageRunner` is the single state machine used by both processes; background sessions are named `com.justin-c.web-to-ics.job.<uuid>.<stage>.<attempt>`; `activity.json` carries the batch id and tells the extension whether to open the app (`disabled: true` once Live Activities are off); VTIMEZONE DTSTART is written as the local time after each transition to match eluceo; Apple Calendar edit sheets are presented one at a time with swipe-dismiss treated as cancel.
+
+### Active backlog (iOS)
+- [ ] First local build + `swift test`; fix compile errors; record results here.
+- [ ] Device checklist items 1–11.
+- [ ] Decide whether to add an App Icon asset (placeholder set is empty) and a launch screen colour.
 
 ## Recent Verification Baseline
 
@@ -110,11 +109,11 @@ Replaces the user's Apple Shortcut "Add To Calendar With AI 2" (web page → sha
 ## Durable Decisions
 
 - `PLAN.md` is authoritative; chat history, stashes, and local memory are not durable project state.
-- Every coding-agent commit must include the trailer:
-  - `Assisted-by: Codex:gpt-5.5`
+- Every coding-agent commit must include an `Assisted-by: AGENT_NAME:MODEL_VERSION` trailer (for example `Assisted-by: Codex:gpt-5.5` or `Assisted-by: Claude:claude-fable-5-1`).
 - Verification scope:
   - Run PHP lint/tests before PHP/backend code-changing commits.
   - Run JS syntax/build checks before Chrome extension code-changing commits.
+  - Run `ios/scripts/check-structure.sh` before iOS code-changing commits; `ios/scripts/verify.sh` on a Mac is the full gate.
   - Documentation-only commits do not require test runs, but must remain documentation-only.
 - Environment precedence:
   - command-line/process env wins over `.env`

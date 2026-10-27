@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document outlines the comprehensive architecture and implementation plan for enhancing the Email-to-ICS converter with new features including multi-day event support, improved Chrome extension functionality, iOS Shortcuts integration, and enhanced AI processing.
+This document outlines the comprehensive architecture and implementation plan for enhancing the Email-to-ICS converter with new features including multi-day event support, improved Chrome extension functionality, a native iOS share-sheet app, and enhanced AI processing.
 
 ## Current Architecture
 
@@ -10,8 +10,8 @@ This document outlines the comprehensive architecture and implementation plan fo
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Web Form      │     │ Chrome Extension │     │  iOS Shortcut   │
-│  (form.html)    │     │   (popup.js)     │     │   (planned)     │
+│   Web Form      │     │ Chrome Extension │     │    iOS App      │
+│  (form.html)    │     │   (popup.js)     │     │ (ios/, direct)* │
 └────────┬────────┘     └────────┬─────────┘     └────────┬────────┘
          │                       │                          │
          └───────────────────────┴──────────────────────────┘
@@ -31,6 +31,8 @@ This document outlines the comprehensive architecture and implementation plan fo
          │   (AI)      │                │   (Email)       │
          └─────────────┘                └─────────────────┘
 ```
+
+\* The iOS app does not go through the PHP backend: its share extension starts background `URLSession` uploads straight to OpenRouter (and optionally Firecrawl), and the app finishes the job on wake. It shares the prompt policy and the ICS semantics with the backend (see Phase 4).
 
 ### Data Flow
 
@@ -406,85 +408,24 @@ function escapeHtml(text) {
 }
 ```
 
-### Phase 4: iOS Shortcut Support
+### Phase 4: iOS App (implemented on branch `ios-share-app`)
 
-#### 4.1 Create iOS Endpoint
+The original plan here was an `ios-shortcut.php` endpoint plus a Shortcut. It was replaced by a native app under `ios/` that needs no server. Details and the decision log live in `PLAN.md` ("iOS App").
 
-**Files to create**:
-- `ios-shortcut.php`: Dedicated iOS endpoint
+**Targets** (`ios/project.yml`, XcodeGen): `WebToICS` app (SwiftUI, iOS 18+), `ShareExtension`, `WidgetExtension` (Live Activity), all in App Group `group.com.justin-c.web-to-ics`; shared logic in the SwiftPM package `WebToICSCore`.
 
-**Implementation**:
-```php
-<?php
-require_once 'index.php';
+**Stage flow per shared page** (`StageRunner`, identical in the extension and the app):
 
-// iOS Shortcut endpoint
-header('Content-Type: application/json');
-
-// Simplified response for Shortcuts app
-try {
-    $processor = new EmailProcessor();
-    
-    $input = json_decode(file_get_contents('php://input'), true);
-    $url = $input['url'] ?? $_POST['url'] ?? '';
-    $html = $input['html'] ?? $_POST['html'] ?? '';
-    $screenshot = $input['screenshot'] ?? $_POST['screenshot'] ?? '';
-    
-    // Process the event
-    $result = $processor->processWebContent($url, $html, '', [
-        'screenshot' => $screenshot,
-        'tentative' => true,
-        'multiday' => $input['multiday'] ?? false
-    ]);
-    
-    // Return simplified response
-    echo json_encode([
-        'success' => true,
-        'event' => $result['event'],
-        'ics_content' => $result['ics'],
-        'preview_url' => $result['preview_url'] ?? null
-    ]);
-    
-} catch (Exception $e) {
-    http_response_code(500);
-    echo json_encode([
-        'success' => false,
-        'error' => $e->getMessage()
-    ]);
-}
+```
+share sheet ──capture──▶ page.txt (+ raw.html) ──extract (background upload to OpenRouter)──▶ result.json
+            │                                                      │ no events / error → one retry with raw.html
+            └ Safari DOM via ShareJS.js (Readability + heuristic)  ▼
+              bare URL: Firecrawl (if key) | offscreen WKWebView | plain fetch     geocode (MapKit) ──▶ ready ──▶ added
 ```
 
-#### 4.2 iOS Shortcut Template
-
-**Files to create**:
-- `docs/ios-shortcut-setup.md`: Setup instructions
-
-**Content**:
-```markdown
-# iOS Shortcut Setup
-
-## Installation
-
-1. Install the Shortcuts app (pre-installed on iOS 13+)
-2. Open this link on your iPhone: [Install Email-to-ICS Shortcut](https://www.icloud.com/shortcuts/YOUR_SHORTCUT_ID)
-3. Tap "Add Shortcut"
-4. Configure your server URL when prompted
-
-## Manual Setup
-
-1. Create new shortcut
-2. Add actions:
-   - Get Contents of Web Page
-   - Get Contents of URL (POST to your-server/ios-shortcut.php)
-   - Show Result
-
-## Usage
-
-- Share any webpage to the shortcut
-- Or run from Shortcuts app
-- Review the extracted event
-- Add to calendar or share
-```
+- The extension writes `Jobs/<uuid>/job.json`, starts the first background `URLSession` task (identifier `com.justin-c.web-to-ics.job.<uuid>.<stage>.<attempt>`) and dismisses. The first share of a batch opens the app once so it can start the Live Activity; `activity.json` tells later shares to stay in the browser.
+- When a task finishes, iOS launches the app in the background (`handleEventsForBackgroundURLSession`); `StageCoordinator` parses the result, starts the next stage or geocodes, updates the Live Activity, then calls the system completion handler.
+- The Inbox lists jobs by state; ready jobs expose per-event checkboxes; "Add N events" runs the destinations: `EKEventEditViewController` sheets, Google Calendar `events.insert` (OAuth, PKCE, confirmed vs tentative calendar), or one ICS file (`ICSGenerator`, byte-compatible with `IcalGenerator.php`) in the share sheet.
 
 ### Phase 5: Attachment Handling
 
@@ -558,13 +499,13 @@ private function processAttachments($attachments, $eventData) {
 1. Multi-event parsing
 2. Attachment filename generation
 3. Tab state management
-4. iOS response formatting
+4. iOS Core package unit tests (`swift test`, incl. ICS parity with the Presidio fixtures)
 
 ### Integration Tests
 
 1. End-to-end multi-day event flow
 2. Chrome extension state persistence
-3. iOS Shortcut execution
+3. iOS share flow on device (Safari and bare-URL shares, background wake, Live Activity, destinations)
 4. File upload security
 
 ### Performance Tests
