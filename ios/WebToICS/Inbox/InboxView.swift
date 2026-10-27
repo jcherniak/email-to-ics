@@ -9,13 +9,16 @@ struct InboxView: View {
         NavigationStack {
             Group {
                 if model.jobs.isEmpty {
-                    EmptyInboxView()
+                    EmptyInboxView(hasKey: AppEnvironment.shared.secrets.has(.openRouterAPIKey)) { model.showSettings = true }
                 } else {
                     jobList
                 }
             }
             .navigationTitle("Web to ICS")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Settings", systemImage: "gearshape") { model.showSettings = true }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button("Refresh", systemImage: "arrow.clockwise") { model.rescan() }
@@ -42,6 +45,9 @@ struct InboxView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $model.showSettings, onDismiss: { model.reload() }) {
+            SettingsView()
         }
         .sheet(item: $delivery.activeEventEdit, onDismiss: { delivery.editSheetDismissed() }) { request in
             EventEditSheet(request: request)
@@ -192,11 +198,19 @@ struct ReadyJobSection: View {
 }
 
 struct EmptyInboxView: View {
+    let hasKey: Bool
+    let openSettings: () -> Void
+
     var body: some View {
         ContentUnavailableView {
-            Label("No shared pages yet", systemImage: "calendar.badge.plus")
+            Label(hasKey ? "No shared pages yet" : "Add your OpenRouter key", systemImage: hasKey ? "calendar.badge.plus" : "key")
         } description: {
-            Text("In Safari or any app, tap Share, choose Web to ICS, and the event lands here.\nSeveral pages can be shared back to back; the Live Activity shows progress.")
+            Text(hasKey
+                 ? "In Safari or any app, tap Share, choose Web to ICS, and the event lands here.\nSeveral pages can be shared back to back; the Live Activity shows progress."
+                 : "The share extension needs an OpenRouter API key before it can analyze pages.")
+        } actions: {
+            Button(hasKey ? "Settings" : "Open Settings", action: openSettings)
+                .buttonStyle(.borderedProminent)
         }
     }
 }
