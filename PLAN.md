@@ -8,7 +8,7 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
 
 ## Current State
 
-- Active work: none.
+- Active work: native iOS share-sheet app on branch `ios-share-app` (see "iOS App" section below).
 - Completed bugfix: fixed Chrome extension popup regressions on `main`.
   - [x] Switch preferred/default models to OpenRouter tilde-prefixed latest aliases, with `~openai/gpt-mini-latest` as the default.
   - [x] Stop the iframe from auto-expanding to screen height after popup open.
@@ -36,6 +36,41 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
 - The processed-folder debug browser is implemented, env-gated, and isolated from normal workflows.
 - Processed records are gzip-compressed going forward; existing records were backed up and backfilled.
 - Command-line/process environment values take precedence over `.env` throughout the app through `Jcherniak\EmailToIcs\Config\Environment`.
+
+## iOS App (branch `ios-share-app`)
+
+Replaces the user's Apple Shortcut "Add To Calendar With AI 2" (web page → share sheet → calendar event) with a native app under `ios/`. Shortcut behaviour it supersedes: ask for special instructions + tentative flag, scrape the URL with Firecrawl, ask an LLM for raw ICS text, open it in Quick Look.
+
+### Decisions (agreed with the user)
+- AI backend: OpenRouter only, called directly from the device (key in Keychain, model configurable, default `~openai/gpt-mini-latest`, Chrome extension priority aliases). Apple Intelligence rejected because the on-device model has a 4096-token context.
+- Page content: Safari shares deliver the live DOM through the share-extension JS preprocessor. Bare URLs (Orion, Mail…) use Firecrawl first **only if a key is configured**, else an offscreen `WKWebView` rendered inside the share sheet, else a plain fetch + HTML strip. One shared cleaning script (Mozilla Readability.js, selector-heuristic fallback copied from the Chrome extension), text capped at 200k chars.
+- No cheap-model cleanup pass. One extraction call on the cleaned text; if it fails or returns no events, one retry with the raw HTML (kept per job, ~1 MB cap), mirroring the Chrome extension fallback.
+- Concurrency: the share extension enqueues a job in the App Group and starts a background `URLSession` upload; the first share of a batch opens the app once so it can start the Live Activity; later shares just dismiss. The app is woken on each completion (`handleEventsForBackgroundURLSession`), advances the job, geocodes with MapKit, updates the activity.
+- One queue Live Activity per batch: `done/total`, weighted progress (capture 1, extraction 5, retry +5, geocode 0.5), current title/stage; tap opens the Inbox.
+- Destinations: Apple Calendar via `EKEventEditViewController` (edit sheet only, sequential per event); Google Calendar via OAuth (ASWebAuthenticationSession + PKCE, user-supplied iOS client ID) with separate Confirmed/Tentative target calendars chosen in settings; ICS file built on device (one VCALENDAR, all selected VEVENTs) opened in the share sheet. Multi-event results go through an Inbox picker with all events selected by default.
+- Targets: iOS 18+, iPhone + iPad, XcodeGen spec at `ios/project.yml`; bundle `com.justin-c.web-to-ics` (+ `.share`, `.widgets`), App Group `group.com.justin-c.web-to-ics`, URL scheme `webtoics`; secrets in gitignored `ios/Config/Secrets.xcconfig` (template committed).
+- Platform facts verified against Apple docs: only the foreground app can start a Live Activity (extensions cannot; apps may update one from the background); an extension-started background upload survives the extension and wakes the containing app; background upload tasks deliver the response body via the data delegate; `extensionContext.open` is unreliable from share extensions, `EnvironmentValues().openURL` works.
+- Layout: SwiftPM resources/fixtures must live inside the package target, so policy/custom-prompt copies and the Presidio parity fixtures live under `ios/Packages/WebToICSCore/` with `cmp` sync scripts.
+- Verification scope for iOS changes: `ios/scripts/check-structure.sh` (runs anywhere: YAML/JSON/XML validity, required plist keys, `node --check`, generated-JS drift, policy/fixture sync) before every commit; `ios/scripts/verify.sh` (macOS: `swift test` on the Core package, `xcodegen generate`, simulator build) is the user's local gate because this coding environment has no Xcode or Swift toolchain. PLAN.md entries state which checks ran where.
+
+### Commit checklist
+- [x] 1. Scaffold: `project.yml`, configs, `.gitignore`, package skeleton, placeholder targets, scripts, this section.
+- [ ] 2. Core models, prompt builder, JSON schema, OpenRouter extractor, URL cleaner, model catalog, HTML text cleaner + tests.
+- [ ] 3. Core jobs, stages, background transfer, settings, Keychain + tests.
+- [ ] 4. Swift ICS generator with byte-parity tests against the Presidio fixtures.
+- [ ] 5. Cleaner JS (vendored Readability + PageCleaner + Safari shim, generated `ShareJS.js`).
+- [ ] 6. Share extension (options sheet, capture tiers incl. offscreen web view, handoff).
+- [ ] 7. App wake handling, stage coordinator, MapKit geocoding, Inbox UI, deep links.
+- [ ] 8. Queue Live Activity.
+- [ ] 9. Destinations: Apple edit sheet, ICS share sheet, Google OAuth + Calendar API.
+- [ ] 10. Settings UI, model list, Firecrawl toggle, Google calendar pickers.
+- [ ] 11. Docs: README, AGENTS.md, ARCHITECTURE.md, PLAN.md wrap-up.
+
+### Device test checklist (user, recorded here when run)
+1. Share 3 Safari tabs back-to-back: app opens once, all reach Ready. 2. Force-quit app, share again: background wake advances the job. 3. Activity shows `N of M · P%`, tap opens Inbox, ends ~120 s after last add, failed job keeps it open. 4. Manual dismissal → next share opens the app. 5. Apple: sequential edit sheets. 6. ICS import honours VTIMEZONE. 7. Google: calendars by tentative flag. 8. Airplane mode → Failed + Retry. 9. Orion bare URL with/without Firecrawl key. 10. Selection share prefills instructions. 11. No-events page triggers the raw-HTML retry.
+
+### iOS verification log
+- Commit 1 (scaffold): `ios/scripts/check-structure.sh` passed in the coding sandbox. `xcodegen generate`, `swift test` and the simulator build are pending on the user's Mac (no Xcode here).
 
 ## Recent Verification Baseline
 

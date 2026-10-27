@@ -11,3 +11,10 @@ uploads
 processed
 *.local.md
 .phpunit.result.cache
+# iOS app (ios/): generated Xcode project, build products, local secrets
+ios/*.xcodeproj
+ios/DerivedData
+**/xcuserdata/
+ios/**/.build/
+ios/**/.swiftpm/
+ios/Config/Secrets.xcconfig

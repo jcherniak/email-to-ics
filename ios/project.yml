@@ -1,0 +1,132 @@
+# XcodeGen project spec for the WebToICS iOS app.
+# Generate the Xcode project with:  cd ios && xcodegen generate
+# Secrets (Google OAuth client ID, team ID) live in Config/Secrets.xcconfig (gitignored);
+# copy Config/Secrets.xcconfig.template to create it.
+name: WebToICS
+options:
+  bundleIdPrefix: com.justin-c
+  deploymentTarget:
+    iOS: "18.0"
+  xcodeVersion: "16.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: Config/Shared.xcconfig
+  Release: Config/Shared.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+packages:
+  WebToICSCore:
+    path: Packages/WebToICSCore
+targets:
+  WebToICS:
+    type: application
+    platform: iOS
+    sources:
+      - WebToICS
+      - Shared/LiveActivity
+    dependencies:
+      - package: WebToICSCore
+      - target: ShareExtension
+      - target: WidgetExtension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.justin-c.web-to-ics
+        PRODUCT_NAME: WebToICS
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+    entitlements:
+      path: WebToICS/WebToICS.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.justin-c.web-to-ics
+    info:
+      path: WebToICS/Info.plist
+      properties:
+        CFBundleDisplayName: Web to ICS
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: false
+        NSCalendarsWriteOnlyAccessUsageDescription: Web to ICS saves extracted events to your calendar.
+        GoogleIOSClientID: $(GOOGLE_IOS_CLIENT_ID)
+        CFBundleURLTypes:
+          - CFBundleURLName: com.justin-c.web-to-ics
+            CFBundleURLSchemes:
+              - webtoics
+              - $(GOOGLE_REVERSED_CLIENT_ID)
+  ShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ShareExtension
+        excludes:
+          - "*.js"
+      - path: ShareExtension/ShareJS.js
+        buildPhase: resources
+    dependencies:
+      - package: WebToICSCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.justin-c.web-to-ics.share
+        PRODUCT_NAME: ShareExtension
+        APPLICATION_EXTENSION_API_ONLY: YES
+    entitlements:
+      path: ShareExtension/ShareExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.justin-c.web-to-ics
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Web to ICS
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionJavaScriptPreprocessingFile: ShareJS
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsWebPageWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+  WidgetExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - WidgetExtension
+      - Shared/LiveActivity
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.justin-c.web-to-ics.widgets
+        PRODUCT_NAME: WidgetExtension
+        APPLICATION_EXTENSION_API_ONLY: YES
+    entitlements:
+      path: WidgetExtension/WidgetExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.justin-c.web-to-ics
+    info:
+      path: WidgetExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Web to ICS
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
