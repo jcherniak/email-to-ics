@@ -3,6 +3,7 @@ import WebToICSCore
 
 struct InboxView: View {
     @Bindable var model: JobsModel
+    @State private var delivery = DeliveryCoordinator()
 
     var body: some View {
         NavigationStack {
@@ -32,6 +33,30 @@ struct InboxView: View {
                 } else {
                     Text("This job is gone.").foregroundStyle(.secondary)
                 }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if model.selectedCount > 0 {
+                    AddEventsBar(count: model.selectedCount, isRunning: delivery.isRunning) {
+                        let groups = model.selectedByJob
+                        Task { await delivery.deliver(groups) }
+                    }
+                }
+            }
+        }
+        .sheet(item: $delivery.activeEventEdit, onDismiss: { delivery.editSheetDismissed() }) { request in
+            EventEditSheet(request: request)
+                .ignoresSafeArea()
+                .interactiveDismissDisabled()
+        }
+        .sheet(item: $delivery.activeShare, onDismiss: { delivery.shareSheetDismissed() }) { request in
+            ActivityShareSheet(request: request)
+                .presentationDetents([.medium, .large])
+        }
+        .alert("Calendar", isPresented: Binding(get: { delivery.report != nil }, set: { if !$0 { delivery.report = nil } })) {
+            Button("OK") { delivery.report = nil }
+        } message: {
+            if let report = delivery.report {
+                Text(([report.summary] + report.failures.prefix(3)).joined(separator: "\n"))
             }
         }
         .onAppear { model.reload() }
@@ -81,6 +106,29 @@ struct InboxView: View {
         }
         .listStyle(.insetGrouped)
         .refreshable { model.rescan() }
+    }
+}
+
+struct AddEventsBar: View {
+    let count: Int
+    let isRunning: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                if isRunning { ProgressView().tint(.white) }
+                Text(isRunning ? "Adding…" : "Add \(count) event\(count == 1 ? "" : "s")")
+                    .fontWeight(.semibold)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(isRunning)
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 }
 

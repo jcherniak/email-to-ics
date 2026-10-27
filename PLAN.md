@@ -62,7 +62,7 @@ Replaces the user's Apple Shortcut "Add To Calendar With AI 2" (web page → sha
 - [x] 6. Share extension (options sheet, capture tiers incl. offscreen web view, handoff).
 - [x] 7. App wake handling, stage coordinator, MapKit geocoding, Inbox UI, deep links.
 - [x] 8. Queue Live Activity.
-- [ ] 9. Destinations: Apple edit sheet, ICS share sheet, Google OAuth + Calendar API.
+- [x] 9. Destinations: Apple edit sheet, ICS share sheet, Google OAuth + Calendar API.
 - [ ] 10. Settings UI, model list, Firecrawl toggle, Google calendar pickers.
 - [ ] 11. Docs: README, AGENTS.md, ARCHITECTURE.md, PLAN.md wrap-up.
 
@@ -78,6 +78,7 @@ Replaces the user's Apple Shortcut "Add To Calendar With AI 2" (web page → sha
 - Commit 6 (share extension): `check-structure.sh` passed in the sandbox; Swift cannot be compiled here, so the first local `xcodegen generate` + build is the gate. Host-app opening tries the responder-chain `openURL:` first, then SwiftUI's `OpenURLAction`, then `extensionContext.open`.
 - Commit 7 (app core): `check-structure.sh` passed in the sandbox; Xcode build pending locally. `StageCoordinator` (actor) is the only writer in the app process; `rescan` runs on launch, foreground, deep link and after every wake, and marks in-flight jobs whose background session has no task left and no result after 90 s as retryable.
 - Commit 8 (Live Activity): `check-structure.sh` passed in the sandbox; device test items 3–4 pending. One activity per batch; started only in the foreground, adopted after relaunch from `Activity.activities`, ended with a 120 s dismissal once every job in the batch is added or dismissed (failed and ready jobs keep it alive); `activity.json` gets `disabled: true` when Live Activities are turned off so the extension stops opening the app.
+- Commit 9 (destinations): `check-structure.sh` passed in the sandbox; `GoogleCalendarAPITests` cover PKCE (RFC 7636 vector), authorization/token/refresh requests, stored-token refresh semantics, timed and all-day event bodies, calendar-list parsing and error envelopes. Apple Calendar uses `EKEventEditViewController` in a SwiftUI sheet one event at a time (swipe-dismiss resumes as cancelled); ICS builds one calendar for all selected events and opens the share sheet; Google inserts into the confirmed or tentative calendar chosen in Settings with one 401 retry after refresh. Device items 5–7 pending.
 
 ## Recent Verification Baseline
 
