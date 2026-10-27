@@ -10,7 +10,11 @@ struct ShareEnvironment {
 
     static func live() -> ShareEnvironment? {
         guard let store = FileJobStore.appGroup() else { return nil }
-        return ShareEnvironment(store: store, settings: AppSettings.shared(), secrets: KeychainStore(),
+        let settings = AppSettings.shared()
+        if settings.debugShortResourceTimeout {
+            BackgroundTransferCenter.shared.resourceTimeout = 60
+        }
+        return ShareEnvironment(store: store, settings: settings, secrets: KeychainStore(),
                                 transfer: BackgroundTransferCenter.shared)
     }
 }

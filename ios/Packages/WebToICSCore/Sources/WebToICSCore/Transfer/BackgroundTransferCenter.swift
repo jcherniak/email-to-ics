@@ -14,6 +14,9 @@ public final class BackgroundTransferCenter: NSObject, TransferStarting, URLSess
     /// Directory for downloaded response bodies; defaults to `<container>/Transfers`.
     public var downloadsDirectory: URL?
     public var log: (@Sendable (String) -> Void)?
+    /// Per-request and overall timeouts for new background sessions (the debug setting lowers the resource one).
+    public var requestTimeout: TimeInterval = 300
+    public var resourceTimeout: TimeInterval = 900
 
     private let lock = NSLock()
     private var sessions: [String: URLSession] = [:]
@@ -68,8 +71,8 @@ public final class BackgroundTransferCenter: NSObject, TransferStarting, URLSess
             config.sharedContainerIdentifier = containerIdentifier
             config.isDiscretionary = false
             config.sessionSendsLaunchEvents = true
-            config.timeoutIntervalForRequest = 300
-            config.timeoutIntervalForResource = 900
+            config.timeoutIntervalForRequest = requestTimeout
+            config.timeoutIntervalForResource = resourceTimeout
             config.allowsCellularAccess = true
             let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
             sessions[identifier] = session

@@ -48,7 +48,8 @@ final class AppEnvironment: @unchecked Sendable {
             await StageCoordinator.shared.setActivityUpdater(LiveActivityController.shared)
         }
         if settings.debugShortResourceTimeout {
-            logger.notice("debugShortResourceTimeout is on; background resource timeout lowered for testing")
+            BackgroundTransferCenter.shared.resourceTimeout = 60
+            logger.notice("debugShortResourceTimeout is on; background resource timeout lowered to 60 s")
         }
     }
 
