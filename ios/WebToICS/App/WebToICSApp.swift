@@ -3,14 +3,30 @@ import WebToICSCore
 
 @main
 struct WebToICSApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var jobs = JobsModel()
+
     var body: some Scene {
         WindowGroup {
-            NavigationStack {
-                Text("Web to ICS")
-                    .font(.title)
-                    .padding()
-                Text("Share a web page to get started.")
-                    .foregroundStyle(.secondary)
+            InboxView(model: jobs)
+                .onOpenURL { url in
+                    guard let link = DeepLink(url: url) else { return }
+                    jobs.handle(link)
+                    Task { await StageCoordinator.shared.rescan(reason: "deep link") }
+                }
+                .task {
+                    AppEnvironment.shared.bootstrap()
+                    await StageCoordinator.shared.rescan(reason: "launch")
+                    jobs.reload()
+                }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task {
+                    await StageCoordinator.shared.rescan(reason: "foreground")
+                    jobs.reload()
+                }
             }
         }
     }

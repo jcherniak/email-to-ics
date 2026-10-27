@@ -1,0 +1,154 @@
+import SwiftUI
+import WebToICSCore
+
+struct InboxView: View {
+    @Bindable var model: JobsModel
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if model.jobs.isEmpty {
+                    EmptyInboxView()
+                } else {
+                    jobList
+                }
+            }
+            .navigationTitle("Web to ICS")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("Refresh", systemImage: "arrow.clockwise") { model.rescan() }
+                        if model.hasFinished {
+                            Button("Clear finished", systemImage: "trash", role: .destructive) { model.clearFinished() }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+            }
+            .navigationDestination(for: ShareJob.ID.self) { id in
+                if let job = model.jobs.first(where: { $0.id == id }) {
+                    JobDetailView(job: job, events: model.events(for: job))
+                } else {
+                    Text("This job is gone.").foregroundStyle(.secondary)
+                }
+            }
+        }
+        .onAppear { model.reload() }
+    }
+
+    private var jobList: some View {
+        List {
+            if model.snapshot.inProgress > 0 {
+                Section {
+                    BatchProgressHeader(snapshot: model.snapshot)
+                }
+            }
+            if !model.ready.isEmpty {
+                Section("Ready to add") {
+                    ForEach(model.ready) { job in
+                        ReadyJobSection(job: job, model: model)
+                    }
+                }
+            }
+            if !model.inProgress.isEmpty {
+                Section("In progress") {
+                    ForEach(model.inProgress) { job in
+                        NavigationLink(value: job.id) { JobRowView(job: job) }
+                    }
+                }
+            }
+            if !model.failed.isEmpty {
+                Section("Failed") {
+                    ForEach(model.failed) { job in
+                        NavigationLink(value: job.id) { JobRowView(job: job) }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) { model.delete(job) } label: { Label("Delete", systemImage: "trash") }
+                            }
+                            .swipeActions(edge: .leading) {
+                                Button { model.retry(job) } label: { Label("Retry", systemImage: "arrow.clockwise") }.tint(.blue)
+                            }
+                    }
+                }
+            }
+            if !model.added.isEmpty {
+                Section("Added") {
+                    ForEach(model.added) { job in
+                        NavigationLink(value: job.id) { JobRowView(job: job) }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .refreshable { model.rescan() }
+    }
+}
+
+struct BatchProgressHeader: View {
+    let snapshot: BatchSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(snapshot.headline).font(.headline)
+                Spacer()
+                if snapshot.failed > 0 {
+                    Text("\(snapshot.failed) failed").font(.caption).foregroundStyle(.red)
+                }
+            }
+            ProgressView(value: snapshot.progress)
+            if let title = snapshot.currentTitle {
+                Text("\(snapshot.currentStage ?? "Working"): \(title)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct ReadyJobSection: View {
+    let job: ShareJob
+    @Bindable var model: JobsModel
+
+    var body: some View {
+        let events = model.events(for: job)
+        let selectedCount = events.filter { model.isSelected($0) }.count
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                NavigationLink(value: job.id) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(job.displayTitle).font(.headline).lineLimit(2)
+                        Text("\(events.count) event\(events.count == 1 ? "" : "s") · \(job.options.destination.displayName)\(job.options.tentative ? " · tentative" : "")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Button(selectedCount == events.count ? "None" : "All") {
+                    model.setAll(selectedCount != events.count, in: job)
+                }
+                .font(.caption)
+                .buttonStyle(.bordered)
+            }
+            ForEach(events) { event in
+                EventRowView(event: event, selected: model.isSelected(event)) { model.toggle(event) }
+            }
+        }
+        .padding(.vertical, 4)
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) { model.dismiss(job) } label: { Label("Dismiss", systemImage: "xmark") }
+        }
+    }
+}
+
+struct EmptyInboxView: View {
+    var body: some View {
+        ContentUnavailableView {
+            Label("No shared pages yet", systemImage: "calendar.badge.plus")
+        } description: {
+            Text("In Safari or any app, tap Share, choose Web to ICS, and the event lands here.\nSeveral pages can be shared back to back; the Live Activity shows progress.")
+        }
+    }
+}
