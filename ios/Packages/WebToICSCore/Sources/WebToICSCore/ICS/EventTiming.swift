@@ -51,12 +51,12 @@ public struct EventTiming: Equatable, Sendable {
         let allDay = event.isAllDay || (isDateOnly(startText) && (endText.isEmpty || isDateOnly(endText)))
 
         if allDay {
-            guard let startDay = parseDateOnly(startText, calendar: calendar) ?? parseDateTime(startText, timeZone: tz).map { calendar.startOfDay(for: $0) } else {
+            guard let startDay = parseDateOnly(startText, calendar: calendar) ?? parseDateTime(startText, timeZone: tz).map({ calendar.startOfDay(for: $0) }) else {
                 throw EventTimingError.invalidStart(event.dtstart)
             }
             var lastDay = startDay
             if !endText.isEmpty {
-                guard let parsedEnd = parseDateOnly(endText, calendar: calendar) ?? parseDateTime(endText, timeZone: tz).map { calendar.startOfDay(for: $0) } else {
+                guard let parsedEnd = parseDateOnly(endText, calendar: calendar) ?? parseDateTime(endText, timeZone: tz).map({ calendar.startOfDay(for: $0) }) else {
                     throw EventTimingError.invalidEnd(event.dtend)
                 }
                 if parsedEnd >= startDay { lastDay = parsedEnd }

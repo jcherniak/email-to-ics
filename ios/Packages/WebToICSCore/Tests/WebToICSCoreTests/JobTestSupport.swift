@@ -33,7 +33,8 @@ struct JobHarness {
     private static var counter = 0
     static func nextTimestamp() -> Date {
         counter += 1
-        return Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970) + Double(counter))
+        // In the past, so `update()` stamping the real "now" always sorts after creation.
+        return Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970) - 100_000 + Double(counter))
     }
 
     let directory: URL

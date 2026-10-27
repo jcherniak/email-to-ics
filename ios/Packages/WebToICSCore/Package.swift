@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "WebToICSCore",
-    platforms: [.iOS(.v18), .macOS(.v14)],
+    platforms: [.iOS("18.0"), .macOS(.v14)],
     products: [
         .library(name: "WebToICSCore", targets: ["WebToICSCore"]),
     ],

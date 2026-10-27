@@ -139,8 +139,21 @@ public final class BackgroundTransferCenter: NSObject, TransferStarting, URLSess
     }
 
     private func finishedHandling(_ key: String) {
-        lock.withLock { pendingResults[key] = max(0, (pendingResults[key] ?? 1) - 1) }
-        completeIfReady(key)
+        let hasCompletionHandler: Bool = lock.withLock {
+            pendingResults[key] = max(0, (pendingResults[key] ?? 1) - 1)
+            return completionHandlers[key] != nil || eventsFinished.contains(key)
+        }
+        if hasCompletionHandler {
+            completeIfReady(key)
+        } else {
+            // Task finished while the app was running (no system wake): nothing else will arrive on this
+            // single-task session, so release it instead of keeping one URLSession per stage attempt alive.
+            lock.withLock {
+                guard (pendingResults[key] ?? 0) == 0, let session = sessions.removeValue(forKey: key) else { return }
+                pendingResults.removeValue(forKey: key)
+                session.finishTasksAndInvalidate()
+            }
+        }
     }
 
     /// Runs the system completion handler once events are finished and every result has been persisted.

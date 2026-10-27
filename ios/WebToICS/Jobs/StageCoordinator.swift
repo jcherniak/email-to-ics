@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import WebToICSCore
+import os
 
 /// App-side driver of the job pipeline: handles finished background transfers (from a wake or while running),
 /// geocodes, rescans the queue on foreground, and reflects everything into the Live Activity and the UI.

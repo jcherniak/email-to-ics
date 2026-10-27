@@ -298,19 +298,32 @@ public enum GoogleCalendarAPI {
         return try JSONDecoder().decode(InsertedEvent.self, from: data)
     }
 
+    /// Calendar API errors are `{"error":{"code":..,"message":..}}`; OAuth token errors are
+    /// `{"error":"invalid_grant","error_description":"..."}`. Both shapes are handled.
     struct ErrorEnvelope: Decodable {
         struct Inner: Decodable {
             var code: Int?
             var message: String?
         }
         var error: Inner?
+        var errorCode: String?
         var errorDescription: String?
         enum CodingKeys: String, CodingKey { case error, errorDescription = "error_description" }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            if let inner = try? c.decodeIfPresent(Inner.self, forKey: .error) {
+                error = inner
+            } else {
+                errorCode = try? c.decodeIfPresent(String.self, forKey: .error)
+            }
+            errorDescription = try c.decodeIfPresent(String.self, forKey: .errorDescription)
+        }
     }
 
     public static func errorMessage(from data: Data) -> String? {
         guard let envelope = try? JSONDecoder().decode(ErrorEnvelope.self, from: data) else { return nil }
         if let inner = envelope.error { return inner.message ?? "error \(inner.code ?? 0)" }
-        return envelope.errorDescription
+        return envelope.errorDescription ?? envelope.errorCode
     }
 }

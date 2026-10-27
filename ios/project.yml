@@ -14,7 +14,7 @@ configFiles:
   Release: Config/Shared.xcconfig
 settings:
   base:
-    SWIFT_VERSION: "5.10"
+    SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1,2"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)

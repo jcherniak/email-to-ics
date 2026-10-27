@@ -3,7 +3,7 @@ import XCTest
 
 final class ICSWriterTests: XCTestCase {
     func testEscaping() {
-        XCTAssertEqual(ICSWriter.escapeText("a,b;c\\d"), "a\\,b\;c\\\\d")
+        XCTAssertEqual(ICSWriter.escapeText("a,b;c\\d"), "a\\,b\\;c\\\\d")
         XCTAssertEqual(ICSWriter.escapeText("line1\nline2"), "line1\\nline2")
         XCTAssertEqual(ICSWriter.escapeText("literal\\nbreak"), "literal\\nbreak", "a literal \\n is kept as one escaped newline")
         XCTAssertEqual(ICSWriter.escapeText("tab\there\r\nnext"), "tabhere\\nnext")

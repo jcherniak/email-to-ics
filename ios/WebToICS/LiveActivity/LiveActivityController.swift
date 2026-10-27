@@ -1,6 +1,7 @@
 import ActivityKit
 import Foundation
 import WebToICSCore
+import os
 
 /// Owns the single queue Live Activity for the current batch and mirrors its existence into `activity.json`
 /// so the share extension knows whether to open the app.

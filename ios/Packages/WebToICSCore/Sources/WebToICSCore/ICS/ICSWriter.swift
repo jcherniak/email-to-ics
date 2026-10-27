@@ -15,7 +15,7 @@ public enum ICSWriter {
         for scalar in text.unicodeScalars {
             switch scalar {
             case "\\": out += "\\\\"
-            case ";": out += "\;"
+            case ";": out += "\\;"
             case ",": out += "\\,"
             case "\n": out += "\\n"
             default:
