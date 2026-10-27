@@ -59,6 +59,7 @@ use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
 use Opis\JsonSchema\Errors\ValidationError;
 use Jcherniak\EmailToIcs\Calendar\IcalGenerator;
 use Jcherniak\EmailToIcs\Config\Environment;
+use Jcherniak\EmailToIcs\Content\HtmlTitle;
 use Jcherniak\EmailToIcs\Fetch\ChainUrlFetcher;
 use Jcherniak\EmailToIcs\Fetch\UrlFetcherInterface;
 use Jcherniak\EmailToIcs\Geocode\ChainGeocoder;
@@ -314,8 +315,6 @@ class ErrorHandler {
     }
 }
 
-// Include the PuphpeteerRenderer class
-require_once __DIR__ . '/PuphpeteerRenderer.php';
 
 class EmailProcessor
 {
@@ -328,8 +327,7 @@ class EmailProcessor
 	private $toConfirmedEmail;
 
 	private $openaiClient;
-	private $scrapeflyScreenshot = null; // Stores screenshot from Scrapefly
-	private $puphpeteerRenderer = null; // PuphpeteerRenderer instance
+	private $fetchedScreenshot = null; // Screenshot captured by a fetch level, if any
 	private MailerInterface $mailer;
 	private UrlFetcherInterface $urlFetcher;
 	private GeocoderInterface $geocoder;
@@ -1224,21 +1222,7 @@ HasBody:
 
 	private function extractPageTitleFromHtml(?string $html): ?string
 	{
-		if (empty($html)) {
-			return null;
-		}
-
-		if (preg_match('/<title[^>]*>(.*?)<\/title>/is', $html, $matches)) {
-			$title = trim(html_entity_decode(strip_tags($matches[1]), ENT_QUOTES | ENT_HTML5));
-			return $title !== '' ? $title : null;
-		}
-
-		if (preg_match('/<h1[^>]*>(.*?)<\/h1>/is', $html, $matches)) {
-			$title = trim(html_entity_decode(strip_tags($matches[1]), ENT_QUOTES | ENT_HTML5));
-			return $title !== '' ? $title : null;
-		}
-
-		return null;
+		return HtmlTitle::extract($html);
 	}
 
 	private function buildProcessingMetadata(?string $downloadedUrl, ?string $pageTitle, array $eventDetails = []): array
@@ -1506,16 +1490,16 @@ HasBody:
 			$extractedUrl = $this->stripTrackingParameters($extractedUrl);
             errlog("URL found in TextBody (after stripping tracking): {$extractedUrl}. Fetching...");
 			// Clear any previous screenshot
-			$this->scrapeflyScreenshot = null;
+			$this->fetchedScreenshot = null;
 			$fetchedContent = $this->fetch_url($extractedUrl); // Returns raw HTML/content
             if ($fetchedContent) {
                 $downloadedPageTitle = $this->extractPageTitleFromHtml($fetchedContent);
                 $downloadedUrlContent = $this->extractMainContent($fetchedContent); // Cleaned content
     			$combinedText .= "\n\n--- HTML content fetched from URL found in email TextBody ---\n```html\n" . $downloadedUrlContent . "\n```";
-				// Get screenshot if it was captured by Scrapefly
-				if ($this->scrapeflyScreenshot) {
-					$screenshotData = $this->scrapeflyScreenshot;
-					errlog("Using screenshot from Scrapefly for AI processing");
+				// Get screenshot if the fetch level captured one
+				if ($this->fetchedScreenshot) {
+					$screenshotData = $this->fetchedScreenshot;
+					errlog("Using screenshot from fetch level for AI processing");
 				}
             } else {
                 errlog("Failed to fetch content from URL found in TextBody: {$extractedUrl}");
@@ -1638,7 +1622,7 @@ HasBody:
 
             // Record successful processing
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'success', $calendarEvent, null, null, $downloadedUrlContent, $this->scrapeflyScreenshot, $pdfText, $htmlBodyForAI, $this->buildProcessingMetadata($extractedUrl, $downloadedPageTitle, $eventDetails));
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'success', $calendarEvent, null, null, $downloadedUrlContent, $this->fetchedScreenshot, $pdfText, $htmlBodyForAI, $this->buildProcessingMetadata($extractedUrl, $downloadedPageTitle, $eventDetails));
             }
 
             echo json_encode([
@@ -1659,7 +1643,7 @@ HasBody:
 
             // Record failed processing
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'failure', null, $errorMessage, null, $downloadedUrlContent, $this->scrapeflyScreenshot, $pdfText, $htmlBodyForAI, $this->buildProcessingMetadata($extractedUrl, $downloadedPageTitle, $eventDetails));
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'failure', null, $errorMessage, null, $downloadedUrlContent, $this->fetchedScreenshot, $pdfText, $htmlBodyForAI, $this->buildProcessingMetadata($extractedUrl, $downloadedPageTitle, $eventDetails));
             }
 
             echo json_encode(['status' => 'error', 'message' => 'Failed to process email - error notification sent']);
@@ -1673,7 +1657,7 @@ HasBody:
             errlog("Stack trace: " . $stackTrace);
 
             if ($messageId) {
-                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'exception', null, $errorMessage, $stackTrace, $downloadedUrlContent ?? null, $this->scrapeflyScreenshot ?? null, $pdfText ?? null, $htmlBodyForAI ?? null, $this->buildProcessingMetadata($extractedUrl ?? null, $downloadedPageTitle ?? null, $eventDetails ?? []));
+                $this->recordProcessingAttempt($messageId, $body['Subject'] ?? 'no_subject', 'exception', null, $errorMessage, $stackTrace, $downloadedUrlContent ?? null, $this->fetchedScreenshot ?? null, $pdfText ?? null, $htmlBodyForAI ?? null, $this->buildProcessingMetadata($extractedUrl ?? null, $downloadedPageTitle ?? null, $eventDetails ?? []));
             }
 
             // Send error email
@@ -1760,266 +1744,8 @@ HasBody:
 			return false;
 		}
 
-		$this->scrapeflyScreenshot = $result->screenshotBase64;
+		$this->fetchedScreenshot = $result->screenshotBase64;
 		return $result->content;
-	}
-
-	private function fetchUrlDirect($url) {
-		$client = new Client();
-		$requestOptions = [
-			'headers' => [
-				'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-				'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-				'Accept-Language' => 'en-US,en;q=0.5',
-				'Accept-Encoding' => 'gzip, deflate, br',
-				'DNT' => '1',
-				'Connection' => 'keep-alive',
-				'Upgrade-Insecure-Requests' => '1',
-			],
-			'timeout' => 30,
-			'connect_timeout' => 10,
-			'http_errors' => true, // Throw exception on 4xx/5xx
-		];
-
-		$response = $client->get($url, $requestOptions);
-		$htmlContent = $response->getBody()->getContents();
-
-		if (empty($htmlContent)) {
-			return false;
-		}
-
-		return $htmlContent;
-	}
-
-	private function fetchUrlWithProxy($url) {
-		// Skip if proxy credentials not configured
-		if (empty($_ENV['OXYLABS_PROXY']) || empty($_ENV['OXYLABS_USERNAME']) || empty($_ENV['OXYLABS_PASSWORD'])) {
-			errlog("Oxylabs proxy not configured, skipping proxy method");
-			return false;
-		}
-
-		$client = new Client();
-		$requestOptions = [
-			'headers' => [
-				'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-				'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-			],
-			'proxy' => [
-				'http' => 'http://' . $_ENV['OXYLABS_USERNAME'] . ':' . $_ENV['OXYLABS_PASSWORD'] . '@' . $_ENV['OXYLABS_PROXY'],
-				'https' => 'http://' . $_ENV['OXYLABS_USERNAME'] . ':' . $_ENV['OXYLABS_PASSWORD'] . '@' . $_ENV['OXYLABS_PROXY'],
-			],
-			'timeout' => 30,
-			'connect_timeout' => 10,
-			'http_errors' => true,
-		];
-
-		errlog("Using Oxylabs proxy: " . $_ENV['OXYLABS_PROXY']);
-
-		$response = $client->get($url, $requestOptions);
-		$htmlContent = $response->getBody()->getContents();
-
-		if (empty($htmlContent)) {
-			return false;
-		}
-
-		return $htmlContent;
-	}
-
-	private function solveCaptchaWith2Captcha($sitekey, $pageUrl, $captchaType = 'recaptchav2') {
-		// Skip if 2captcha API key not configured
-		if (empty($_ENV['TWOCAPTCHA_API_KEY'])) {
-			errlog("2captcha API key not configured, cannot solve captcha");
-			return false;
-		}
-
-		$apiKey = $_ENV['TWOCAPTCHA_API_KEY'];
-
-		// Step 1: Submit captcha for solving
-		$submitUrl = 'http://2captcha.com/in.php';
-		$submitData = [
-			'key' => $apiKey,
-			'method' => $captchaType,
-			'googlekey' => $sitekey,
-			'pageurl' => $pageUrl,
-			'json' => 1
-		];
-
-		errlog("Submitting captcha to 2captcha for solving");
-		$response = file_get_contents($submitUrl . '?' . http_build_query($submitData));
-		$result = json_decode($response, true);
-
-		if ($result['status'] != 1) {
-			errlog("2captcha submission failed: " . ($result['error_text'] ?? 'Unknown error'));
-			return false;
-		}
-
-		$captchaId = $result['request'];
-		errlog("Captcha submitted to 2captcha, ID: {$captchaId}");
-
-		// Step 2: Wait and poll for result
-		$resultUrl = 'http://2captcha.com/res.php';
-		$maxAttempts = 30; // 30 attempts, 5 seconds each = 2.5 minutes max
-		$attempt = 0;
-
-		while ($attempt < $maxAttempts) {
-			sleep(5); // Wait 5 seconds between attempts
-			$attempt++;
-
-			$checkData = [
-				'key' => $apiKey,
-				'action' => 'get',
-				'id' => $captchaId,
-				'json' => 1
-			];
-
-			$response = file_get_contents($resultUrl . '?' . http_build_query($checkData));
-			$result = json_decode($response, true);
-
-			if ($result['status'] == 1) {
-				errlog("Captcha solved successfully by 2captcha");
-				return $result['request']; // This is the captcha solution
-			} elseif ($result['request'] != 'CAPCHA_NOT_READY') {
-				errlog("2captcha error: " . ($result['error_text'] ?? $result['request']));
-				return false;
-			}
-		}
-
-		errlog("2captcha timeout after {$maxAttempts} attempts");
-		return false;
-	}
-
-	private function fetchUrlWithScrapefly($url) {
-		// Skip if Scrapefly API key not configured
-		if (empty($_ENV['SCRAPEFLY_API_KEY'])) {
-			errlog("Scrapefly API key not configured, skipping Scrapefly method");
-			return false;
-		}
-
-		// Build Scrapefly API URL with parameters
-		$scrapeflyUrl = 'https://api.scrapfly.io/scrape?' . http_build_query([
-			'key' => $_ENV['SCRAPEFLY_API_KEY'],
-			'url' => $url,
-			'format' => 'clean_html',
-			'render_js' => 'true',
-			'rendering_wait' => 5000,
-			'screenshots[main]' => 'fullpage',
-			'screenshot_flags' => 'load_images',
-			'tags' => 'player,project:email-to-ics',
-		]);
-
-		$curl = curl_init();
-		curl_setopt_array($curl, [
-			CURLOPT_URL => $scrapeflyUrl,
-			CURLOPT_RETURNTRANSFER => true,
-			CURLOPT_ENCODING => '',
-			CURLOPT_MAXREDIRS => 10,
-			CURLOPT_TIMEOUT => 60,
-			CURLOPT_FOLLOWLOCATION => true,
-			CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-			CURLOPT_CUSTOMREQUEST => 'GET',
-		]);
-
-		errlog("Using Scrapefly API to fetch URL");
-
-		$response = curl_exec($curl);
-		$httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-		$error = curl_error($curl);
-		curl_close($curl);
-
-		if ($error) {
-			errlog("Scrapefly CURL error: " . $error);
-			throw new \RuntimeException("Scrapefly request failed: " . $error);
-		}
-
-		if ($httpCode >= 400) {
-			errlog("Scrapefly returned HTTP status: " . $httpCode);
-			throw new \RuntimeException("Scrapefly returned HTTP error: " . $httpCode);
-		}
-
-		if (empty($response)) {
-			return false;
-		}
-
-		// Scrapefly returns a JSON response with the scraped content
-		$result = json_decode($response, true);
-		if (json_last_error() !== JSON_ERROR_NONE) {
-			errlog("Failed to decode Scrapefly JSON response");
-			return false;
-		}
-
-		// Check if captcha was detected
-		if (isset($result['result']['captcha_detected']) && $result['result']['captcha_detected']) {
-			errlog("Captcha detected by Scrapefly");
-
-			// Try to extract captcha details and solve with 2captcha
-			if (!empty($_ENV['TWOCAPTCHA_API_KEY']) && isset($result['result']['captcha_sitekey'])) {
-				$sitekey = $result['result']['captcha_sitekey'];
-				$captchaSolution = $this->solveCaptchaWith2Captcha($sitekey, $url);
-
-				if ($captchaSolution) {
-					// Retry with captcha solution
-					errlog("Retrying Scrapefly with captcha solution");
-					// Add captcha solution to the request
-					// Note: This would need additional Scrapefly API parameters
-					// which may vary based on the captcha type
-				}
-			}
-		}
-
-		// Extract the HTML content from Scrapefly response
-		$htmlContent = $result['result']['content'] ?? '';
-
-		if (empty($htmlContent)) {
-			errlog("Scrapefly returned empty content");
-			return false;
-		}
-
-		// Store screenshot if available
-		if (isset($result['result']['screenshots']['main'])) {
-			$screenshotData = $result['result']['screenshots']['main'];
-			errlog("Screenshot captured via Scrapefly");
-
-			// Extract base64 data from screenshot structure
-			// Scrapefly can return screenshots as:
-			// 1. Object with 'data' property (inline base64)
-			// 2. Object with 'url' property (download URL)
-			// 3. Direct base64 string
-			if (is_array($screenshotData) && isset($screenshotData['data'])) {
-				// Extract just the base64 data
-				$this->scrapeflyScreenshot = $screenshotData['data'];
-			} elseif (is_array($screenshotData) && isset($screenshotData['url'])) {
-				// Download screenshot from URL (requires API key)
-				$screenshotUrl = $screenshotData['url'];
-
-				// Add API key to URL as query parameter
-				$separator = (strpos($screenshotUrl, '?') !== false) ? '&' : '?';
-				$screenshotUrlWithKey = $screenshotUrl . $separator . 'key=' . urlencode($_ENV['SCRAPEFLY_API_KEY']);
-
-				errlog("Downloading screenshot from Scrapefly URL: " . $screenshotUrl);
-				try {
-					$client = new \GuzzleHttp\Client();
-					$screenshotResponse = $client->get($screenshotUrlWithKey, [
-						'timeout' => 30,
-					]);
-					$screenshotBinary = $screenshotResponse->getBody()->getContents();
-					$this->scrapeflyScreenshot = base64_encode($screenshotBinary);
-					errlog("Successfully downloaded screenshot (" . strlen($screenshotBinary) . " bytes)");
-				} catch (\Throwable $e) {
-					errlog("Failed to download screenshot from URL: " . $e->getMessage());
-					$this->scrapeflyScreenshot = null;
-				}
-			} elseif (is_string($screenshotData)) {
-				// Already a string (direct base64)
-				$this->scrapeflyScreenshot = $screenshotData;
-			} else {
-				// Unexpected format, log and skip
-				errlog("Unexpected screenshot format from Scrapefly: " . json_encode($screenshotData));
-				$this->scrapeflyScreenshot = null;
-			}
-		}
-
-		errlog("Successfully fetched content via Scrapefly (" . strlen($htmlContent) . " bytes)");
-		return $htmlContent;
 	}
 
 	private function extractPdfText($attachments)
@@ -2111,7 +1837,7 @@ HasBody:
 
     /**
      * Simple retry strategy - try all models once with provided content
-     * Content fetching (direct -> oxylabs -> scrapefly) already happened before this
+     * Content fetching (direct -> firecrawl -> tinyfish) already happened before this
      */
     private function generateEventWithRetries($combinedText, $instructions, $url, $htmlBodyForAI, $pdfText, $screenshotData, $cliDebug = false, $hasMultiFlag = false)
     {
@@ -2129,7 +1855,7 @@ HasBody:
         }
 
         // Try all models ONCE with the provided content
-        // (Content was already fetched using direct -> oxylabs -> scrapefly fallback in processPostmarkRequest)
+        // (Content was already fetched using the direct -> firecrawl -> tinyfish chain in processPostmarkRequest)
         errlog("Trying all models with provided content");
         $triedModels = [];
         $result = $this->tryAllModelsWithContent(

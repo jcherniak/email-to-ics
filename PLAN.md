@@ -6,6 +6,37 @@ Update this file as work proceeds. Record completed tasks, changed plans, blocke
 
 Every 5 commits, summarize older detailed entries into a concise historical summary while preserving active todos, active decisions, and unfinished work.
 
+## Active Work: crawl chain, candidates, Readability, retry flow, reply-to-edit, model-driven fetch
+
+Branch `multi-event-and-retry` (items 1-5), then branch `model-driven-fetch` (item 6) so it can be reverted independently.
+
+| Phase | Commit | Status |
+| --- | --- | --- |
+| C1 Fetch chain direct -> firecrawl -> tinyfish_fetch -> tinyfish_browser; remove Oxylabs/Scrapefly/Puphpeteer | this commit | done |
+| C2 Readability (node + jsdom) snippet with lightened full-HTML fallback; delete PHP 8.4-only `extractMainContent` | | todo |
+| C3 Shared retry runner: per model, snippet then full on first level, full on later levels, then next model; opis validation back on | | todo |
+| C4a Multi-event candidates: always-array schema, `CandidateStore` keyed state, choice email with confirm-page links, routes before auth | | todo |
+| C4b Chrome extension: candidate checkbox picker in the local JS processor, Reply-To + source-url marker | | todo |
+| C5 Reply-to-edit: unique Reply-To `edit-<key>@INBOUND_REPLY_DOMAIN`, stored state path with previous ICS, URL fallback from quoted email | | todo |
+| C6 Model-driven fetch via tool loop (`fetch_direct`, `fetch_with_firecrawl`, `fetch_with_tinyfish`, `render_with_tinyfish_browser`) on `model-driven-fetch` | | todo |
+
+Decisions for this work (confirmed with the owner):
+- Links in emails use a random 32-hex key, no login; every link lands on a one-button confirm page (`CANDIDATE_LINKS_REQUIRE_CONFIRM=1` default) so mail scanners cannot trigger sends.
+- Choice email whenever more than one candidate is returned; one candidate sends directly; `<multiple>` or `MULTI` in the incoming mail sends every candidate directly, one email per event. Email delivery never combines events into one ICS.
+- TinyFish browser level uses the Agent API (pure HTTP), not a CDP driver; no screenshot from that level.
+- Item 6 level 1 is a PHP `fetch_direct` function tool (not `openrouter:web_fetch`) so PHP always sees page content for emails and edits.
+- Retry failure = transport error, unparseable JSON, schema-invalid JSON, zero events or missing dtstart, or model `success:false`.
+- Extension keeps local processing; candidates are ported into `email-processor.js`.
+
+C1 notes:
+- `FetchResult` gained `finalUrl`, `title`, `statusCode`, `contentType` (`html`|`text`) and `toSummary()`.
+- `ChainUrlFetcher` exposes `levelNames()`, `hasLevel()`, `fetchLevel()` (exceptions propagate) for the C3 runner; `fetch()` keeps first-success semantics.
+- Removed `OxylabsProxyUrlFetcher`, `ScrapeflyUrlFetcher`, `PuphpeteerRenderer.php`, the dead curl/2captcha fetch methods in `index.php`, `zoon/puphpeteer` and unused `html2text/html2text`; added `symfony/process` (used by C2) explicitly. `$scrapeflyScreenshot` is now `$fetchedScreenshot`.
+- New env: `FIRECRAWL_API_KEY`, `TINYFISH_API_KEY`, `FETCH_*_TIMEOUT`, `FETCH_FIRECRAWL_WAIT_MS`, `FETCH_TINYFISH_BROWSER_PROFILE` (default `stealth` because that level only runs after three cheaper levels failed).
+- Firecrawl is called with `onlyMainContent:false` so the full-page tier gets the whole document; Readability (C2) does main-content extraction.
+- Verified: `php -l` on touched files, `vendor/bin/phpunit` (69 tests, 3 expected geocoder skips without live keys).
+- Environment notes: tests need a local `.env` (copy of `.env.template`); `chrome-extension/node_modules` is tracked in git with a darwin-arm64 esbuild binary, so on Linux run the bundle with `node_modules/@esbuild/linux-x64/bin/esbuild` or reinstall; do not commit `node_modules` changes.
+
 ## Current State
 
 - The main requested Presidio Theatre behavior is implemented: equal peer performances can produce multiple events/emails, while explicit instructions to focus on one date keep output to one event.
@@ -63,7 +94,7 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
   - RSVP/invitation behavior, if ever needed, must be an explicit non-default mode
 - Fetching:
   - use a chain of fetchers behind `UrlFetcherInterface`
-  - production order remains direct, Oxylabs, then Scrapefly where configured
+  - production order is direct, Firecrawl, TinyFish Fetch, then TinyFish browser (Agent API), each skipped when its key is missing
   - test fetchers should avoid live network calls
 - Geocoding:
   - use `GeocoderInterface` through `ChainGeocoder`
@@ -95,7 +126,7 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
   - `EmailAttachment`
 - Added fetcher abstractions:
   - `UrlFetcherInterface`
-  - direct, Oxylabs, Scrapefly, chain, artifact, and dummy fetchers
+  - direct, chain, artifact, and dummy fetchers (Oxylabs/Scrapefly removed later in favor of Firecrawl/TinyFish)
 - Added input-source abstractions:
   - `ProcessingInput`
   - `EmailInputSource`

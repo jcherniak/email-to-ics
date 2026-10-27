@@ -1,5 +1,4 @@
 {
-  "dependencies": {
-    "@zoon/puphpeteer": "github:zoonru/puphpeteer"
-  }
+  "private": true,
+  "dependencies": {}
 }
