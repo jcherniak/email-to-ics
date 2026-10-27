@@ -23,7 +23,7 @@ public struct OpenRouterModelsResponse: Decodable {
 }
 
 /// Cached, merged list persisted in the App Group so the share extension's picker is instant.
-public struct ModelCatalogCache: Codable, Sendable {
+public struct ModelCatalogCache: Codable, Equatable, Sendable {
     public var fetchedAt: Date
     public var models: [ModelOption]
 
