@@ -60,6 +60,7 @@ use Opis\JsonSchema\Errors\ValidationError;
 use Jcherniak\EmailToIcs\Calendar\IcalGenerator;
 use Jcherniak\EmailToIcs\Config\Environment;
 use Jcherniak\EmailToIcs\Content\HtmlTitle;
+use Jcherniak\EmailToIcs\Content\ReadabilityExtractor;
 use Jcherniak\EmailToIcs\Fetch\ChainUrlFetcher;
 use Jcherniak\EmailToIcs\Fetch\UrlFetcherInterface;
 use Jcherniak\EmailToIcs\Geocode\ChainGeocoder;
@@ -331,6 +332,7 @@ class EmailProcessor
 	private MailerInterface $mailer;
 	private UrlFetcherInterface $urlFetcher;
 	private GeocoderInterface $geocoder;
+	private ReadabilityExtractor $contentExtractor;
 
 	private $aiModel;
 	private $openRouterKey;
@@ -540,7 +542,7 @@ class EmailProcessor
 		)));
 	}
 
-    public function __construct(?MailerInterface $mailer = null, ?UrlFetcherInterface $urlFetcher = null, ?GeocoderInterface $geocoder = null)
+    public function __construct(?MailerInterface $mailer = null, ?UrlFetcherInterface $urlFetcher = null, ?GeocoderInterface $geocoder = null, ?ReadabilityExtractor $contentExtractor = null)
     {
         $this->openRouterKey = $_ENV['OPENROUTER_KEY'];
         $this->postmarkApiKey = $_ENV['POSTMARK_API_KEY'];
@@ -577,6 +579,7 @@ class EmailProcessor
 		$this->mailer = $mailer ?? new PostmarkMailer($this->postmarkApiKey);
 		$this->urlFetcher = $urlFetcher ?? ChainUrlFetcher::fromEnvironment();
 		$this->geocoder = $geocoder ?? ChainGeocoder::fromEnvironment();
+		$this->contentExtractor = $contentExtractor ?? ReadabilityExtractor::fromEnvironment();
 	}
 
 
@@ -759,7 +762,9 @@ class EmailProcessor
 			errlog("Requested model '{$requestedModel}' invalid or not provided. Using default model: {$this->aiModel}");
 		}
 
-		$downloadedText = $this->extractMainContent($downloadedText);
+		$extractedContent = $this->contentExtractor->extract($downloadedText, $url);
+		errlog("Content extraction: " . json_encode($extractedContent->toSummary()));
+		$downloadedText = $extractedContent->primaryHtml();
 
 		// Process screenshot if provided
 		$screenshotBase64 = null;
@@ -1002,213 +1007,6 @@ TEXT;
             }
 		}
 		exit;
-	}
-
-	protected function extractMainContent(string $html) : string
-	{
-		$extract_start = microtime(true);
-		errlog("extractMainContent started, HTML length: " . strlen($html));
-		
-		// If the html contains a <main> element, extract and return it.
-		$doc = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
-
-		$body = null;
-		$elems = ['main', 'article'];
-		foreach ($elems as $elem) {
-			$elements = $doc->getElementsByTagName($elem);
-			if ($elements->length > 0) {
-				errlog("Found $elem element");
-				$body = $this->removeNonTextTags($elements->item(0));
-				goto HasBody;
-			}
-		}
-
-		$bodies = $doc->getElementsByTagName('body');
-		if ($bodies->length > 0) {
-			errlog("Using body element");
-			$body = $this->removeNonTextTags($bodies->item(0));
-			goto HasBody;
-		}
-
-		errlog("Using document element");
-		$body = $this->removeNonTextTags($doc->documentElement);
-HasBody:
-
-		$this->removeAttributes($body);
-		$this->removeEmptyElements($body);
-
-		$finalHtml = $body->innerHTML;
-
-		// Apply UTF-8 conversion to the final HTML string
-		$encoding = mb_detect_encoding($finalHtml, mb_detect_order(), true); // Strict detection
-		if ($encoding && $encoding !== 'UTF-8') {
-			$finalHtml = mb_convert_encoding($finalHtml, 'UTF-8', $encoding);
-		}
-		// Ensure it IS UTF-8 even if detection failed or was already UTF-8 (handles potential invalid sequences)
-		$finalHtml = mb_convert_encoding($finalHtml, 'UTF-8', 'UTF-8'); 
-
-		$duration = microtime(true) - $extract_start;
-		errlog("extractMainContent completed in " . number_format($duration, 4) . " seconds, final HTML length: " . strlen($finalHtml));
-		
-		return $finalHtml;
-	}
-
-	/**
-	 * Removes non-text tags like svg, img, script, style, etc. from HTML content
-	 *
-	 * @param \Dom\Element $body The body element to clean
-	 * @return \Dom\Element The cleaned body element
-	 */
-	protected function removeNonTextTags(\Dom\Element $body) : \Dom\Element
-	{
-		// Tags to remove
-		$tagsToRemove = [
-			'svg', 
-			'img', 
-			'script', 
-			'style', 
-			'iframe', 
-			'video', 
-			'audio', 
-			'canvas',
-			'object',
-			'embed',
-			'noscript',
-			'map',
-			'button',
-			'select',
-			'option',
-			'form',
-			'input',
-			'textarea',
-			'progress',
-			'figure',
-			'figcaption',
-			'picture',
-			'source',
-			'link',
-			'meta',
-			'title',
-			'track',
-			'param',
-			'applet',
-			'area',
-			'base',
-			'col',
-			'command',
-			'dialog',
-			'frame',
-			'frameset',
-			'hr',
-			'wbr',
-			'slot',
-			'template',
-			'portal',
-		];
-		
-		// Remove each type of non-text element
-		foreach ($tagsToRemove as $tag) {
-			$elements = $body->getElementsByTagName($tag);
-			// We need to remove elements in reverse order because the NodeList is live
-			for ($i = $elements->length - 1; $i >= 0; $i--) {
-				$element = $elements->item($i);
-				if ($element->parentNode) {
-					// Remove the element from its parent
-					$element->parentNode->removeChild($element);
-				}
-			}
-		}
-		
-		return $body;
-	}
-
-	protected function removeAttributes(\Dom\Element $body)
-	{
-		// Define allowed attributes
-		$allowedAttributes = ['class', 'id', 'for', 'href']; // <-- Add 'href' here
-		
-		// Recursively process all child nodes
-		$elements = $body->getElementsByTagName('*');
-		// Process in reverse order since the NodeList is live
-		for ($i = $elements->length - 1; $i >= 0; $i--) {
-			$element = $elements->item($i);
-			if ($element) {
-				// Remove all attributes except allowed ones
-				$attributes = $element->attributes;
-				if ($attributes) {
-					for ($j = $attributes->length - 1; $j >= 0; $j--) {
-						$attrName = $attributes->item($j)->name;
-						if (!in_array($attrName, $allowedAttributes)) {
-							$element->removeAttribute($attrName);
-						} elseif ($attrName === 'class') {
-							// Remove jsx- classes
-							$classes = explode(' ', $element->getAttribute('class'));
-							$filteredClasses = array_filter($classes, function($class) {
-								return strpos($class, 'jsx-') !== 0;
-							});
-							$element->setAttribute('class', implode(' ', $filteredClasses));
-						}
-					}
-				}
-			}
-		}
-		
-		// Also remove attributes from the body element itself except allowed ones
-		$attributes = $body->attributes;
-		if ($attributes) {
-			for ($j = $attributes->length - 1; $j >= 0; $j--) {
-				$attrName = $attributes->item($j)->name;
-				if (!in_array($attrName, $allowedAttributes)) {
-					$body->removeAttribute($attrName);
-				} elseif ($attrName === 'class') {
-					// Remove jsx- classes from body element
-					$classes = explode(' ', $body->getAttribute('class'));
-					$filteredClasses = array_filter($classes, function($class) {
-						return strpos($class, 'jsx-') !== 0;
-					});
-					$body->setAttribute('class', implode(' ', $filteredClasses));
-				}
-			}
-		}
-	}
-
-	protected function removeEmptyElements(\Dom\Element $body)
-	{
-		$start_time = microtime(true);
-		errlog("removeEmptyElements started");
-		
-		try {
-			// Collect elements to remove
-			$elementsToRemove = [];
-			
-			// Use getElementsByTagName to get all elements
-			$allElements = $body->getElementsByTagName('*');
-			
-			foreach ($allElements as $element) {
-				// Skip <p> tags
-				if ($element->tagName === 'p') {
-					continue;
-				}
-				
-				// Check if element is empty (no children and no text content)
-				if ($element->childNodes->length === 0 && trim($element->textContent) === '') {
-					$elementsToRemove[] = $element;
-				}
-			}
-			
-			// Remove the collected empty elements
-			foreach ($elementsToRemove as $element) {
-				if ($element->parentNode) {
-					$element->parentNode->removeChild($element);
-				}
-			}
-			
-			$duration = microtime(true) - $start_time;
-			errlog("removeEmptyElements completed in " . number_format($duration, 4) . " seconds, removed " . count($elementsToRemove) . " elements");
-		} catch (\Exception $e) {
-			errlog("Error in removeEmptyElements: " . $e->getMessage());
-			// Continue without removing empty elements rather than fail
-		}
 	}
 
 	protected function unescapeNewlines($str)
@@ -1493,8 +1291,10 @@ HasBody:
 			$this->fetchedScreenshot = null;
 			$fetchedContent = $this->fetch_url($extractedUrl); // Returns raw HTML/content
             if ($fetchedContent) {
-                $downloadedPageTitle = $this->extractPageTitleFromHtml($fetchedContent);
-                $downloadedUrlContent = $this->extractMainContent($fetchedContent); // Cleaned content
+                $extractedContent = $this->contentExtractor->extract($fetchedContent, $extractedUrl);
+                errlog("Content extraction: " . json_encode($extractedContent->toSummary()));
+                $downloadedPageTitle = $extractedContent->title ?? $this->extractPageTitleFromHtml($fetchedContent);
+                $downloadedUrlContent = $extractedContent->primaryHtml(); // Readability snippet, or lightened full page
     			$combinedText .= "\n\n--- HTML content fetched from URL found in email TextBody ---\n```html\n" . $downloadedUrlContent . "\n```";
 				// Get screenshot if the fetch level captured one
 				if ($this->fetchedScreenshot) {

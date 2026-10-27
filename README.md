@@ -2,6 +2,18 @@
 
 Email-to-ICS converts emails, URLs, and web content into calendar events and ICS files.
 
+## Setup
+
+```bash
+composer install          # PHP dependencies
+npm install               # Readability content cleanup (node + @mozilla/readability + jsdom)
+cp .env.template .env     # then fill in keys
+```
+
+Fetched pages are cleaned with Mozilla Readability through `scripts/readability.mjs`. If `node` or the
+dependencies are missing, or extraction yields too little text, the lightened full page is sent instead
+(see `READABILITY_*` in `.env.template`).
+
 ## Email Input Formats
 
 Inbound email can include a URL, optional model instructions, and an optional `MULTI` flag.
