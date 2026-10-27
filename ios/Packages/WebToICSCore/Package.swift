@@ -10,12 +10,14 @@ let package = Package(
     targets: [
         .target(
             name: "WebToICSCore",
-            path: "Sources/WebToICSCore"
+            path: "Sources/WebToICSCore",
+            resources: [.copy("Resources")]
         ),
         .testTarget(
             name: "WebToICSCoreTests",
             dependencies: ["WebToICSCore"],
-            path: "Tests/WebToICSCoreTests"
+            path: "Tests/WebToICSCoreTests",
+            resources: [.copy("Fixtures")]
         ),
     ]
 )

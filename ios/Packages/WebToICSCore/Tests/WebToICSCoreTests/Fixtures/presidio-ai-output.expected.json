@@ -1,0 +1,41 @@
+{
+    "success": true,
+    "errorMessage": "",
+    "eventData": [
+        {
+            "summary": "Opera Parallele - Doubt",
+            "description": "World premiere immersive opera performance of Doubt at the Presidio Theatre.\n\nSource: https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre",
+            "htmlDescription": "<p>World premiere immersive opera performance of Doubt at the Presidio Theatre.</p><p><a href=\"https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre\">Source</a></p>",
+            "dtstart": "2026-05-29T19:30:00",
+            "dtend": "2026-05-29T22:30:00",
+            "timezone": "America/Los_Angeles",
+            "location": "Presidio Theatre, 99 Moraga Ave, San Francisco, CA",
+            "url": "https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre",
+            "isAllDay": false
+        },
+        {
+            "summary": "Opera Parallele - Doubt",
+            "description": "World premiere immersive opera performance of Doubt at the Presidio Theatre.\n\nSource: https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre",
+            "htmlDescription": "<p>World premiere immersive opera performance of Doubt at the Presidio Theatre.</p><p><a href=\"https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre\">Source</a></p>",
+            "dtstart": "2026-05-30T19:30:00",
+            "dtend": "2026-05-30T22:30:00",
+            "timezone": "America/Los_Angeles",
+            "location": "Presidio Theatre, 99 Moraga Ave, San Francisco, CA",
+            "url": "https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre",
+            "isAllDay": false
+        },
+        {
+            "summary": "Opera Parallele - Doubt",
+            "description": "World premiere immersive opera performance of Doubt at the Presidio Theatre.\n\nSource: https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre",
+            "htmlDescription": "<p>World premiere immersive opera performance of Doubt at the Presidio Theatre.</p><p><a href=\"https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre\">Source</a></p>",
+            "dtstart": "2026-05-31T15:00:00",
+            "dtend": "2026-05-31T18:00:00",
+            "timezone": "America/Los_Angeles",
+            "location": "Presidio Theatre, 99 Moraga Ave, San Francisco, CA",
+            "url": "https://www.presidiotheatre.org/show-details/opera-parallele-doubt-at-the-presidio-theatre",
+            "isAllDay": false
+        }
+    ],
+    "emailSubject": "Opera Parallele - Doubt",
+    "locationLookup": ""
+}

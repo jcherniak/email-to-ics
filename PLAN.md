@@ -55,7 +55,7 @@ Replaces the user's Apple Shortcut "Add To Calendar With AI 2" (web page → sha
 
 ### Commit checklist
 - [x] 1. Scaffold: `project.yml`, configs, `.gitignore`, package skeleton, placeholder targets, scripts, this section.
-- [ ] 2. Core models, prompt builder, JSON schema, OpenRouter extractor, URL cleaner, model catalog, HTML text cleaner + tests.
+- [x] 2. Core models, prompt builder, JSON schema, OpenRouter extractor, URL cleaner, model catalog, HTML text cleaner + tests.
 - [ ] 3. Core jobs, stages, background transfer, settings, Keychain + tests.
 - [ ] 4. Swift ICS generator with byte-parity tests against the Presidio fixtures.
 - [ ] 5. Cleaner JS (vendored Readability + PageCleaner + Safari shim, generated `ShareJS.js`).
@@ -71,6 +71,7 @@ Replaces the user's Apple Shortcut "Add To Calendar With AI 2" (web page → sha
 
 ### iOS verification log
 - Commit 1 (scaffold): `ios/scripts/check-structure.sh` passed in the coding sandbox. `xcodegen generate`, `swift test` and the simulator build are pending on the user's Mac (no Xcode here).
+- Commit 2 (Core models/prompt/schema/extractor): `check-structure.sh` incl. policy + fixture sync passed in the sandbox; 10 XCTest files written (`swift test` pending locally, no Swift toolchain in the sandbox). The iOS system prompt lives in `ios/Packages/WebToICSCore/Sources/WebToICSCore/Resources/ios_system_prompt.txt`: the shortcut's prompt rewritten for JSON output, with the shared policy XML and the Chrome custom prompt substituted at runtime.
 
 ## Recent Verification Baseline
 

@@ -1,0 +1,12 @@
+- Summary format for artistic/cultural events: "Venue - Artist/Show" (e.g., "SF Opera - La Boheme", "Stern Grove - The Honeydrips", "Davies Hall - SF Symphony")
+- For concerts with programs: "Venue - Program Title" (e.g., "SF Symphony - Sibelius and Mahler")
+- For general events: Keep the summary concise and descriptive (e.g., "Dr. White Appointment")
+- Title prefix: Determine the presenting organization from the page/site (prefer <meta property="og:site_name">, the site header/brand, or phrases like "X presents...").
+- IMPORTANT: Never use a ticketing/platform brand (e.g., Eventbrite, Ticketmaster) as the group prefix. If the domain is eventbrite.com, identify the organizer from the page (e.g., the Organizer/By section or organizer profile). If no organizer can be found, omit the prefix rather than using the platform name.
+- Concerts: Include the complete program in the description under a "Program:" section. Preserve order, include composer names and full work titles (and movements if listed).
+- For artistic events: Highlight featured artists, performers, and full program/repertoire.
+- For concerts/opera: Include composer names, piece titles, featured soloists.
+- For conferences: Include key speakers and session topics.
+- For flights: Include Flight #, Confirmation #, Departure/Arrival details.
+- Include Eventbrite ticket links prominently if found in the content.
+- Location: Always prefer physical venue name and address over streaming/virtual URLs. If both streaming and in-person options exist, use the in-person venue.
