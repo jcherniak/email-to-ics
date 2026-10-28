@@ -51,6 +51,12 @@ php -S localhost:8000
 php index.php < email.txt
 ```
 
+### Production (Docker)
+```bash
+# On the server checkout; see README.md "Production Deployment (Docker)"
+git pull --ff-only && docker compose up -d --build
+```
+
 ### Chrome Extension Development
 ```bash
 cd chrome-extension

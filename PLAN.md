@@ -23,6 +23,7 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
 
 ## Recent Verification Baseline
 
+- Completed follow-up: added the production Docker deployment (`Dockerfile`, `docker-compose.yml`, `docker/`). Verified on a Docker 29 host: production and test images build; `docker run --rm email-to-ics:test` (PHPUnit 11.5) passed 59 tests, 183 assertions, 3 skips (live geocoder tests with placeholder keys); over the `edge` network `/` returns 401 + Basic challenge without credentials and 200 with them, `.env`, dotfiles, `vendor/`, `processed/`, `uploads/`, `src/`, `tests/` and docs return 403; `X-Forwarded-Proto: https` sets `HTTPS=on` and `X-Forwarded-For` sets `REMOTE_ADDR`; puppeteer launched Debian Chromium 156 as `www-data` from both CLI and Apache, and a Chromium-printed PDF round-tripped through spatie/pdf-to-text; `php index.php --help` and an Apache-spawned detached PHP CLI run work.
 - Completed follow-up: updated outgoing ICS email bodies so the first line is a source URL link, followed by `Source data (...)` for the originating input type and `Source page (cleaned)` for fetched page content. Displayed source data now strips UTF-8 BOM bytes. Verified with `php -l index.php`, `php -l tests/EmailProcessorPromptAndEmailTest.php`, and `vendor/bin/phpunit` (59 tests, 190 assertions, 1 expected Google geocoder skip).
 - Completed follow-up: added an AI geocode-location combiner so `original` location text and provider `geocoded` address can be merged into `<place name>, <full formatted address without default country>`. Defaults: `GEOCODE_COMBINE_MODEL=~anthropic/claude-haiku-latest`, `GEOCODE_DEFAULT_COUNTRY=US`. Added `OpenRouterChatClient` for shared chat-completion calls and unit tests for prompt shape, JSON fence handling, and chain geocoder integration.
 - Completed follow-up: fixed Google Calendar timezone preservation by embedding `VTIMEZONE` components for timed ICS events that use named timezones such as `America/Los_Angeles`. Latest processed Presidio record showed correct AI data and `DTSTART;TZID=America/Los_Angeles`, but no matching `VTIMEZONE`, causing Google Calendar to preserve the instant while showing GMT as the editable timezone. Updated Presidio expected ICS artifacts and verified with `php -l src/Calendar/IcalGenerator.php`, `php -l tests/IcalGeneratorPersonalEventTest.php`, and `vendor/bin/phpunit` (55 tests, 167 assertions, 1 expected Google geocoder skip).
@@ -69,6 +70,12 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
   - use `GeocoderInterface` through `ChainGeocoder`
   - default `GEOCODER_ORDER=mapbox,google`
   - if all geocoders fail, preserve original/AI event location, continue ICS/email sending, and send one diagnostic error email with provider failure details
+- Production deployment:
+  - Docker `php:8.4-apache` image (`Dockerfile`, `docker-compose.yml`) served at the web root behind a TLS reverse proxy on the external `edge` network; no host ports.
+  - `.env` is bind-mounted read-only into the app directory (Dotenv requires the file); runtime data is bind-mounted from the gitignored `data/` directory.
+  - HTTPS and client IP come from `X-Forwarded-Proto`/`X-Forwarded-For` in Apache config, not PHP code.
+  - Chromium comes from Debian (`PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`); npm runs with `PUPPETEER_SKIP_DOWNLOAD`.
+  - Deploy/update with `git pull --ff-only && docker compose up -d --build`.
 - Processed records:
   - use gzip for processed JSON because PHP can read/write it natively
   - zstd was used for the one-time backup tarball because `/usr/bin/zstd` was available
@@ -157,6 +164,8 @@ Every 5 commits, summarize older detailed entries into a concise historical summ
   - delete invalid paid fallback output immediately
 - Continue reducing `index.php` over time by moving remaining core processing into PSR-4 services.
 - Consider a true explicit RSVP/invitation mode only if requested; keep personal editable events as the default.
+- Fix the puphpeteer pairing before using `PuphpeteerRenderer`: `composer.lock` pins PHP `zoon/puphpeteer` 1.6.0 (namespace `Nesk\Puphpeteer`, needs JS `@nesk/rialto`), while `PuphpeteerRenderer.php` imports `Zoon\Puphpeteer\Puppeteer` and `package.json` installs `@zoon/puphpeteer`/`@zoon/rialto`. The renderer is currently not instantiated anywhere.
+- Push the EC2-only commit `a972e01` ("Add async=1 web mode that emails the ICS from a background CLI run"); it is not on GitHub. The Docker image has PHP CLI at `/usr/local/bin/php` on `PATH` for Apache.
 
 ## Operational Notes
 
