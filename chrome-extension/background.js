@@ -385,7 +385,7 @@ async function captureVisibleTabScreenshot(tabId) {
 async function getStoredBaseUrl() {
     return new Promise((resolve) => {
         chrome.storage.sync.get(['baseUrl'], (result) => {
-            resolve(result.baseUrl || 'https://new.justin-c.com/email-to-ics'); // Default if not set
+            resolve(result.baseUrl || 'https://email-to-ics.metal.justin-c.com'); // Default if not set
         });
     });
 }

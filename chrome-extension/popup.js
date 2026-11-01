@@ -22,7 +22,7 @@ window.ICAL = ICAL;
 let availableModels = [];
 let selectedModel = null;
 // let pageScreenshot = null; // Managed within generateICS now
-let baseUrl = 'https://new.justin-c.com/email-to-ics'; // Add default base URL
+let baseUrl = 'https://email-to-ics.metal.justin-c.com'; // Add default base URL
 let targetUrl = `${baseUrl}/?display=email`;
 let modelsEndpointUrl = `${baseUrl}/?get_models=1`;
 let debugMode = false; // Add debug mode flag
@@ -46,7 +46,7 @@ async function init() { // Keep function definition for now, might be removed la
             credentialsPromise
         ]);
         
-        baseUrl = storedBaseUrl || 'https://new.justin-c.com/email-to-ics';
+        baseUrl = storedBaseUrl || 'https://email-to-ics.metal.justin-c.com';
         targetUrl = `${baseUrl}/?display=email`;
         modelsEndpointUrl = `${baseUrl}/?get_models=1`;
         debugMode = prefs.debugMode || false;

@@ -1,0 +1,26 @@
+# Production deployment. TLS and the public hostname are handled by the
+# reverse proxy on the external `edge` network, which forwards to
+# http://email-to-ics:80 with X-Forwarded-Proto/X-Forwarded-For.
+services:
+  email-to-ics:
+    build:
+      context: .
+      target: production
+    image: email-to-ics:latest
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Dotenv requires the file to exist in the app directory.
+      - ./.env:/var/www/html/.env:ro
+      # Runtime data lives under ./data (gitignored), outside tracked files.
+      - ./data/processed:/var/www/html/processed
+      - ./data/uploads:/var/www/html/uploads
+      # The app keeps pending review confirmations in sys_get_temp_dir().
+      - ./data/confirm_cache:/tmp/confirm_cache
+    shm_size: 512m
+    networks:
+      - edge
+
+networks:
+  edge:
+    external: true

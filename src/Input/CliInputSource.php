@@ -31,6 +31,8 @@ final class CliInputSource implements InputSourceInterface
                 : false,
             outputJsonOnly: isset($this->options['json']),
             cliDebug: isset($this->options['debug']),
+            allowMultiDay: isset($this->options['multiday'])
+                && ((string)$this->options['multiday'] === '1' || strtolower((string)$this->options['multiday']) === 'true'),
             metadata: ['source' => 'cli'],
         );
     }

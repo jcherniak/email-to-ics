@@ -6,6 +6,10 @@ namespace Jcherniak\EmailToIcs\Web;
 
 use EmailProcessor;
 use ErrorHandler;
+use Jcherniak\EmailToIcs\Input\CliInputSource;
+use Jcherniak\EmailToIcs\Input\ProcessingInput;
+use Jcherniak\EmailToIcs\Input\RawEmailTextInputSource;
+use Jcherniak\EmailToIcs\Input\WebFormInputSource;
 use Jcherniak\EmailToIcs\Processed\ProcessedRecordStore;
 use Throwable;
 use function errlog;
@@ -70,12 +74,16 @@ class WebPage
 
         if (!$authorized) {
             error_log("Authorization failed - sending challenge/form");
-            // Always send WWW-Authenticate header for basic auth
-            header('WWW-Authenticate: Basic realm="Email to ICS"');
+            // iOS Shortcuts hang on a Basic auth challenge, so give them a plain JSON 401 instead.
+            $isShortcut = stripos($_SERVER['HTTP_USER_AGENT'] ?? '', 'Shortcut') !== false;
+            if (!$isShortcut) {
+                header('WWW-Authenticate: Basic realm="Email to ICS"');
+            }
             http_response_code(401);
             
             // For API requests or when explicitly requesting basic auth, return JSON
-            if (isset($_SERVER['HTTP_ACCEPT']) && strpos($_SERVER['HTTP_ACCEPT'], 'application/json') !== false) {
+            if ($isShortcut || (isset($_SERVER['HTTP_ACCEPT']) && strpos($_SERVER['HTTP_ACCEPT'], 'application/json') !== false)) {
+                header('Content-Type: application/json');
                 echo json_encode(['error' => 'Authentication required']);
                 return;
             }
@@ -252,9 +260,16 @@ HTML;
     {
 			// Detect iOS Shortcuts requests
 			$isFromShortcut = isset($_REQUEST['fromShortcut']) || 
-							  stripos($_SERVER['HTTP_USER_AGENT'] ?? '', 'Shortcuts') !== false;
+							  stripos($_SERVER['HTTP_USER_AGENT'] ?? '', 'Shortcut') !== false;
 			
 			$input = (new WebFormInputSource($_REQUEST))->toProcessingInput();
+
+			// async=1: hand off to a detached CLI run that emails the ICS, and reply at once.
+			if (!empty($_REQUEST['async'])) {
+				$this->queueBackgroundJob($input);
+				return;
+			}
+
 			$processor = new EmailProcessor();
 			$processor->processUrl(
 				$input->url,
@@ -271,6 +286,32 @@ HTML;
 				$input->cliDebug,
 				$input->allowMultiDay
 			);
+    }
+
+    private function queueBackgroundJob(ProcessingInput $input): void
+    {
+        header('Content-Type: application/json');
+        try {
+            $launcher = new BackgroundJobLauncher(
+                $this->projectRoot(),
+                sys_get_temp_dir() . '/email-to-ics-jobs',
+                $_ENV['PHP_CLI_BINARY'] ?? '/usr/bin/php'
+            );
+            $jobId = $launcher->launch($input);
+        } catch (Throwable $e) {
+            errlog('Failed to queue background job: ' . $e->getMessage());
+            http_response_code(400);
+            echo json_encode(['error' => $e->getMessage(), 'success' => false]);
+            return;
+        }
+
+        errlog("Queued background job {$jobId} for URL: " . ($input->url ?: '(none)'));
+        http_response_code(202);
+        echo json_encode([
+            'status' => 'queued',
+            'jobId' => $jobId,
+            'message' => 'Processing in the background; the calendar invite will be emailed when ready.',
+        ]);
     }
 
     private function isPostmarkInboundWebhook($json_data)
@@ -311,6 +352,8 @@ HTML;
         $long_opts = [
             "url:",             // Required: URL to process
             "html::",           // Optional: Pre-downloaded HTML content (used as downloadedText)
+            "html-file:",       // Optional: Path to a file containing pre-downloaded HTML (for large pages)
+            "multiday::",       // Optional: Allow multi-day/multi-performance extraction (1 or 0). Default: 0
             "display::",        // Optional: How to handle output. Default: 'display' (ICS to stdout for CLI)
             "tentative::",      // Optional: Mark as tentative (1 or 0). Default: 1
             "instructions::",   // Optional: Additional instructions for AI
@@ -429,6 +472,14 @@ HTML;
             throw new \InvalidArgumentException("You must provide at least one of --url, --html, or --instructions. Use --help for usage.");
         }
 
+        if (isset($options['html-file'])) {
+            $htmlFile = (string)$options['html-file'];
+            if (!is_readable($htmlFile)) {
+                throw new \RuntimeException("HTML file not found or not readable: {$htmlFile}");
+            }
+            $options['html'] = (string)file_get_contents($htmlFile);
+        }
+
         $input = (new CliInputSource($options))->toProcessingInput();
 
         try {
@@ -444,7 +495,8 @@ HTML;
                 $input->needsReview,
                 $input->fromExtension,
                 $input->outputJsonOnly,
-                $input->cliDebug
+                $input->cliDebug,
+                $input->allowMultiDay
             );
             exit(0); // Successful CLI execution
         } catch (Throwable $e) {
@@ -467,6 +519,8 @@ HTML;
         echo "Required (at least one of the following must be provided):\n";
         echo "  --url <url>                      URL of the event page to process. Will be fetched if --html is not provided.\n";
         echo "  --html <string>                  Pre-downloaded HTML content. If --url is also given, this HTML will be used instead of fetching the URL.\n";
+        echo "  --html-file <path>               Read pre-downloaded HTML from a file instead of --html (used by async web jobs).\n";
+        echo "  --multiday <1|0>                 Allow extracting multiple equal performances as separate events. Default: 0.\n";
         echo "  -i, --instructions <string>      Direct instructions for the AI to create an event. Can be used alone or to supplement --url/--html.\n";
         echo "  --test-email-text <string>       Test harness: process raw email text and output JSON only; does not email or write calendar output.\n";
         echo "  --test-email-file <filepath>     Test harness: process raw email text from a file and output JSON only; does not email or write calendar output.\n";
