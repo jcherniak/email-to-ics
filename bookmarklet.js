@@ -1,6 +1,6 @@
 javascript:(function() {
     const currentUrl = window.location.href;
-    const targetUrl = 'https://new.justin-c.com/email-to-ics/?display=email';
+    const targetUrl = 'https://email-to-ics.metal.justin-c.com/?display=email';
     const credentials = btoa('calendar:justinc');
 
     // --- IDs ---

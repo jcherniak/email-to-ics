@@ -12551,7 +12551,7 @@
 
   // popup.js
   window.ICAL = ICALmodule;
-  var baseUrl = "https://new.justin-c.com/email-to-ics";
+  var baseUrl = "https://email-to-ics.metal.justin-c.com";
   var targetUrl = `${baseUrl}/?display=email`;
   var modelsEndpointUrl = `${baseUrl}/?get_models=1`;
   async function fetchAvailableModels() {
