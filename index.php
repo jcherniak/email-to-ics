@@ -58,6 +58,7 @@ use Symfony\Component\HtmlSanitizer\HtmlSanitizerConfig;
 use Symfony\Component\HtmlSanitizer\HtmlSanitizer;
 use Opis\JsonSchema\Errors\ValidationError;
 use Jcherniak\EmailToIcs\Calendar\IcalGenerator;
+use Jcherniak\EmailToIcs\Calendar\SimpleEventJson;
 use Jcherniak\EmailToIcs\Config\Environment;
 use Jcherniak\EmailToIcs\Fetch\ChainUrlFetcher;
 use Jcherniak\EmailToIcs\Fetch\UrlFetcherInterface;
@@ -191,7 +192,8 @@ class ErrorHandler {
         // Determine the context
         $isPostmark = defined('IS_POSTMARK_WEBHOOK') && IS_POSTMARK_WEBHOOK;
         $isCli = defined('IS_CLI_RUN') && IS_CLI_RUN;
-        $isExtension = isset($_REQUEST['fromExtension']) && ($_REQUEST['fromExtension'] === 'true' || $_REQUEST['fromExtension'] === true);
+        $isExtension = (isset($_REQUEST['fromExtension']) && ($_REQUEST['fromExtension'] === 'true' || $_REQUEST['fromExtension'] === true))
+            || in_array($_REQUEST['display'] ?? null, ['json', 'dataurl'], true);
 
         // Handle based on context
         if ($isPostmark) {
@@ -841,6 +843,20 @@ TEXT;
 			exit(0);
 		}
 
+		// Web JSON mode (e.g. iOS Shortcuts): return simplified event fields instead of ICS/email.
+		if ($display === 'json' && !(defined('IS_CLI_RUN') && IS_CLI_RUN)) {
+			$eventData = $eventDetails['eventData'] ?? null;
+			if (!($eventDetails['success'] ?? false) || !is_array($eventData) || $eventData === []) {
+				ErrorHandler::handle(
+					new \RuntimeException($eventDetails['errorMessage'] ?? 'No event could be extracted.'),
+					['status_code' => 422]
+				);
+			}
+			header('Content-Type: application/json; charset=utf-8');
+			echo json_encode(SimpleEventJson::fromEventData($eventData), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+			exit;
+		}
+
 		// If not outputting JSON directly, proceed with standard logic
 		// Generate ICS only if not outputting JSON and if eventData is present and AI was successful
 		$ics = null;
@@ -904,6 +920,18 @@ TEXT;
 		}
 
 		// --- If not reviewing, proceed with requested action (download/display/email) ---
+
+		if ($display === 'dataurl' && !(defined('IS_CLI_RUN') && IS_CLI_RUN)) {
+			if ($ics === null) {
+				http_response_code(500);
+				header('Content-Type: application/json');
+				echo json_encode(['error' => 'ICS data could not be generated.', 'success' => false]);
+				exit;
+			}
+			header('Content-Type: text/plain; charset=utf-8');
+			echo 'data:text/calendar;charset=utf-8;base64,' . base64_encode($ics);
+			exit;
+		}
 
 		if ($display == 'download' || $display == 'display') {
 			$filename = 'event.ics';
